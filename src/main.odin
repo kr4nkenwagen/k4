@@ -157,6 +157,7 @@ main :: proc() {
 		if a.menu != nil do menu_load_all(a)
 		else do app_layout(a)
 		press_keys(a, opts.keys)
+		if a.menu != nil do menu_load_all(a) // a stay action started by the keys, and the reload after it
 		if a.menu == nil do app_move(a, opts.select)
 		s := opts.scale
 		if s != 1 {
