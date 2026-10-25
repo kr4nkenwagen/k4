@@ -27,8 +27,9 @@ import "logic"
 //                                                     sections and views reload
 //   L <shell command>                                the last section's A lines come from this
 //                                                     command, run in the background
-//   V <name> <title> <subtitle> <shell command>      a view; the command prints its items:
+//   V <name> <title> <subtitle> <shell command>      a list view; the command prints its items:
 //                                                     I <id> <label> [image] [current]
+//   G <name> <title> <subtitle> <shell command>      the same as a grid of pictures (4 across)
 // Enter prints the chosen action's or item's id; a web search prints "url:<url>".
 
 Action :: struct {
@@ -61,6 +62,7 @@ Section :: struct {
 
 View :: struct {
 	name, title, subtitle: string,
+	grid: bool,
 	items: [dynamic]Item,
 	load:  Loader,
 }
@@ -121,8 +123,8 @@ menu_parse :: proc(m: ^Menu, data: string) {
 				s := &m.sections[len(m.sections) - 1]
 				s.load = Loader{cmd = strings.join(f[1:], "\t"), state = .Lazy}
 			}
-		case "V":
-			if len(f) > 4 do append(&m.views, View{name = f[1], title = f[2], subtitle = f[3], load = {cmd = strings.join(f[4:], "\t"), state = .Lazy}})
+		case "V", "G":
+			if len(f) > 4 do append(&m.views, View{name = f[1], title = f[2], subtitle = f[3], grid = f[0] == "G", load = {cmd = strings.join(f[4:], "\t"), state = .Lazy}})
 		}
 	}
 }
@@ -432,7 +434,7 @@ menu_move :: proc(a: ^App, d: int) {
 	}
 	n := menu_list_len(a)
 	if n == 0 do return
-	if m.focus == .View do m.si = clamp(m.si + d, 0, n - 1) // grid: no wrap-around
+	if m.focus == .View && m.views[m.view].grid do m.si = clamp(m.si + d, 0, n - 1) // grid: no wrap-around
 	else do m.si = ((m.si + d) % n + n) % n
 }
 
@@ -648,17 +650,18 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 	}
 	if ctrl {
 		switch ch {
-		case 'j', 'n': menu_move(a, m.focus == .View ? 4 : 1); return true
-		case 'k', 'p': menu_move(a, m.focus == .View ? -4 : -1); return true
+		case 'j', 'n': menu_move(a, m.focus == .View && m.views[m.view].grid ? 4 : 1); return true
+		case 'k', 'p': menu_move(a, m.focus == .View && m.views[m.view].grid ? -4 : -1); return true
 		case 'c', 'g': a.exit = 1; a.done = true; return true
 		}
 		return app_edit_key(a, k, ctrl, ch, text)
 	}
-	if m.focus == .View && (k == .Left || k == .Right) { menu_move(a, k == .Left ? -1 : 1); return true }
+	grid := m.focus == .View && m.views[m.view].grid
+	if grid && (k == .Left || k == .Right) { menu_move(a, k == .Left ? -1 : 1); return true }
 	if (k == .Left || k == .Right) && (m.focus == .Sub || searching(m, a)) && slide(a, k == .Left ? -1 : 1) do return true
 	switch k {
-	case .Down: menu_move(a, m.focus == .View ? 4 : 1)
-	case .Up: menu_move(a, m.focus == .View ? -4 : -1)
+	case .Down: menu_move(a, grid ? 4 : 1)
+	case .Up: menu_move(a, grid ? -4 : -1)
 	case .Tab: menu_move(a, 1)
 	case .Back_Tab: menu_move(a, -1)
 	case .Page_Down: menu_move(a, 8)
@@ -755,8 +758,10 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	case .View:
 		v := m.views[m.view]
 		crumb = strings.to_upper(fmt.tprintf("%s › %s", pv_name, v.title), context.temp_allocator)
-		ph = fmt.tprintf("Filter %ss…", strings.to_lower(v.title, context.temp_allocator))
-		count = fmt.tprintf("%d %ss", len(m.shown_items), strings.to_lower(v.title, context.temp_allocator))
+		plural := strings.to_lower(v.title, context.temp_allocator)
+		if !strings.has_suffix(plural, "s") do plural = strings.concatenate({plural, "s"}, context.temp_allocator)
+		ph = fmt.tprintf("Filter %s…", plural)
+		count = fmt.tprintf("%d %s", len(m.shown_items), plural)
 	case .Web:
 		crumb, ph = "g DUCKDUCKGO", "Search the web…"
 		count = q_of(a) != "" ? "Enter to open" : ""
@@ -804,7 +809,9 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		case m.focus == .Web: hints = {{"↑↓", "Bang"}, {"↵", "Open in browser"}, {"⌫", "Exit mode"}}
 		case m.focus == .Calc: hints = {{"↵", "Copy result"}, {"⌫", "Exit mode"}, {"Esc", "Back"}}
 		case m.views[m.view].name == "wall": hints = {{"←→↑↓", "Move"}, {"↵", "Set background"}, {"⌫", "Back"}}
-		case: hints = {{"↑↓", "Move"}, {"↵", "Apply theme"}, {"⌫", "Back"}}
+		case m.views[m.view].name == "theme": hints = {{"↑↓", "Move"}, {"↵", "Apply theme"}, {"⌫", "Back"}}
+		case m.views[m.view].grid: hints = {{"←→↑↓", "Move"}, {"↵", "Open"}, {"⌫", "Back"}}
+		case: hints = {{"↑↓", "Move"}, {"↵", "Open"}, {"⌫", "Back"}}
 		}
 		hx := x0 + 16 * S
 		for h in hints {
@@ -1060,7 +1067,7 @@ draw_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	x0, by, bw, bh := body[0], body[1], body[2], body[3]
 	x1, fy := x0 + bw, by + bh
 	v := &m.views[m.view]
-	grid := v.name == "wall"
+	grid := v.grid
 	pad := 20 * S
 	py := by + 16 * S
 	draw_text_f(cv, m.f_title, v.title, x0 + pad, py, argb(acc, 0xff))
@@ -1071,7 +1078,7 @@ draw_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		return
 	}
 	if len(m.shown_items) == 0 {
-		text_in(cv, m.f_body, grid ? "No wallpaper matches" : "No theme matches", x0 + pad, py, 34 * S, argb(dim, 0xff))
+		text_in(cv, m.f_body, "No match", x0 + pad, py, 34 * S, argb(dim, 0xff))
 		return
 	}
 	if grid {

@@ -28,6 +28,7 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --theme FILE            colors.toml (default: the current Omarchy-format theme)
   --no-icons              ignore icon fields
   --menu                  two-pane launcher (sections, actions, views); input format in menu.odin
+  --open ID               menu mode: start inside the section with this id
   --config FILE           accepted and ignored (fuzzel compatibility)
   --dry-run FILE.png      render one frame to a PNG without Wayland, then print the selection
   --keys KEYS, --select N keys pressed before the first frame: text plus <down> <up> <left>
@@ -90,6 +91,7 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--theme": o.theme_file = value(args, &i, inline, has_inline)
 		case "--no-icons": o.no_icons = true
 		case "--menu": o.menu = true
+		case "--open": o.open = value(args, &i, inline, has_inline)
 		case "--config": _ = value(args, &i, inline, has_inline)
 		case "--dry-run": o.dry_run = value(args, &i, inline, has_inline)
 		case "--keys": o.keys = value(args, &i, inline, has_inline)
@@ -146,6 +148,7 @@ main :: proc() {
 	if opts.menu {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		menu_setup(a, string(data))
+		if opts.open != "" do for s, i in a.menu.sections do if s.id == opts.open { menu_enter(a, i); break }
 	} else if !prompt_only {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		a.rows = logic.parse_dmenu(string(data))

@@ -31,6 +31,7 @@ Options :: struct {
 	theme_file:    string,
 	no_icons:      bool,
 	menu:          bool,
+	open:          string,
 }
 
 Icon :: struct { px: []u32, w, h: int, ok: bool }
