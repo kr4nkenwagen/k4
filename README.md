@@ -27,8 +27,10 @@ k4 --prompt-only 'Password ❯ ' --password
 
 ## Build
 
-Needs `odin`, a C compiler, and the Wayland, xkbcommon and fontconfig runtime libraries
-(on Ubuntu: `libwayland-dev libxkbcommon-dev`).
+Needs [mise](https://mise.jdx.dev) (it installs the Odin version pinned in `mise.toml`), clang
+and a C compiler, and the Wayland, xkbcommon and fontconfig libraries (on Ubuntu:
+`clang libwayland-dev libxkbcommon-dev`). Without mise, any `odin` on PATH is used; on Ubuntu
+make sure that is not the unrelated apt package of the same name.
 
 ```sh
 ./build.sh            # ./k4

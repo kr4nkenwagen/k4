@@ -1,0 +1,4 @@
+# The Odin compiler k4 is built and tested with. `mise install` in this directory fetches it;
+# build.sh runs odin through mise when mise is installed.
+[tools]
+odin = "dev-2026-09"

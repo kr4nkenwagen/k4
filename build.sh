@@ -7,6 +7,13 @@
 set -e
 cd "$(dirname "$0")"
 cc=${CC:-cc}; ar=${AR:-ar}
+# The pinned compiler from mise.toml when mise is around (Ubuntu's apt "odin" is an unrelated
+# MRI tool, so a bare `odin` on PATH is not trusted there).
+if command -v mise >/dev/null 2>&1; then
+  mise trust -q "$PWD/mise.toml" >/dev/null 2>&1 || true
+  mise install -q >/dev/null 2>&1 || mise install
+  odin() { mise exec -- odin "$@"; }
+fi
 mkdir -p lib vendor/kb_text_shape/lib
 if [ ! -f lib/k4c.a ] || [ csrc/k4c.c -nt lib/k4c.a ]; then
   $cc -O2 -fPIC -w -c csrc/k4c.c -o lib/k4c.o && $ar -rcs lib/k4c.a lib/k4c.o && rm lib/k4c.o
