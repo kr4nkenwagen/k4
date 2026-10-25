@@ -6,6 +6,7 @@ import "core:os"
 import "core:strconv"
 import "core:strings"
 import "core:sys/linux"
+import "core:time"
 import "core:unicode/utf8"
 import "logic"
 
@@ -45,11 +46,43 @@ import "logic"
 //   k4:page <title> <subtitle> <shell command>       open a page of A/H lines (e.g. search results)
 //   k4:back, k4:close                                 go back one level, or close the menu
 // After every R run the theme (colors.toml) and font (font.name) are read again.
+// Integration components (design: Apps integrations), in a section's or page's lines:
+//   H <text> [count]                                 a heading with a count badge
+//   E <text>                                          an empty line under a heading ("Nothing to review")
+//   N <title> <body> <tone> [slow]                    a notice (tone: accent red muted); slow: only
+//                                                     while the loader has run 8 s or more
+//   K <n>                                             n loading bars (placeholders until rows land)
+//   C <glyph> <state> <title> <line> <flags> [active] the now-playing card
+//   B <label> <percent> <meta>                        a progress row (a snapshot)
+//   D <desc> [count] [placeholder]                    the section's description, header count, placeholder
+//   Y <key> <label> [<key> <label>…]                  the footer hints
+//   Q <id>                                            typing is input for <id> (run with K4_INPUT) instead
+//                                                     of a filter; Tab steps the first choice row
+// A flags for them: mark=<glyph> markc=<tone> sub=<text> chip=<TEXT> chipc=<tone> metac=<tone>
+// thumb=<image> dim slow key=<letter> (shortcut mode), choice=<a>|<b>|<c> (the meta is the
+// value: ← → steps it and runs R with K4_VALUE set). A section's static lines show until its
+// loader's output replaces them (a skeleton, or the last fetch). The action id k4:retry restarts
+// the open section's loader. S takes a 7th field of flags: dim, group=<heading>.
+//   T <crumb> <placeholder> <count>                   the top level's crumb, placeholder and count
+// View items also take sub=<text> (a second line under grid tiles), wide (460×215 tiles) and
+// alt=<label>|<id> (Tab runs it).
 // Enter prints the chosen action's or item's id; a web search prints "url:<url>".
 
+Entry_Kind :: enum { Row, Heading, Empty, Notice, Bars, Card, Progress }
+
 Action :: struct {
+	kind: Entry_Kind,
 	id, label, meta, view: string,
-	heading: bool,
+	heading: bool, // anything that is not a selectable row
+	count: string,
+	mark, markc, sub, chip, chipc, metac, thumb, key: string,
+	dim, slow: bool,
+	choices: []string,
+	// notice: label = title, meta = body, tone; card: glyph, state, label = title, meta = line,
+	// line2 = flags; progress: label, meta, pct; bars: bars
+	tone, glyph, state, line2: string,
+	active: bool,
+	pct, bars: int,
 	stay, app: bool,
 	slider: bool,
 	value, step: int,
@@ -63,6 +96,8 @@ Item :: struct {
 	id, label, image: string,
 	current, stay: bool,
 	palette: [8]u32, has_palette: bool,
+	sub, alt_label, alt_id: string,
+	wide: bool,
 }
 
 Load_State :: enum { Ready, Lazy, Loading, Failed }
@@ -74,7 +109,10 @@ Loader :: struct {
 	pipe:  ^os.File,
 	proc_: os.Process,
 	buf:   [dynamic]u8,
+	started: time.Tick,
 }
+
+SLOW_MS :: 8000 // a loader this slow gets the section's "slow" lines (K4_SLOW_MS overrides)
 
 Page_Kind :: enum { Section, Page, Font }
 
@@ -86,6 +124,12 @@ Section :: struct {
 	back, back_si: int, // pages: the section/page and selection ⌫ returns to, -1 = home
 	actions: [dynamic]Action,
 	load:    Loader,
+	desc0:   string, // the S/P description; D lines override it until the next load
+	count, ph, query_id: string,
+	has_d:   bool, // a D line set the count (an empty one hides it)
+	hints:   [dynamic][2]string,
+	dim:     bool,
+	group:   string,
 }
 
 View :: struct {
@@ -134,7 +178,9 @@ Menu :: struct {
 	input_from_si: int,
 	dyn_pages: int,
 	families: map[string]Family_Fonts,
-	f_body, f_small, f_tiny, f_big, f_title, f_row, f_huge, f_confirm, f_bold13, f_bold12: ^Font,
+	top_crumb, top_ph, top_count: string, // T record
+	slow_ms: int,
+	f_body, f_small, f_tiny, f_big, f_title, f_row, f_huge, f_confirm, f_bold13, f_bold12, f_bold11, f_bold10, f_glyph: ^Font,
 }
 
 MENU_W :: 760
@@ -151,15 +197,23 @@ menu_parse :: proc(m: ^Menu, data: string) {
 		get :: proc(f: []string, i: int) -> string { return i < len(f) ? f[i] : "" }
 		switch f[0] {
 		case "S":
-			append(&m.sections, Section{id = get(f, 1), name = get(f, 2), key = strings.to_upper(get(f, 3)), desc = get(f, 4), icon = get(f, 5), home = len(m.sections), back = -1})
+			s := Section{id = get(f, 1), name = get(f, 2), key = strings.to_upper(get(f, 3)), desc = get(f, 4), icon = get(f, 5), home = len(m.sections), back = -1}
+			for flag in strings.split(get(f, 6), ";", context.temp_allocator) {
+				if flag == "dim" do s.dim = true
+				if strings.has_prefix(flag, "group=") do s.group = strings.clone(flag[6:])
+			}
+			s.desc0 = s.desc
+			append(&m.sections, s)
 		case "P", "F":
 			if len(f) > 4 {
 				home := -1
 				#reverse for s, i in m.sections do if s.kind == .Section { home = i; break }
-				append(&m.sections, Section{id = f[1], name = f[2], desc = f[3], kind = f[0] == "F" ? .Font : .Page, home = home, back = -1, load = {cmd = strings.join(f[4:], "\t"), state = .Lazy}})
+				append(&m.sections, Section{id = f[1], name = f[2], desc = f[3], desc0 = f[3], kind = f[0] == "F" ? .Font : .Page, home = home, back = -1, load = {cmd = strings.join(f[4:], "\t"), state = .Lazy}})
 			}
-		case "A", "H":
-			if len(m.sections) > 0 do append(&m.sections[len(m.sections) - 1].actions, action_from(f))
+		case "T":
+			m.top_crumb, m.top_ph, m.top_count = get(f, 1), get(f, 2), get(f, 3)
+		case "A", "H", "E", "N", "K", "C", "B", "D", "Y", "Q":
+			if len(m.sections) > 0 do section_line(&m.sections[len(m.sections) - 1], f)
 		case "R":
 			if len(f) > 1 do m.run_cmd = strings.join(f[1:], "\t")
 		case "L":
@@ -173,11 +227,48 @@ menu_parse :: proc(m: ^Menu, data: string) {
 	}
 }
 
+// One line of a section's or page's body (static in the tree, or from its loader).
+@(private)
+section_line :: proc(s: ^Section, f: []string) {
+	get :: proc(f: []string, i: int) -> string { return i < len(f) ? f[i] : "" }
+	switch f[0] {
+	case "A", "H": append(&s.actions, action_from(f))
+	case "E": append(&s.actions, Action{kind = .Empty, heading = true, label = strings.clone(get(f, 1))})
+	case "N":
+		append(&s.actions, Action{kind = .Notice, heading = true, label = strings.clone(get(f, 1)), meta = strings.clone(get(f, 2)), tone = strings.clone(get(f, 3)), slow = get(f, 4) == "slow"})
+	case "K":
+		n, _ := strconv.parse_int(get(f, 1))
+		append(&s.actions, Action{kind = .Bars, heading = true, bars = clamp(n, 1, 8)})
+	case "C":
+		append(&s.actions, Action{kind = .Card, heading = true, glyph = strings.clone(get(f, 1)), state = strings.clone(get(f, 2)), label = strings.clone(get(f, 3)), meta = strings.clone(get(f, 4)), line2 = strings.clone(get(f, 5)), active = get(f, 6) == "active"})
+	case "B":
+		p, _ := strconv.parse_int(get(f, 2))
+		append(&s.actions, Action{kind = .Progress, heading = true, label = strings.clone(get(f, 1)), pct = clamp(p, 0, 100), meta = strings.clone(get(f, 3))})
+	case "D":
+		s.desc, s.count, s.ph = strings.clone(get(f, 1)), strings.clone(get(f, 2)), strings.clone(get(f, 3))
+		s.has_d = true
+	case "Y":
+		clear(&s.hints)
+		for i := 1; i + 1 < len(f); i += 2 do append(&s.hints, [2]string{strings.clone(f[i]), strings.clone(f[i + 1])})
+	case "Q":
+		s.query_id = strings.clone(get(f, 1))
+	}
+}
+
+// A loader's output replaces the section's lines (its skeleton, cached rows, or the last load).
+@(private)
+section_reset :: proc(s: ^Section) {
+	clear(&s.actions)
+	clear(&s.hints)
+	s.desc, s.count, s.ph, s.query_id = s.desc0, "", "", ""
+	s.has_d = false
+}
+
 @(private)
 action_from :: proc(f: []string) -> Action {
 	get :: proc(f: []string, i: int) -> string { return i < len(f) ? f[i] : "" }
-	if f[0] == "H" do return Action{label = get(f, 1), heading = true}
-	a := Action{id = get(f, 1), label = get(f, 2), meta = get(f, 3), view = get(f, 4)}
+	if f[0] == "H" do return Action{kind = .Heading, label = strings.clone(get(f, 1)), count = strings.clone(get(f, 2)), heading = true}
+	a := Action{id = strings.clone(get(f, 1)), label = strings.clone(get(f, 2)), meta = strings.clone(get(f, 3)), view = strings.clone(get(f, 4))}
 	for flag in strings.split(get(f, 5), ";", context.temp_allocator) {
 		switch {
 		case flag == "stay": a.stay = true
@@ -189,6 +280,21 @@ action_from :: proc(f: []string) -> Action {
 			if v, ok := strconv.parse_int(flag[5:]); ok do a.step = v
 		case strings.has_prefix(flag, "jump="): a.jump = strings.clone(flag[5:])
 		case flag == "current": a.current = true
+		case flag == "dim": a.dim = true
+		case flag == "slow": a.slow = true
+		case strings.has_prefix(flag, "mark="): a.mark = strings.clone(flag[5:])
+		case strings.has_prefix(flag, "markc="): a.markc = strings.clone(flag[6:])
+		case strings.has_prefix(flag, "sub="): a.sub = strings.clone(flag[4:])
+		case strings.has_prefix(flag, "chip="): a.chip = strings.clone(flag[5:])
+		case strings.has_prefix(flag, "chipc="): a.chipc = strings.clone(flag[6:])
+		case strings.has_prefix(flag, "metac="): a.metac = strings.clone(flag[6:])
+		case strings.has_prefix(flag, "thumb="): a.thumb = strings.clone(flag[6:])
+		case strings.has_prefix(flag, "key="): a.key = strings.to_upper(flag[4:])
+		case strings.has_prefix(flag, "choice="):
+			a.stay = true
+			cs := strings.split(flag[7:], "|")
+			for &c in cs do c = strings.clone(c)
+			a.choices = cs
 		case strings.has_prefix(flag, "input="):
 			a.input, a.stay = true, true
 			parts := strings.split(flag[6:], "|", context.temp_allocator)
@@ -216,7 +322,44 @@ loader_start :: proc(m: ^Menu, l: ^Loader) {
 	os.close(w)
 	if perr != nil { os.close(r); l.state = .Failed; return }
 	l.pipe, l.proc_, l.state = r, p, .Loading
+	l.started = time.tick_now()
 	m.loading += 1
+}
+
+// The open section's loader has run long enough for its "slow" lines.
+@(private)
+section_slow :: proc(m: ^Menu, s: ^Section) -> bool {
+	if s.load.state != .Loading do return false
+	limit := m.slow_ms > 0 ? m.slow_ms : SLOW_MS
+	return time.duration_milliseconds(time.tick_since(s.load.started)) >= f64(limit)
+}
+
+// Milliseconds until the menu needs a redraw on its own (the slow notice, the waiting
+// count), or -1.
+menu_tick_ms :: proc(m: ^Menu) -> int {
+	if m.focus != .Sub || m.open < 0 || m.open >= len(m.sections) do return -1
+	if m.sections[m.open].load.state != .Loading do return -1
+	return 1000
+}
+
+// Called when menu_tick_ms ran out: the slow lines may have to show now.
+menu_on_tick :: proc(a: ^App) {
+	menu_refilter(a)
+}
+
+// k4:retry: start the open section's loader again.
+@(private)
+loader_restart :: proc(m: ^Menu, l: ^Loader) {
+	if l.state == .Loading {
+		_ = os.process_kill(l.proc_)
+		os.close(l.pipe)
+		_, _ = os.process_wait(l.proc_)
+		m.loading -= 1
+	}
+	clear(&l.buf)
+	l.state = .Lazy
+	l.refresh = true
+	loader_start(m, l)
 }
 
 // Sections load in the background from the start; a page only while it is open (a Wi-Fi
@@ -284,12 +427,12 @@ menu_on_readable :: proc(a: ^App, fd: linux.Fd) -> bool {
 		if s.load.state != .Loading || linux.Fd(os.fd(s.load.pipe)) != fd do continue
 		if !loader_read(m, &s.load) do return false
 		first := !s.load.refresh
-		if s.load.refresh do clear(&s.actions)
 		s.load.refresh = false
+		section_reset(&s)
 		text := string(s.load.buf[:])
 		for line in strings.split_lines_iterator(&text) {
-			f := strings.split(line, "\t")
-			if len(f) > 0 && (f[0] == "A" || f[0] == "H") do append(&s.actions, action_from(f))
+			f := strings.split(line, "\t", context.temp_allocator)
+			if len(f) > 0 do section_line(&s, f)
 		}
 		menu_start_loaders(m)
 		menu_refilter(a)
@@ -305,8 +448,8 @@ menu_on_readable :: proc(a: ^App, fd: linux.Fd) -> bool {
 		for line in strings.split_lines_iterator(&text) {
 			f := strings.split(line, "\t")
 			if len(f) < 3 || f[0] != "I" do continue
-			it := Item{id = f[1], label = f[2]}
-			if len(f) > 3 do it.image = f[3]
+			it := Item{id = strings.clone(f[1]), label = strings.clone(f[2])}
+			if len(f) > 3 do it.image = strings.clone(f[3])
 			if len(f) > 4 do it.current = f[4] == "current"
 			if len(f) > 5 do item_flags(&it, f[5])
 			append(&v.items, it)
@@ -324,6 +467,11 @@ item_flags :: proc(it: ^Item, flags: string) {
 	for flag in strings.split(flags, ";", context.temp_allocator) {
 		switch {
 		case flag == "stay": it.stay = true
+		case flag == "wide": it.wide = true
+		case strings.has_prefix(flag, "sub="): it.sub = strings.clone(flag[4:])
+		case strings.has_prefix(flag, "alt="):
+			t := flag[4:]
+			if bar := strings.index_byte(t, '|'); bar >= 0 do it.alt_label, it.alt_id = strings.clone(t[:bar]), strings.clone(t[bar + 1:])
 		case strings.has_prefix(flag, "palette="):
 			for c, i in strings.split(flag[8:], ",", context.temp_allocator) {
 				if i >= len(it.palette) do break
@@ -393,8 +541,11 @@ menu_refilter :: proc(a: ^App) {
 	for s, i in m.sections do if s.kind == .Section do append(&m.shown_sections, i)
 	sec := m.focus == .Menu ? m.cur : m.open
 	if sec >= 0 && sec < len(m.sections) {
-		filter := m.focus == .Sub && !m.shortcut && q != ""
-		for act, i in m.sections[sec].actions {
+		s := &m.sections[sec]
+		filter := m.focus == .Sub && !m.shortcut && q != "" && s.query_id == ""
+		slow := section_slow(m, s)
+		for act, i in s.actions {
+			if act.slow && !slow do continue
 			if filter && (act.heading || !has_fold(act.label, q)) do continue
 			append(&m.shown_actions, i)
 			if !act.heading do append(&m.sel_actions, i)
@@ -422,7 +573,8 @@ menu_search :: proc(m: ^Menu, q: string) {
 		if s.kind != .Section do continue
 		hdr := ""
 		for act, ai in s.actions {
-			if act.heading { hdr = act.label; if bar := strings.index(hdr, " · "); bar >= 0 do hdr = hdr[:bar]; continue }
+			if act.kind == .Heading { hdr = act.label; if bar := strings.index(hdr, " · "); bar >= 0 do hdr = hdr[:bar]; continue }
+			if act.heading || act.slow do continue
 			text := strings.to_lower(strings.concatenate({act.label, " ", hdr, " ", s.name}, context.temp_allocator), context.temp_allocator)
 			if !all_in(text, toks) do continue
 			score := (strings.has_prefix(strings.to_lower(act.label, context.temp_allocator), ql) ? 2 : 0) + (act.app ? 1 : 0)
@@ -505,10 +657,10 @@ menu_enter :: proc(a: ^App, idx: int) {
 	select_current_action(m)
 }
 
-// A page's "current" row is selected when it opens.
+// A row flagged "current" is selected when its section or page opens.
 @(private)
 select_current_action :: proc(m: ^Menu) {
-	if !is_page(m, m.open) do return
+	if m.open < 0 || m.open >= len(m.sections) do return
 	for v, i in m.sel_actions do if m.sections[m.open].actions[v].current { m.si = i; return }
 }
 
@@ -632,6 +784,14 @@ menu_run :: proc(a: ^App) {
 			else do run_action(a, r.sec, r.act)
 		} else do menu_enter(a, m.cur)
 	case .Sub:
+		// a Q section: typed text goes to its input action
+		if s := &m.sections[m.open]; s.query_id != "" && strings.trim_space(string(a.query[:])) != "" {
+			if m.runner.state == .Loading { m.toast = "Still running the last action…"; return }
+			value := strings.clone(string(a.query[:]), context.temp_allocator)
+			clear_query(a)
+			start_runner(a, s.query_id, "K4_INPUT", value, strings.concatenate({s.name, "  …"}))
+			return
+		}
 		if m.si < len(m.sel_actions) do run_action(a, m.open, m.sel_actions[m.si])
 	case .View:
 		if m.si >= len(m.shown_items) do return
@@ -697,9 +857,18 @@ run_action :: proc(a: ^App, sec, idx: int) {
 execute :: proc(a: ^App, sec, idx: int) {
 	m := a.menu
 	act := m.sections[sec].actions[idx]
+	if act.id == "k4:retry" {
+		if m.open >= 0 && m.open < len(m.sections) && m.sections[m.open].load.cmd != "" {
+			loader_restart(m, &m.sections[m.open].load)
+			m.toast = "Retrying…"
+			menu_refilter(a)
+		}
+		return
+	}
 	if !act.stay || m.run_cmd == "" { finish(a, act.id); return }
 	if act.input { enter_input(a, act.id, act.label, act.input_prompt, act.input_hint, act.input_password); return }
-	if act.slider do start_runner(a, act.id, "K4_VALUE", fmt.tprintf("%d", act.value), fmt.aprintf("%s  %d%%", act.label, act.value))
+	if len(act.choices) > 0 do start_runner(a, act.id, "K4_VALUE", act.meta, fmt.aprintf("%s  %s", act.label, act.meta))
+	else if act.slider do start_runner(a, act.id, "K4_VALUE", fmt.tprintf("%d", act.value), fmt.aprintf("%s  %d%%", act.label, act.value))
 	else do start_runner(a, act.id, "", "", strings.concatenate({act.label, "  …"}))
 }
 
@@ -757,14 +926,22 @@ slide :: proc(a: ^App, d: int) -> bool {
 	else if searching(m, a) && m.si < len(m.results) && m.results[m.si].act >= 0 do sec, idx = m.results[m.si].sec, m.results[m.si].act
 	if sec < 0 do return false
 	act := &m.sections[sec].actions[idx]
-	if !act.slider do return false
-	step := act.step > 0 ? act.step : 5
-	nv := clamp(act.value + d * step, 0, 100)
-	if nv == act.value do return true
-	act.value = nv
+	if len(act.choices) > 0 {
+		// a choice stepper: ‹ value ›, wrapping
+		cur := 0
+		for c, i in act.choices do if c == act.meta { cur = i; break }
+		n := len(act.choices)
+		act.meta = act.choices[((cur + d) % n + n) % n]
+	} else {
+		if !act.slider do return false
+		step := act.step > 0 ? act.step : 5
+		nv := clamp(act.value + d * step, 0, 100)
+		if nv == act.value do return true
+		act.value = nv
+	}
 	if m.runner.state == .Loading {
 		m.slide_pending, m.slide_sec, m.slide_act = true, sec, idx
-		m.toast = fmt.aprintf("%s  %d%%", act.label, nv)
+		m.toast = len(act.choices) > 0 ? fmt.aprintf("%s  %s", act.label, act.meta) : fmt.aprintf("%s  %d%%", act.label, act.value)
 	} else {
 		execute(a, sec, idx)
 	}
@@ -864,6 +1041,9 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 		case m.focus == .Sub && len(text) == 1 && text[0] >= '1' && text[0] <= '9':
 			n := int(text[0] - '1')
 			if n < len(m.sel_actions) { m.si = n; menu_run(a) }
+		case m.focus == .Sub && len(text) == 1 && action_by_key(m, text) >= 0:
+			m.si = action_by_key(m, text)
+			menu_run(a)
 		case m.focus == .Menu && len(text) == 1 && (text[0] >= 'a' && text[0] <= 'z' || text[0] >= 'A' && text[0] <= 'Z'):
 			up := strings.to_upper(text, context.temp_allocator)
 			for s, i in m.sections do if s.key == up { menu_enter(a, i); break }
@@ -881,6 +1061,18 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 	}
 	grid := m.focus == .View && m.views[m.view].grid
 	if grid && (k == .Left || k == .Right) { menu_move(a, k == .Left ? -1 : 1); return true }
+	if k == .Tab && m.focus == .View && m.si < len(m.shown_items) {
+		it := m.views[m.view].items[m.shown_items[m.si]]
+		if it.alt_id != "" { finish(a, it.alt_id); return true }
+	}
+	if k == .Tab && m.focus == .Sub && m.sections[m.open].query_id != "" {
+		// Tab steps the first choice row (Ollama's model)
+		for v, i in m.sel_actions do if len(m.sections[m.open].actions[v].choices) > 0 {
+			m.si = i
+			slide(a, 1)
+			return true
+		}
+	}
 	if (k == .Left || k == .Right) && (m.focus == .Sub || searching(m, a)) && slide(a, k == .Left ? -1 : 1) do return true
 	switch k {
 	case .Down: menu_move(a, grid ? 4 : 1)
@@ -906,6 +1098,14 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 		return app_edit_key(a, k, ctrl, ch, text)
 	}
 	return true
+}
+
+// The selectable row whose key= letter is text (shortcut mode), as an index into sel_actions.
+@(private)
+action_by_key :: proc(m: ^Menu, text: string) -> int {
+	up := strings.to_upper(text, context.temp_allocator)
+	for v, i in m.sel_actions do if m.sections[m.open].actions[v].key == up do return i
+	return -1
 }
 
 // ---------- drawing ----------
@@ -969,22 +1169,30 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	srch := searching(m, a)
 	switch m.focus {
 	case .Menu:
-		crumb = sc ? "SHORTCUTS" : (srch ? "SEARCH" : "MENU")
-		ph = sc ? "Press a letter   / to search" : "Search apps and actions…"
-		count = sc ? "" : (srch ? fmt.tprintf("%d results", len(m.results)) : fmt.tprintf("%d sections", len(m.sections)))
+		crumb = sc ? "SHORTCUTS" : (srch ? "SEARCH" : (m.top_crumb != "" ? m.top_crumb : "MENU"))
+		ph = sc ? "Press a letter   / to search" : (m.top_ph != "" ? m.top_ph : "Search apps and actions…")
+		count = sc ? "" : (srch ? fmt.tprintf("%d results", len(m.results)) : (m.top_count != "" ? m.top_count : fmt.tprintf("%d sections", len(m.shown_sections))))
 	case .Confirm:
 		crumb = "CONFIRM"
 	case .Sub:
+		s := &m.sections[m.open]
 		if is_page(m, m.open) {
 			pg := m.sections[m.open]
-			crumb = strings.to_upper(fmt.tprintf("%s › %s", m.sections[root(m, m.open)].name, pg.name), context.temp_allocator)
+			parent := pg.back >= 0 && pg.back < len(m.sections) ? pg.back : root(m, m.open)
+			crumb = strings.to_upper(fmt.tprintf("%s › %s", m.sections[parent].name, pg.name), context.temp_allocator)
 			noun := page_noun(pg)
 			ph = sc ? "Press a number   / to filter" : fmt.tprintf("Filter %s…", noun)
 			count = sc ? "" : fmt.tprintf("%d %s", len(m.sel_actions), page_noun(pg, len(m.sel_actions)))
 		} else {
-			crumb = fmt.tprintf("%s › %s", sc ? "SHORTCUTS" : "MENU", strings.to_upper(pv_name, context.temp_allocator))
+			top := m.top_crumb != "" ? m.top_crumb : "MENU"
+			crumb = fmt.tprintf("%s › %s", sc ? "SHORTCUTS" : top, strings.to_upper(pv_name, context.temp_allocator))
 			ph = sc ? "Press a number   / to search" : fmt.tprintf("Search %s…", pv_name)
 			count = sc ? "" : fmt.tprintf("%d actions", len(m.sel_actions))
+		}
+		if !sc {
+			if s.ph != "" do ph = s.ph
+			if s.has_d do count = s.count
+			if section_slow(m, s) do count = fmt.tprintf("waiting %d s", int(time.duration_seconds(time.tick_since(s.load.started))))
 		}
 	case .Input:
 		crumb = strings.to_upper(m.input_prompt, context.temp_allocator)
@@ -993,7 +1201,8 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	case .View:
 		v := m.views[m.view]
 		crumb = strings.to_upper(fmt.tprintf("%s › %s", pv_name, v.title), context.temp_allocator)
-		plural := strings.to_lower(v.title, context.temp_allocator)
+		// a plural view name says what the items are (games); else the title (Theme -> themes)
+		plural := strings.has_suffix(v.name, "s") ? v.name : strings.to_lower(v.title, context.temp_allocator)
 		if !strings.has_suffix(plural, "s") do plural = strings.concatenate({plural, "s"}, context.temp_allocator)
 		ph = fmt.tprintf("Filter %s…", plural)
 		count = fmt.tprintf("%d %s", len(m.shown_items), plural)
@@ -1040,6 +1249,12 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		case m.focus == .Confirm: hints = {{"y", "Yes"}, {"n Esc", "No"}, {"← →", "Choose"}}
 		case m.focus == .Input: hints = {{"↵", "Submit"}, {"Esc", "Cancel"}}
 		case m.focus == .Sub && !sc && is_page(m, m.open) && m.sections[m.open].kind == .Font: hints = {{"↑↓", "Preview"}, {"↵", "Apply font"}, {"⌫", "Back"}}
+		case m.focus == .Sub && !sc && len(m.sections[m.open].hints) > 0: hints = m.sections[m.open].hints[:]
+		case m.focus == .Menu && !sc && m.top_crumb != "":
+			keys := make([dynamic]string, 0, 8, context.temp_allocator)
+			for i in m.shown_sections do if m.sections[i].key != "" do append(&keys, strings.to_lower(m.sections[i].key, context.temp_allocator))
+			hints = {{"↑↓", "Move"}, {"→ ↵", "Open"}, {"Esc", fmt.tprintf("Shortcuts %s", strings.join(keys[:], " ", context.temp_allocator))}}
+		case m.focus == .View && view_alt_label(m) != "": hints = {{"←→↑↓", "Move"}, {"↵", "Launch"}, {"Tab", view_alt_label(m)}, {"⌫", "Back"}}
 		case srch: hints = {{"↑↓", "Move"}, {"↵", "Run"}, {"Esc", "Shortcuts"}}
 		case m.focus == .Menu: hints = {{"↑↓", "Move"}, {"→ ↵", "Open"}, {"type", "Search all"}, {"Esc", "Shortcuts"}}
 		case m.focus == .Sub && on_slider(m): hints = {{"↑↓", "Move"}, {"← →", "Adjust"}, {"⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
@@ -1092,17 +1307,26 @@ draw_panes :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
 	lw := 250 * S
 	fill_rect(cv, x0 + lw, by, S, bh, argb(mix(bg, fg, 0.12), 0xff))
 
-	// left: sections
+	// left: sections (a group= flag starts a heading: "Not installed")
 	ry, rh := by + 6 * S, 28 * S
 	if len(m.shown_sections) == 0 do text_in(cv, m.f_body, "No match", x0 + 14 * S, ry + 4 * S, rh, argb(dim, 0xff))
+	group := ""
 	for i in m.shown_sections {
 		if ry + rh > fy do break
 		s := m.sections[i]
-		on := i == (m.focus == .Menu ? m.cur : m.open)
+		if s.group != group {
+			group = s.group
+			if group != "" {
+				ry += 14 * S
+				draw_text_f(cv, m.f_tiny, strings.to_upper(group, context.temp_allocator), x0 + 14 * S, ry, argb(dim, 0xff))
+				ry += int(m.f_tiny.line_h) + 4 * S
+			}
+		}
+		on := i == (m.focus == .Menu ? m.cur : root(m, m.open))
 		strong := on && m.focus == .Menu
-		col := fg
+		col := s.dim ? mix(bg, fg, 0.3) : fg
 		if strong { fill_rect(cv, x0, ry, lw, rh, argb(acc, 0xff)); col = bg }
-		else if on { fill_rect(cv, x0, ry, lw, rh, argb(t.selection, 0xff)); col = fgb }
+		else if on { fill_rect(cv, x0, ry, lw, rh, argb(t.selection, 0xff)); col = s.dim ? mix(bg, fg, 0.45) : fgb }
 		tx := x0 + 14 * S
 		if s.icon != "" do text_in(cv, m.f_body, s.icon, tx, ry, rh, argb(col, 0xff))
 		tx += 15 * S + 12 * S
@@ -1126,8 +1350,9 @@ draw_panes :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
 		draw_text_f(cv, m.f_tiny, hint, px + 20 * S + tw(tf, s.name) + 12 * S, py + int(tf.ascent - m.f_tiny.ascent), argb(dim, 0xff))
 	}
 	py += int(tf.line_h) + 4 * S
-	if s.desc != "" {
-		draw_text_f(cv, m.f_small, s.desc, px + 20 * S, py, argb(dim, 0xff), nil, 0, x1 - 20 * S)
+	desc := section_slow(m, s) ? fmt.tprintf("Still waiting on %s", s.name) : s.desc
+	if desc != "" {
+		draw_text_f(cv, m.f_small, ellipsize(m.f_small, desc, x1 - 20 * S - (px + 20 * S)), px + 20 * S, py, argb(dim, 0xff))
 		py += int(m.f_small.line_h) + 8 * S
 	}
 	tip_h := m.focus == .Menu && !sc && q_of(a) == "" ? 28 * S : 0
@@ -1144,76 +1369,223 @@ draw_panes :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
 	}
 }
 
-// The rows of a section or page (headings, meta, sliders), from y=py down to bottom;
-// px is the left edge of the highlight, text starts 20 px in.
+// Theme colour for a tone name used by the integration lines.
+@(private)
+tone_color :: proc(t: logic.Theme, tone: string, def: u32) -> u32 {
+	switch tone {
+	case "accent": return t.accent
+	case "red": return t.red
+	case "muted": return t.fg_dim
+	case "dim": return mix(t.fg_dim, t.fg, 0.5)
+	case "faint": return mix(t.bg, t.fg, 0.3)
+	case "fg": return t.fg_bright
+	}
+	return def
+}
+
+// Height of one entry of a section's body.
+@(private)
+entry_h :: proc(m: ^Menu, act: Action, S: int) -> int {
+	switch act.kind {
+	case .Row, .Empty: return 30 * S
+	case .Heading: return 10 * S + int(m.f_tiny.line_h) + 4 * S
+	case .Notice: return 8 * S + 12 * S + int(m.f_bold13.line_h) + 4 * S + int(m.f_small.line_h) + 12 * S + 8 * S
+	case .Bars: return act.bars * 30 * S
+	case .Card: return 6 * S + 2 * 14 * S + card_inner_h(m, S) + 8 * S
+	case .Progress: return 7 * S + int(m.f_body.line_h) + 7 * S + 4 * S + 9 * S
+	}
+	return 30 * S
+}
+
+@(private)
+card_inner_h :: proc(m: ^Menu, S: int) -> int {
+	text := int(m.f_bold11.line_h) + int(m.f_title.line_h) + int(m.f_small.line_h) + int(m.f_tiny.line_h) + 3 * 3 * S
+	return max(64 * S, text)
+}
+
+// The rows of a section or page, from y=py down to bottom; px is the left edge of the
+// highlight, text starts 20 px in. Headings carry count badges; rows a mark, thumbnail, sub
+// text, chip and meta (or a slider / ‹ choice ›); notices, cards, progress and loading bars
+// sit between them.
 @(private)
 draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bottom: int, sc: bool) {
 	m := a.menu
 	t := a.theme
 	bg, fg, fgb, dim, acc := t.bg, t.fg, t.fg_bright, t.fg_dim, t.accent
+	faint := mix(bg, fg, 0.3)
 	py := py_
 	ah := 30 * S
-	hh_ := 10 * S + int(m.f_tiny.line_h) + 4 * S
-	if s.load.state == .Failed {
+	if s.load.state == .Failed && len(s.actions) == 0 {
 		text_in(cv, m.f_body, "Could not load this section", px + 20 * S, py, ah, argb(dim, 0xff))
-	} else if len(s.actions) == 0 && s.load.state != .Ready {
+		return
+	} else if len(m.shown_actions) == 0 && s.load.state != .Ready {
 		text_in(cv, m.f_body, "Loading…", px + 20 * S, py, ah, argb(dim, 0xff))
-	} else if len(m.sel_actions) == 0 {
+		return
+	} else if len(m.shown_actions) == 0 {
 		text_in(cv, m.f_body, len(s.actions) == 0 ? "Nothing here" : "No match", px + 20 * S, py, ah, argb(dim, 0xff))
-	} else {
-		// entries: headings and rows; scroll (in entries) keeps the selected row visible
-		sel_entry := -1
-		if m.focus == .Sub && m.si < len(m.sel_actions) {
-			for e, i in m.shown_actions do if e == m.sel_actions[m.si] { sel_entry = i; break }
-		}
-		height :: proc(act: Action, ah, hh: int) -> int { return act.heading ? hh : ah }
-		if m.focus != .Sub do m.scroll = 0
-		if sel_entry >= 0 {
-			if sel_entry < m.scroll do m.scroll = sel_entry
-			if m.scroll > 0 && sel_entry == m.scroll && s.actions[m.shown_actions[m.scroll - 1]].heading do m.scroll -= 1
-			for {
-				h := 0
-				for e in m.scroll ..= sel_entry do h += height(s.actions[m.shown_actions[e]], ah, hh_)
-				if py + h <= bottom || m.scroll >= sel_entry do break
-				m.scroll += 1
-			}
-		}
-		row := 0
-		for e in 0 ..< len(m.shown_actions) {
-			act := s.actions[m.shown_actions[e]]
-			if !act.heading do row += 1
-			if e < m.scroll do continue
-			h := height(act, ah, hh_)
+		return
+	}
+	// scroll (in entries) keeps the selected row visible
+	sel_entry := -1
+	if m.focus == .Sub && m.si < len(m.sel_actions) {
+		for e, i in m.shown_actions do if e == m.sel_actions[m.si] { sel_entry = i; break }
+	}
+	if m.focus != .Sub do m.scroll = 0
+	m.scroll = clamp(m.scroll, 0, max(len(m.shown_actions) - 1, 0))
+	if sel_entry >= 0 {
+		if sel_entry < m.scroll do m.scroll = sel_entry
+		for m.scroll > 0 && sel_entry == m.scroll && s.actions[m.shown_actions[m.scroll - 1]].heading {
+			// keep the heading (and a notice above it) with the first row
+			h := 0
+			for e in m.scroll - 1 ..= sel_entry do h += entry_h(m, s.actions[m.shown_actions[e]], S)
 			if py + h > bottom do break
-			if act.heading {
-				draw_text_f(cv, m.f_tiny, strings.to_upper(act.label, context.temp_allocator), px + 20 * S, py + 10 * S, argb(dim, 0xff), nil, 0, x1 - 20 * S)
-				py += h
-				continue
+			m.scroll -= 1
+		}
+		for {
+			h := 0
+			for e in m.scroll ..= sel_entry do h += entry_h(m, s.actions[m.shown_actions[e]], S)
+			if py + h <= bottom || m.scroll >= sel_entry do break
+			m.scroll += 1
+		}
+	}
+	mx := px + 20 * S
+	row := 0
+	for e in 0 ..< len(m.shown_actions) {
+		act := s.actions[m.shown_actions[e]]
+		if !act.heading do row += 1
+		if e < m.scroll do continue
+		h := entry_h(m, act, S)
+		if py + h > bottom do break
+		switch act.kind {
+		case .Heading:
+			label := strings.to_upper(act.label, context.temp_allocator)
+			draw_text_f(cv, m.f_tiny, label, mx, py + 10 * S, argb(dim, 0xff), nil, 0, x1 - 20 * S)
+			if act.count != "" {
+				bx := mx + tw(m.f_tiny, label) + 8 * S
+				bw := tw(m.f_tiny, act.count) + 10 * S
+				bh := 16 * S
+				by := py + 10 * S + (int(m.f_tiny.line_h) - bh) / 2
+				zero := act.count == "0"
+				fill_rect(cv, bx, by, bw, bh, argb(zero ? t.selection : acc, 0xff))
+				text_in(cv, m.f_tiny, act.count, bx + 5 * S, by, bh, argb(zero ? dim : bg, 0xff))
 			}
+		case .Empty:
+			text_in(cv, m.f_body, "–", mx + 4 * S, py, ah, argb(faint, 0xff))
+			text_in(cv, m.f_body, act.label, mx + 28 * S, py, ah, argb(dim, 0xff), x1 - 20 * S)
+		case .Notice:
+			tc := tone_color(t, act.tone, acc)
+			nx, ny, nw := mx, py + 8 * S, x1 - 20 * S - mx
+			nh := h - 16 * S
+			rounded_rect(cv, nx, ny, nw, nh, 0, argb(mix(bg, fg, 0.05), 0xff), f32(S), argb(tc, 0xff))
+			ty := ny + 12 * S
+			draw_text_f(cv, m.f_bold13, "!", nx + 14 * S, ty, argb(tc, 0xff))
+			draw_text_f(cv, m.f_bold13, ellipsize(m.f_bold13, act.label, nw - 46 * S), nx + 32 * S, ty, argb(fgb, 0xff))
+			ty += int(m.f_bold13.line_h) + 4 * S
+			draw_text_f(cv, m.f_small, ellipsize(m.f_small, act.meta, nw - 46 * S), nx + 32 * S, ty, argb(mix(dim, fg, 0.5), 0xff))
+		case .Bars:
+			inner := x1 - 20 * S - (mx + 28 * S) - 90 * S - 12 * S
+			widths := [3]int{62, 44, 70}
+			for i in 0 ..< act.bars {
+				y := py + i * ah + (ah - 10 * S) / 2
+				fill_rect(cv, mx + 2 * S, y, 14 * S, 10 * S, argb(mix(bg, fg, 0.08), 0xff))
+				fill_rect(cv, mx + 28 * S, y, inner * widths[i % 3] / 100, 10 * S, argb(mix(bg, fg, 0.08), 0xff))
+				fill_rect(cv, x1 - 20 * S - 90 * S, y, 90 * S, 10 * S, argb(mix(bg, fg, 0.05), 0xff))
+			}
+		case .Card:
+			cx, cy, cw := mx, py + 6 * S, x1 - 20 * S - mx
+			ch := h - 14 * S
+			rounded_rect(cv, cx, cy, cw, ch, 0, argb(mix(bg, fg, 0.05), 0xff), f32(S), argb(mix(bg, fg, 0.18), 0xff))
+			g := 64 * S
+			gx, gy := cx + 14 * S, cy + (ch - g) / 2
+			fill_rect(cv, gx, gy, g, g, argb(act.active ? mix(bg, acc, 0.15) : t.selection, 0xff))
+			text_in(cv, m.f_glyph, act.glyph, gx + (g - tw(m.f_glyph, act.glyph)) / 2, gy, g, argb(act.active ? acc : dim, 0xff))
+			tx := gx + g + 14 * S
+			tw_ := cx + cw - 14 * S - tx
+			inner := card_inner_h(m, S)
+			text_h := int(m.f_bold11.line_h) + int(m.f_title.line_h) + int(m.f_small.line_h) + int(m.f_tiny.line_h) + 9 * S
+			ty := cy + 14 * S + (inner - text_h) / 2
+			draw_text_f(cv, m.f_bold11, act.state, tx, ty, argb(act.active ? acc : dim, 0xff))
+			ty += int(m.f_bold11.line_h) + 3 * S
+			draw_text_f(cv, m.f_title, ellipsize(m.f_title, act.label, tw_), tx, ty, argb(fgb, 0xff))
+			ty += int(m.f_title.line_h) + 3 * S
+			draw_text_f(cv, m.f_small, ellipsize(m.f_small, act.meta, tw_), tx, ty, argb(mix(dim, fg, 0.5), 0xff))
+			ty += int(m.f_small.line_h) + 3 * S
+			draw_text_f(cv, m.f_tiny, act.line2, tx, ty, argb(dim, 0xff), nil, 0, tx + tw_)
+		case .Progress:
+			ty := py + 7 * S
+			lh := int(m.f_body.line_h)
+			text_in(cv, m.f_body, "↓", mx + 4 * S, ty, lh, argb(acc, 0xff))
+			mw := tw(m.f_small, act.meta)
+			text_in(cv, m.f_small, act.meta, x1 - 20 * S - mw, ty, lh, argb(dim, 0xff))
+			text_in(cv, m.f_body, ellipsize(m.f_body, act.label, x1 - 20 * S - mw - 12 * S - (mx + 26 * S)), mx + 26 * S, ty, lh, argb(fgb, 0xff))
+			bx, by := mx + 26 * S, ty + lh + 7 * S
+			bw := x1 - 20 * S - bx
+			fill_rect(cv, bx, by, bw, 4 * S, argb(mix(bg, fg, 0.18), 0xff))
+			if act.pct > 0 do fill_rect(cv, bx, by, max(bw * act.pct / 100, S), 4 * S, argb(acc, 0xff))
+		case .Row:
 			j := row - 1
 			on := m.focus == .Sub && e == sel_entry
-			lc, mc, arrow := m.focus == .Sub ? fgb : fg, dim, mix(bg, fg, 0.35)
-			if on { fill_rect(cv, px, py, x1 - px, ah, argb(acc, 0xff)); lc, mc, arrow = bg, bg, bg }
-			num := sc && m.focus == .Sub && j < 9
-			mark := num ? fmt.tprintf("%d", j + 1) : (act.view != "" || act.jump != "" ? "»" : "›")
-			mx := px + 20 * S
-			if num do badge(cv, m.f_tiny, mark, mx + 16 * S, py, ah, S, on ? bg : acc, on ? acc : bg, true)
-			else do text_in(cv, m.f_body, mark, mx + 4 * S, py, ah, argb(arrow, 0xff))
+			lc := m.focus == .Sub ? fgb : fg
+			if act.dim do lc = faint
+			mc := tone_color(t, act.metac, dim)
+			markc := tone_color(t, act.markc, act.mark != "" ? faint : mix(bg, fg, 0.35))
+			subc, chipc := dim, tone_color(t, act.chipc, dim)
+			if on {
+				fill_rect(cv, px, py, x1 - px, ah, argb(acc, 0xff))
+				lc, mc, markc, subc, chipc = bg, bg, bg, bg, bg
+			}
+			// mark column: shortcut letter or number, a status glyph, or › / »
+			badge_label := ""
+			if sc && m.focus == .Sub {
+				if act.key != "" do badge_label = strings.to_lower(act.key, context.temp_allocator)
+				else if j < 9 do badge_label = fmt.tprintf("%d", j + 1)
+			}
+			if badge_label != "" do badge(cv, m.f_tiny, badge_label, mx + 16 * S, py, ah, S, on ? bg : acc, on ? acc : bg, true)
+			else {
+				mark := act.mark != "" ? act.mark : (act.view != "" || act.jump != "" ? "»" : "›")
+				text_in(cv, m.f_body, mark, mx + (16 * S - tw(m.f_body, mark)) / 2, py, ah, argb(markc, 0xff))
+			}
+			lx := mx + 16 * S + 12 * S
+			right := x1 - 20 * S
+			if act.slider {
+				sw := draw_slider(a, cv, S, act.value, right, py, ah, on)
+				text_in(cv, m.f_body, act.label, lx, py, ah, argb(lc, 0xff), right - sw - 12 * S)
+				break
+			}
 			meta := act.meta
+			if len(act.choices) > 0 do meta = fmt.tprintf("‹ %s ›", act.meta)
 			if meta == "" && act.confirm_title != "" do meta = "asks first"
 			if meta == "" && act.jump != "" do meta = "→"
-			lx := mx + 16 * S + 12 * S
-			if act.slider {
-				sw := draw_slider(a, cv, S, act.value, x1 - 20 * S, py, ah, on)
-				text_in(cv, m.f_body, act.label, lx, py, ah, argb(lc, 0xff), x1 - 20 * S - sw - 12 * S)
-				py += ah
-				continue
+			if meta != "" {
+				meta = ellipsize(m.f_small, meta, (right - lx) * 60 / 100)
+				mw := tw(m.f_small, meta)
+				text_in(cv, m.f_small, meta, right - mw, py, ah, argb(mc, 0xff))
+				right -= mw + 10 * S
 			}
-			mw := meta != "" ? tw(m.f_small, meta) : 0
-			text_in(cv, m.f_body, act.label, lx, py, ah, argb(lc, 0xff), x1 - 20 * S - mw - 12 * S)
-			if mw > 0 do text_in(cv, m.f_small, meta, x1 - 20 * S - mw, py, ah, argb(mc, 0xff))
-			py += ah
+			if act.chip != "" {
+				cw := tw(m.f_bold10, act.chip) + 10 * S
+				chh := 16 * S + 2 * S
+				rounded_rect(cv, right - cw, py + (ah - chh) / 2, cw, chh, 0, 0, f32(S), argb(chipc, 0xff))
+				text_in(cv, m.f_bold10, act.chip, right - cw + 5 * S, py + (ah - chh) / 2, chh, argb(chipc, 0xff))
+				right -= cw + 10 * S
+			}
+			if act.thumb != "" {
+				ts := 22 * S
+				ty := py + (ah - ts) / 2
+				fill_rect(cv, lx, ty, ts, ts, argb(mix(bg, fg, 0.08), 0xff))
+				img := image_cover(a, act.thumb, ts, ts)
+				if img.ok do blit_image(cv, img.px, img.w, img.h, lx, ty)
+				rounded_rect(cv, lx, ty, ts, ts, 0, 0, f32(S), argb(on ? mix(acc, bg, 0.5) : mix(bg, fg, 0.25), 0xff))
+				lx += ts + 10 * S
+			}
+			label := ellipsize(m.f_body, act.label, right - lx)
+			text_in(cv, m.f_body, label, lx, py, ah, argb(lc, 0xff))
+			if act.sub != "" && label == act.label {
+				sx := lx + tw(m.f_body, label)
+				if sx < right do text_in(cv, m.f_body, act.sub, sx, py, ah, argb(subc, 0xff), right)
+			}
 		}
+		py += h
 	}
 }
 
@@ -1338,8 +1710,10 @@ draw_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	if grid {
 		cols, gx, gy := 4, 14 * S, 18 * S
 		tile_w := (bw - 2 * pad - (cols - 1) * gx) / cols
-		tile_h := 100 * S
-		cell_h := tile_h + 8 * S + int(m.f_small.line_h) + gy
+		wide, subs := false, false
+		for it in v.items { wide ||= it.wide; subs ||= it.sub != "" }
+		tile_h := wide ? tile_w * 215 / 460 : 100 * S // Steam headers are 460×215
+		cell_h := tile_h + 8 * S + int(m.f_small.line_h) + (subs ? int(m.f_tiny.line_h) + 2 * S : 0) + gy
 		rows_vis := max((fy - 8 * S - py + gy) / cell_h, 1)
 		row := m.si / cols
 		if row < m.scroll do m.scroll = row
@@ -1360,6 +1734,7 @@ draw_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 			tag_w := it.current ? tw(m.f_small, "current") : 0
 			draw_text_f(cv, m.f_small, it.label, tx, ly, argb(on ? fgb : fg, 0xff), nil, 0, tx + tile_w - tag_w - 6 * S)
 			if it.current do draw_text_f(cv, m.f_small, "current", tx + tile_w - tag_w, ly, argb(acc, 0xff))
+			if it.sub != "" do draw_text_f(cv, m.f_tiny, it.sub, tx, ly + int(m.f_small.line_h) + 2 * S, argb(dim, 0xff), nil, 0, tx + tile_w)
 		}
 		return
 	}
@@ -1404,6 +1779,13 @@ draw_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	}
 }
 
+// The selected view item's Tab action label ("Store page"), if it has one.
+@(private)
+view_alt_label :: proc(m: ^Menu) -> string {
+	if m.focus != .View || m.si >= len(m.shown_items) do return ""
+	return m.views[m.view].items[m.shown_items[m.si]].alt_label
+}
+
 // What a page's rows are called in its filter and count: "Wi-Fi networks" → networks,
 // "Packages" → packages, anything else → options.
 @(private)
@@ -1427,7 +1809,8 @@ draw_page :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
 	py := by + 16 * S
 	draw_text_f(cv, m.f_title, pg.name, x0 + pad, py, argb(t.accent, 0xff))
 	sub := pg.desc
-	if pg.load.state == .Loading && len(pg.actions) > 0 do sub = "Refreshing…"
+	if section_slow(m, pg) do sub = fmt.tprintf("Still waiting on %s", pg.name)
+	else if pg.load.state == .Loading && len(pg.actions) > 0 && pg.load.refresh do sub = "Refreshing…"
 	draw_text_f(cv, m.f_small, sub, x0 + pad + tw(m.f_title, pg.name) + 12 * S, py + int(m.f_title.ascent - m.f_small.ascent), argb(t.fg_dim, 0xff), nil, 0, x1 - pad)
 	py += int(m.f_title.line_h) + 10 * S
 	draw_actions(a, cv, S, pg, x0, py, x1, fy - 8 * S, sc)
@@ -1650,15 +2033,17 @@ menu_fonts :: proc(a: ^App) {
 	m.f_huge = font_sized(base, 44)
 	m.f_title = font_sized(base, 18)
 	m.f_confirm = font_sized(base, 20)
-	m.f_bold13 = m.f_body
-	m.f_bold12 = m.f_small
+	m.f_glyph = font_sized(base, 26)
+	m.f_bold13, m.f_bold12, m.f_bold11, m.f_bold10 = m.f_body, m.f_small, m.f_tiny, font_sized(base, 10)
 	if bold, ok := bold_font(a, 18); ok {
 		m.f_title = bold
 		m.f_confirm = font_sized(bold, 20)
 		m.f_bold13 = font_sized(bold, 13)
 		m.f_bold12 = font_sized(bold, 12)
+		m.f_bold11 = font_sized(bold, 11)
+		m.f_bold10 = font_sized(bold, 10)
 	}
-	append(&a.fonts, m.f_body, m.f_small, m.f_tiny, m.f_big, m.f_row, m.f_huge, m.f_title, m.f_confirm, m.f_bold13, m.f_bold12)
+	append(&a.fonts, m.f_body, m.f_small, m.f_tiny, m.f_big, m.f_row, m.f_huge, m.f_title, m.f_confirm, m.f_bold13, m.f_bold12, m.f_bold11, m.f_bold10, m.f_glyph)
 	if a.scale > 1 do for f in a.fonts do font_resize(f, f.base_px * f32(a.scale))
 }
 

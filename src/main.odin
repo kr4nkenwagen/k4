@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+import "core:time"
 import "core:unicode/utf8"
 import "logic"
 
@@ -131,6 +132,7 @@ main :: proc() {
 	if opts.menu {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		menu_setup(a, string(data))
+		if v, ok := strconv.parse_int(os.get_env("K4_SLOW_MS", context.temp_allocator)); ok do a.menu.slow_ms = max(v, 1)
 		if opts.open != "" do for s, i in a.menu.sections do if s.id == opts.open { menu_enter(a, i); break }
 	} else if !prompt_only {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
@@ -140,10 +142,13 @@ main :: proc() {
 
 	if opts.dry_run != "" {
 		// same path as Wayland: layout at 1x, then the fonts at the buffer scale
-		if a.menu != nil do menu_load_all(a)
+		// K4_DRY_NOWAIT: render while loaders still run (skeletons, the slow state)
+		wait := os.get_env("K4_DRY_NOWAIT", context.temp_allocator) == ""
+		if a.menu != nil { if wait do menu_load_all(a) }
 		else do app_layout(a)
 		press_keys(a, opts.keys)
-		if a.menu != nil do menu_load_all(a) // a stay action started by the keys, and the reload after it
+		if a.menu != nil && wait do menu_load_all(a) // a stay action started by the keys, and the reload after it
+		if a.menu != nil && !wait { time.sleep(time.Duration(clamp(a.menu.slow_ms, 0, 2000) + 50) * time.Millisecond); menu_on_tick(a) }
 		if a.menu == nil do app_move(a, opts.select)
 		s := opts.scale
 		a.scale = s
@@ -229,13 +234,13 @@ press_keys :: proc(a: ^App, keys: string) {
 					if !ctrl && !alt do text = tok
 				}
 				app_key(a, k, ctrl, ch, text, alt)
-				if a.menu != nil && a.opts.dry_run != "" do menu_load_all(a) // pages and runs a key started
+				if a.menu != nil && a.opts.dry_run != "" && os.get_env("K4_DRY_NOWAIT", context.temp_allocator) == "" do menu_load_all(a) // pages and runs a key started
 				continue
 			}
 		}
 		r, n := utf8.decode_rune_in_string(s)
 		app_key(a, .None, false, r, s[:n])
-		if a.menu != nil && a.opts.dry_run != "" do menu_load_all(a)
+		if a.menu != nil && a.opts.dry_run != "" && os.get_env("K4_DRY_NOWAIT", context.temp_allocator) == "" do menu_load_all(a)
 		s = s[n:]
 	}
 }

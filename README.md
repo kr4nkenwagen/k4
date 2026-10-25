@@ -41,6 +41,11 @@ Everything happens inside the launcher:
   header field, masked for passwords, and hands it over as `$K4_INPUT` in the runner's
   environment. Runner lines `k4:page`, `k4:back` and `k4:close` chain the next step.
 - **Sliders and confirmations:** `slider=` rows adjust with ← →, `confirm=` rows ask first.
+- **Integration components:** headings with count badges, rows with a status mark, sub
+  text, chip, thumbnail or a `‹ choice ›` stepper, notices, empty lines, a now-playing card,
+  progress rows and loading bars. A section's static lines show until its loader's output
+  replaces them (a skeleton, or the last fetch), and `slow` lines appear when a loader takes
+  8 s or more.
 
 ## Build
 

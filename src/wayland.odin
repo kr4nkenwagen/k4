@@ -323,10 +323,13 @@ run_wayland :: proc(a: ^App) -> bool {
 			timeout = i32(max(time.duration_milliseconds(left), 0))
 		}
 		if W.dirty && !W.frame_pending && W.configured do timeout = 0
+		tick := a.menu != nil ? menu_tick_ms(a.menu) : -1 // a slow loader: the waiting count and slow lines
+		if tick >= 0 && (timeout < 0 || i32(tick) < timeout) do timeout = i32(tick)
 		fds := make([dynamic]linux.Poll_Fd, 0, 8, context.temp_allocator)
 		append(&fds, linux.Poll_Fd{fd = fd, events = {.IN}})
 		if a.menu != nil do menu_poll_fds(a.menu, &fds) // background section loaders
 		n, _ := linux.poll(fds[:], timeout)
+		if n == 0 && tick >= 0 { menu_on_tick(a); W.dirty = true }
 		if n > 0 && .IN in fds[0].revents {
 			if i(wl.display_read_events(W.display)) < 0 { a.exit = 1; break }
 		} else {
