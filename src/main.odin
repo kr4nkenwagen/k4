@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+import "core:unicode/utf8"
 import "logic"
 
 VERSION :: "0.1.0"
@@ -26,9 +27,11 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --row-height PX, --icon-size PX, --radius PX, --border PX
   --theme FILE            colors.toml (default: the current Omarchy-format theme)
   --no-icons              ignore icon fields
+  --menu                  two-pane launcher (sections, actions, views); input format in menu.odin
   --config FILE           accepted and ignored (fuzzel compatibility)
   --dry-run FILE.png      render one frame to a PNG without Wayland, then print the selection
-  --keys TEXT, --select N type TEXT and move the selection before the first frame
+  --keys KEYS, --select N keys pressed before the first frame: text plus <down> <up> <left>
+                          <right> <enter> <esc> <tab> <bs> <alt-x> <ctrl-x>; then move the selection
   --scale N               dry runs: buffer scale
 
 Exit status: 0 with the choice on stdout, 1 when cancelled.
@@ -86,6 +89,7 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--border": o.border, _ = strconv.parse_int(value(args, &i, inline, has_inline))
 		case "--theme": o.theme_file = value(args, &i, inline, has_inline)
 		case "--no-icons": o.no_icons = true
+		case "--menu": o.menu = true
 		case "--config": _ = value(args, &i, inline, has_inline)
 		case "--dry-run": o.dry_run = value(args, &i, inline, has_inline)
 		case "--keys": o.keys = value(args, &i, inline, has_inline)
@@ -129,28 +133,36 @@ main :: proc() {
 		}
 	}
 	if family == "" do family = "monospace"
+	a.family = family
 	px := opts.font_pt * 4 / 3
 	a.font_px = px
 	if !font_load(&a.font, family, px, true) {
 		fmt.eprintfln("k4: cannot load font %q", family)
 		os.exit(2)
 	}
-	if font_load(&a.fallback, "sans-serif", px, false) do a.font.fallback = &a.fallback
+	a.font.fallback = new(Fallbacks) // filled per missing character
 
-	// rows
-	if !prompt_only {
+	// rows, or the menu tree
+	if opts.menu {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		menu_setup(a, string(data))
+	} else if !prompt_only {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		a.rows = logic.parse_dmenu(string(data))
 	}
 	app_rematch(a)
 
 	if opts.dry_run != "" {
-		// same path as Wayland: layout at 1x, then the font at the buffer scale
-		app_layout(a)
-		if len(opts.keys) > 0 do app_insert(a, opts.keys)
-		app_move(a, opts.select)
+		// same path as Wayland: layout at 1x, then the fonts at the buffer scale
+		if a.menu != nil do menu_load_all(a)
+		else do app_layout(a)
+		press_keys(a, opts.keys)
+		if a.menu == nil do app_move(a, opts.select)
 		s := opts.scale
-		if s != 1 do font_resize(&a.font, px * f32(s))
+		if s != 1 {
+			font_resize(&a.font, px * f32(s))
+			for f in a.fonts do font_resize(f, f.base_px * f32(s))
+		}
 		cv := Canvas{make([]u32, a.width * a.height * s * s), a.width * s, a.height * s}
 		app_draw(a, &cv, s)
 		rgba := canvas_rgba(&cv)
@@ -159,13 +171,52 @@ main :: proc() {
 			fmt.eprintln("k4: could not write", opts.dry_run)
 			os.exit(2)
 		}
-		app_accept(a)
+		if a.menu == nil && !a.done do app_accept(a)
+		if a.menu != nil && !a.done do a.exit = 1
 	} else {
-		app_layout(a)
-		if len(opts.keys) > 0 do app_insert(a, opts.keys)
-		app_move(a, opts.select)
+		if a.menu == nil do app_layout(a)
+		press_keys(a, opts.keys)
+		if a.menu == nil do app_move(a, opts.select)
 		if !run_wayland(a) do os.exit(2)
 	}
 	if a.exit == 0 do fmt.println(a.result)
 	os.exit(a.exit)
+}
+
+// --keys: text is typed; <name> presses a key (see USAGE).
+press_keys :: proc(a: ^App, keys: string) {
+	s := keys
+	for len(s) > 0 && !a.done {
+		if s[0] == '<' {
+			if end := strings.index_byte(s, '>'); end > 0 {
+				tok := s[1:end]
+				s = s[end + 1:]
+				ctrl, alt := false, false
+				if strings.has_prefix(tok, "ctrl-") { ctrl = true; tok = tok[5:] }
+				if strings.has_prefix(tok, "alt-") { alt = true; tok = tok[4:] }
+				k := Key.None
+				switch tok {
+				case "down": k = .Down
+				case "up": k = .Up
+				case "left": k = .Left
+				case "right": k = .Right
+				case "enter": k = .Enter
+				case "esc": k = .Escape
+				case "tab": k = .Tab
+				case "bs": k = .Backspace
+				}
+				ch := rune(0)
+				text := ""
+				if k == .None && len(tok) == 1 {
+					ch = rune(tok[0])
+					if !ctrl && !alt do text = tok
+				}
+				app_key(a, k, ctrl, ch, text, alt)
+				continue
+			}
+		}
+		r, n := utf8.decode_rune_in_string(s)
+		app_key(a, .None, false, r, s[:n])
+		s = s[n:]
+	}
 }

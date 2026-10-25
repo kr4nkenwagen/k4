@@ -1,0 +1,851 @@
+package k4
+
+import "core:fmt"
+import "core:math"
+import "core:os"
+import "core:strings"
+import "core:sys/linux"
+import "core:unicode/utf8"
+import "logic"
+
+// --menu: the Kestrel design. A search-first two-pane menu (sections left, the highlighted
+// section's actions right), a shortcut mode on Esc (letters open sections, digits run
+// actions), full-width views (wallpaper gallery, theme list), web search ("g ") and a
+// calculator ("="). Input on stdin, one record a line, tab-separated:
+//   S <id> <name> <letter> <description> [icon]    a section
+//   A <id> <label> [meta] [view]                     an action of the last section; with a view
+//                                                     name, Enter opens that view instead
+//   L <shell command>                                the last section's A lines come from this
+//                                                     command, run in the background
+//   V <name> <title> <subtitle> <shell command>      a view; the command prints its items:
+//                                                     I <id> <label> [image] [current]
+// Enter prints the chosen action's or item's id; a web search prints "url:<url>".
+
+Action :: struct { id, label, meta, view: string }
+Item :: struct { id, label, image: string, current: bool }
+
+Load_State :: enum { Ready, Lazy, Loading, Failed }
+
+Loader :: struct {
+	cmd:   string,
+	state: Load_State,
+	pipe:  ^os.File,
+	proc_: os.Process,
+	buf:   [dynamic]u8,
+}
+
+Section :: struct {
+	id, name, key, desc, icon: string,
+	actions: [dynamic]Action,
+	load:    Loader,
+}
+
+View :: struct {
+	name, title, subtitle: string,
+	items: [dynamic]Item,
+	load:  Loader,
+}
+
+Focus :: enum { Menu, Sub, View, Web, Calc }
+
+Menu :: struct {
+	sections: [dynamic]Section,
+	views:    [dynamic]View,
+	focus:    Focus,
+	shortcut: bool,
+	cur:      int, // highlighted section (menu focus)
+	open:     int, // section whose actions are open
+	view:     int, // open view
+	view_from: int, // action index that opened the view (Backspace returns to it)
+	si:       int, // selection in sub / view / web lists
+	scroll:   int,
+	shown_sections, shown_actions, shown_items: [dynamic]int,
+	loading:  int,
+	toast:    string,
+	history:  [dynamic][2]string,
+	f_body, f_small, f_tiny, f_big, f_title, f_row, f_huge: ^Font,
+}
+
+MENU_W :: 760
+MENU_H :: 600
+MAX_LOADERS :: 4
+
+// ---------- input ----------
+
+menu_parse :: proc(m: ^Menu, data: string) {
+	text := data
+	for line in strings.split_lines_iterator(&text) {
+		f := strings.split(strings.trim_suffix(line, "\r"), "\t")
+		if len(f) == 0 do continue
+		get :: proc(f: []string, i: int) -> string { return i < len(f) ? f[i] : "" }
+		switch f[0] {
+		case "S":
+			append(&m.sections, Section{id = get(f, 1), name = get(f, 2), key = strings.to_upper(get(f, 3)), desc = get(f, 4), icon = get(f, 5)})
+		case "A":
+			if len(m.sections) > 0 do append(&m.sections[len(m.sections) - 1].actions, action_from(f))
+		case "L":
+			if len(m.sections) > 0 && len(f) > 1 {
+				s := &m.sections[len(m.sections) - 1]
+				s.load = Loader{cmd = strings.join(f[1:], "\t"), state = .Lazy}
+			}
+		case "V":
+			if len(f) > 4 do append(&m.views, View{name = f[1], title = f[2], subtitle = f[3], load = {cmd = strings.join(f[4:], "\t"), state = .Lazy}})
+		}
+	}
+}
+
+@(private)
+action_from :: proc(f: []string) -> Action {
+	get :: proc(f: []string, i: int) -> string { return i < len(f) ? f[i] : "" }
+	return Action{id = get(f, 1), label = get(f, 2), meta = get(f, 3), view = get(f, 4)}
+}
+
+// ---------- background loading ----------
+
+@(private)
+loader_start :: proc(m: ^Menu, l: ^Loader) {
+	if l.state != .Lazy || m.loading >= MAX_LOADERS do return
+	r, w, err := os.pipe()
+	if err != nil { l.state = .Failed; return }
+	p, perr := os.process_start({command = {"sh", "-c", l.cmd}, stdout = w})
+	os.close(w)
+	if perr != nil { os.close(r); l.state = .Failed; return }
+	l.pipe, l.proc_, l.state = r, p, .Loading
+	m.loading += 1
+}
+
+menu_start_loaders :: proc(m: ^Menu) {
+	if m.cur < len(m.sections) do loader_start(m, &m.sections[m.cur].load)
+	for &s in m.sections do loader_start(m, &s.load)
+	for &v in m.views do loader_start(m, &v.load)
+}
+
+menu_poll_fds :: proc(m: ^Menu, out: ^[dynamic]linux.Poll_Fd) {
+	for s in m.sections do if s.load.state == .Loading do append(out, linux.Poll_Fd{fd = linux.Fd(os.fd(s.load.pipe)), events = {.IN}})
+	for v in m.views do if v.load.state == .Loading do append(out, linux.Poll_Fd{fd = linux.Fd(os.fd(v.load.pipe)), events = {.IN}})
+}
+
+// Reads one chunk from the loader on fd; returns true when it finished.
+@(private)
+loader_read :: proc(m: ^Menu, l: ^Loader) -> (finished: bool) {
+	chunk: [8192]u8
+	n, _ := os.read(l.pipe, chunk[:])
+	if n > 0 { append(&l.buf, ..chunk[:n]); return false }
+	os.close(l.pipe)
+	_, _ = os.process_wait(l.proc_)
+	l.state = .Ready
+	m.loading -= 1
+	return true
+}
+
+menu_on_readable :: proc(a: ^App, fd: linux.Fd) -> bool {
+	m := a.menu
+	for &s in m.sections {
+		if s.load.state != .Loading || linux.Fd(os.fd(s.load.pipe)) != fd do continue
+		if !loader_read(m, &s.load) do return false
+		text := string(s.load.buf[:])
+		for line in strings.split_lines_iterator(&text) {
+			f := strings.split(line, "\t")
+			if len(f) > 0 && f[0] == "A" do append(&s.actions, action_from(f))
+		}
+		menu_start_loaders(m)
+		menu_refilter(a)
+		return true
+	}
+	for &v in m.views {
+		if v.load.state != .Loading || linux.Fd(os.fd(v.load.pipe)) != fd do continue
+		if !loader_read(m, &v.load) do return false
+		text := string(v.load.buf[:])
+		for line in strings.split_lines_iterator(&text) {
+			f := strings.split(line, "\t")
+			if len(f) < 3 || f[0] != "I" do continue
+			it := Item{id = f[1], label = f[2]}
+			if len(f) > 3 do it.image = f[3]
+			if len(f) > 4 do it.current = f[4] == "current"
+			append(&v.items, it)
+		}
+		menu_start_loaders(m)
+		if m.focus == .View && &m.views[m.view] == &v do menu_select_current(m)
+		menu_refilter(a)
+		return true
+	}
+	return false
+}
+
+// Dry runs and tests: wait for every loader.
+menu_load_all :: proc(a: ^App) {
+	m := a.menu
+	for {
+		menu_start_loaders(m)
+		if m.loading == 0 do break
+		for &s in m.sections do for s.load.state == .Loading do menu_on_readable(a, linux.Fd(os.fd(s.load.pipe)))
+		for &v in m.views do for v.load.state == .Loading do menu_on_readable(a, linux.Fd(os.fd(v.load.pipe)))
+	}
+}
+
+// ---------- state ----------
+
+@(private)
+has_fold :: proc(hay, needle: string) -> bool {
+	if needle == "" do return true
+	return strings.contains(strings.to_lower(hay, context.temp_allocator), strings.to_lower(needle, context.temp_allocator))
+}
+
+@(private) q_of :: proc(a: ^App) -> string { return strings.trim_space(string(a.query[:])) }
+
+menu_refilter :: proc(a: ^App) {
+	m := a.menu
+	q := q_of(a)
+	clear(&m.shown_sections); clear(&m.shown_actions); clear(&m.shown_items)
+	search_menu := m.focus == .Menu && !m.shortcut
+	for s, i in m.sections do if !search_menu || has_fold(s.name, q) do append(&m.shown_sections, i)
+	sec := m.focus == .Menu ? m.cur : m.open
+	if sec >= 0 && sec < len(m.sections) {
+		search_sub := m.focus == .Sub && !m.shortcut
+		for act, i in m.sections[sec].actions do if !search_sub || has_fold(act.label, q) do append(&m.shown_actions, i)
+	}
+	if m.focus == .View && m.view < len(m.views) {
+		for it, i in m.views[m.view].items do if has_fold(it.label, q) do append(&m.shown_items, i)
+	}
+	n := menu_list_len(a)
+	m.si = n > 0 ? clamp(m.si, 0, n - 1) : 0
+}
+
+menu_list_len :: proc(a: ^App) -> int {
+	m := a.menu
+	switch m.focus {
+	case .Menu: return len(m.shown_sections)
+	case .Sub: return len(m.shown_actions)
+	case .View: return len(m.shown_items)
+	case .Web: return len(web_rows(a))
+	case .Calc: return 0
+	}
+	return 0
+}
+
+@(private)
+menu_select_current :: proc(m: ^Menu) {
+	v := &m.views[m.view]
+	for it, i in v.items do if it.current { m.si = i; return }
+	m.si = 0
+}
+
+// Typing: "g " starts a web search, "=" the calculator (menu focus only).
+menu_on_query :: proc(a: ^App) {
+	m := a.menu
+	q := string(a.query[:])
+	m.toast = ""
+	if m.focus == .Menu {
+		if len(q) >= 2 && (q[0] == 'g' || q[0] == 'G') && q[1] == ' ' {
+			set_query(a, q[2:]); m.focus, m.si = .Web, 0; menu_refilter(a); return
+		}
+		if len(q) >= 1 && q[0] == '=' {
+			set_query(a, q[1:]); m.focus, m.si = .Calc, 0; menu_refilter(a); return
+		}
+		qq := strings.trim_space(q)
+		if qq != "" do for s, i in m.sections do if has_fold(s.name, qq) { m.cur = i; break }
+	} else {
+		m.si = 0
+		m.scroll = 0
+	}
+	menu_refilter(a)
+	if m.focus == .Menu && len(m.shown_sections) > 0 {
+		found := false
+		for v in m.shown_sections do if v == m.cur { found = true; break }
+		if !found do m.cur = m.shown_sections[0]
+	}
+}
+
+@(private)
+set_query :: proc(a: ^App, s: string) {
+	tmp := strings.clone(s, context.temp_allocator)
+	clear(&a.query)
+	append(&a.query, ..transmute([]u8)tmp)
+	a.cursor = len(a.query)
+}
+
+@(private) clear_query :: proc(a: ^App) { clear(&a.query); a.cursor = 0 }
+
+menu_enter :: proc(a: ^App, idx: int) {
+	m := a.menu
+	if idx < 0 || idx >= len(m.sections) do return
+	m.focus, m.open, m.cur, m.si, m.scroll, m.toast = .Sub, idx, idx, 0, 0, ""
+	loader_start(m, &m.sections[idx].load)
+	clear_query(a)
+	menu_refilter(a)
+}
+
+menu_open_view :: proc(a: ^App, name: string, from: int) {
+	m := a.menu
+	for &v, i in m.views {
+		if v.name != name do continue
+		m.focus, m.view, m.view_from, m.scroll, m.toast = .View, i, from, 0, ""
+		loader_start(m, &v.load)
+		clear_query(a)
+		menu_select_current(m)
+		menu_refilter(a)
+		return
+	}
+	m.toast = fmt.aprintf("No %s view", name)
+}
+
+menu_back :: proc(a: ^App) {
+	m := a.menu
+	m.toast = ""
+	switch m.focus {
+	case .View:
+		m.focus, m.si, m.scroll = .Sub, max(m.view_from, 0), 0
+		clear_query(a)
+	case .Sub:
+		m.focus, m.cur, m.si = .Menu, m.open, 0
+		clear_query(a)
+	case .Web, .Calc:
+		m.focus, m.si = .Menu, 0
+		clear_query(a)
+	case .Menu:
+		if len(a.query) > 0 do clear_query(a)
+		else { a.exit = 1; a.done = true }
+	}
+	menu_refilter(a)
+}
+
+menu_move :: proc(a: ^App, d: int) {
+	m := a.menu
+	m.toast = ""
+	if m.focus == .Menu {
+		n := len(m.shown_sections)
+		if n == 0 do return
+		pos := 0
+		for v, i in m.shown_sections do if v == m.cur { pos = i; break }
+		m.cur = m.shown_sections[((pos + d) % n + n) % n]
+		loader_start(m, &m.sections[m.cur].load)
+		menu_refilter(a)
+		return
+	}
+	n := menu_list_len(a)
+	if n == 0 do return
+	if m.focus == .View do m.si = clamp(m.si + d, 0, n - 1) // grid: no wrap-around
+	else do m.si = ((m.si + d) % n + n) % n
+}
+
+Web_Row :: struct { tag, label, meta, url: string }
+
+BANGS := [][2]string{{"!aw", "Arch Wiki"}, {"!w", "Wikipedia"}, {"!gh", "GitHub"}, {"!yt", "YouTube"}}
+
+web_rows :: proc(a: ^App) -> []Web_Row {
+	q := q_of(a)
+	if q == "" do return nil
+	rows := make([dynamic]Web_Row, 0, 5, context.temp_allocator)
+	ddg :: proc(s: string) -> string { return strings.concatenate({"https://duckduckgo.com/?q=", url_escape(s)}, context.temp_allocator) }
+	append(&rows, Web_Row{"DDG", fmt.tprintf("Search DuckDuckGo for “%s”", q), "duckduckgo.com", ddg(q)})
+	if q[0] != '!' do for b in BANGS do append(&rows, Web_Row{b[0], q, b[1], ddg(fmt.tprintf("%s %s", b[0], q))})
+	return rows[:]
+}
+
+@(private)
+url_escape :: proc(s: string) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	for i in 0 ..< len(s) {
+		c := s[i]
+		switch c {
+		case 'a' ..= 'z', 'A' ..= 'Z', '0' ..= '9', '-', '_', '.', '~': strings.write_byte(&b, c)
+		case ' ': strings.write_byte(&b, '+')
+		case: fmt.sbprintf(&b, "%%%02X", c)
+		}
+	}
+	return strings.to_string(b)
+}
+
+menu_run :: proc(a: ^App) {
+	m := a.menu
+	switch m.focus {
+	case .Menu:
+		if len(m.shown_sections) > 0 do menu_enter(a, m.cur)
+	case .Sub:
+		if m.si >= len(m.shown_actions) do return
+		idx := m.shown_actions[m.si]
+		act := m.sections[m.open].actions[idx]
+		if act.view != "" { menu_open_view(a, act.view, m.si); return }
+		finish(a, act.id)
+	case .View:
+		if m.si < len(m.shown_items) do finish(a, m.views[m.view].items[m.shown_items[m.si]].id)
+	case .Web:
+		rows := web_rows(a)
+		if m.si < len(rows) do finish(a, strings.concatenate({"url:", rows[m.si].url}))
+	case .Calc:
+		q := q_of(a)
+		out, ok := logic.calc_eval(q)
+		if !ok do return
+		copy_to_clipboard(out)
+		inject_at(&m.history, 0, [2]string{strings.clone(q), strings.clone(out)})
+		if len(m.history) > 5 do resize(&m.history, 5)
+		m.toast = fmt.aprintf("Copied  %s", out)
+	}
+}
+
+@(private)
+finish :: proc(a: ^App, id: string) {
+	a.result = id
+	a.exit = 0
+	a.done = true
+}
+
+@(private)
+copy_to_clipboard :: proc(s: string) {
+	r, w, err := os.pipe()
+	if err != nil do return
+	p, perr := os.process_start({command = {"wl-copy"}, stdin = r})
+	os.close(r)
+	if perr == nil {
+		os.write(w, transmute([]u8)s)
+		os.close(w)
+		_, _ = os.process_wait(p)
+	} else {
+		os.close(w)
+	}
+}
+
+menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bool {
+	m := a.menu
+	empty := len(a.query) == 0
+	if alt && ch != 0 {
+		up := strings.to_upper(utf8.runes_to_string({ch}, context.temp_allocator), context.temp_allocator)
+		for s, i in m.sections do if s.key == up { menu_enter(a, i); return true }
+		return false
+	}
+	// shortcut mode: one keystroke per step, the query is not used
+	if m.shortcut && (m.focus == .Menu || m.focus == .Sub) {
+		switch {
+		case k == .Escape:
+			if m.focus == .Sub { m.focus, m.cur = .Menu, m.open; menu_refilter(a) } else { a.exit = 1; a.done = true }
+		case k == .Tab || text == "/":
+			m.shortcut = false; menu_refilter(a)
+		case k == .Backspace || k == .Left:
+			if m.focus == .Sub { m.focus, m.cur = .Menu, m.open; menu_refilter(a) }
+		case k == .Down: menu_move(a, 1)
+		case k == .Up: menu_move(a, -1)
+		case k == .Enter || k == .Right: menu_run(a)
+		case m.focus == .Sub && len(text) == 1 && text[0] >= '1' && text[0] <= '9':
+			n := int(text[0] - '1')
+			if n < len(m.shown_actions) { m.si = n; menu_run(a) }
+		case len(text) == 1 && (text[0] >= 'a' && text[0] <= 'z' || text[0] >= 'A' && text[0] <= 'Z'):
+			up := strings.to_upper(text, context.temp_allocator)
+			for s, i in m.sections do if s.key == up { menu_enter(a, i); break }
+		case: return false
+		}
+		return true
+	}
+	if ctrl {
+		switch ch {
+		case 'j', 'n': menu_move(a, m.focus == .View ? 4 : 1); return true
+		case 'k', 'p': menu_move(a, m.focus == .View ? -4 : -1); return true
+		case 'c', 'g': a.exit = 1; a.done = true; return true
+		}
+		return app_edit_key(a, k, ctrl, ch, text)
+	}
+	if m.focus == .View && (k == .Left || k == .Right) { menu_move(a, k == .Left ? -1 : 1); return true }
+	switch k {
+	case .Down: menu_move(a, m.focus == .View ? 4 : 1)
+	case .Up: menu_move(a, m.focus == .View ? -4 : -1)
+	case .Tab: menu_move(a, 1)
+	case .Back_Tab: menu_move(a, -1)
+	case .Page_Down: menu_move(a, 8)
+	case .Page_Up: menu_move(a, -8)
+	case .Enter: menu_run(a)
+	case .Escape:
+		if m.focus == .Menu { m.shortcut = true; clear_query(a); m.toast = ""; menu_refilter(a) }
+		else do menu_back(a)
+	case .Right:
+		if m.focus == .Menu && a.cursor == len(a.query) { menu_run(a); return true }
+		return app_edit_key(a, k, ctrl, ch, text)
+	case .Left:
+		if m.focus == .Sub && empty { menu_back(a); return true }
+		return app_edit_key(a, k, ctrl, ch, text)
+	case .Backspace:
+		if m.focus != .Menu && empty { menu_back(a); return true }
+		return app_edit_key(a, k, ctrl, ch, text)
+	case .Home, .End, .Delete, .None:
+		return app_edit_key(a, k, ctrl, ch, text)
+	}
+	return true
+}
+
+// ---------- drawing ----------
+
+mix :: proc(a, b: u32, t: f32) -> u32 {
+	ch :: proc(a, b: u32, sh: u32, t: f32) -> u32 {
+		x, y := f32(a >> sh & 0xff), f32(b >> sh & 0xff)
+		return u32(x + (y - x) * t + 0.5) << sh
+	}
+	return ch(a, b, 16, t) | ch(a, b, 8, t) | ch(a, b, 0, t)
+}
+
+@(private) tw :: proc(f: ^Font, s: string) -> int { return int(math.ceil(shape(f, s).width)) }
+
+// Text vertically centred in a box [y, y+h).
+@(private)
+text_in :: proc(cv: ^Canvas, f: ^Font, s: string, x, y, h: int, color: u32, clip := max(int)) {
+	draw_text_f(cv, f, s, x, y + (h - int(f.line_h)) / 2, color, nil, 0, clip)
+}
+
+@(private)
+kbd :: proc(cv: ^Canvas, a: ^App, label: string, x, cy, S: int) -> int {
+	m := a.menu
+	t := a.theme
+	w := tw(m.f_tiny, label) + 12 * S
+	h := 18 * S
+	rounded_rect(cv, x, cy - h / 2, w, h, 0, argb(mix(t.bg, t.fg, 0.07), 0xff), f32(S), argb(mix(t.bg, t.fg, 0.18), 0xff))
+	text_in(cv, m.f_tiny, label, x + 6 * S, cy - h / 2, h, argb(t.fg, 0xff))
+	return w
+}
+
+// A small square badge (key letter, action number), centred text.
+@(private)
+badge :: proc(cv: ^Canvas, f: ^Font, label: string, x_right, y, h, S: int, bg_c, fg_c: u32, filled: bool) -> int {
+	w := max(18 * S, tw(f, label) + 6 * S)
+	bh := 18 * S
+	x := x_right - w
+	by := y + (h - bh) / 2
+	if filled do fill_rect(cv, x, by, w, bh, argb(bg_c, 0xff))
+	text_in(cv, f, label, x + (w - tw(f, label)) / 2, by, bh, argb(fg_c, 0xff))
+	return w
+}
+
+menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
+	m := a.menu
+	t := a.theme
+	bg, fg, fgb, dim, acc := t.bg, t.fg, t.fg_bright, t.fg_dim, t.accent
+	sep := argb(mix(bg, fg, 0.12), 0xff)
+	B := 2 * S
+	canvas_clear(cv)
+	rounded_rect(cv, 0, 0, cv.w, cv.h, 0, argb(bg, 0xf2), f32(B), argb(acc, 0xff))
+	x0, x1 := B, cv.w - B
+	y := B
+	sc := m.shortcut && (m.focus == .Menu || m.focus == .Sub)
+	pv := m.focus == .Menu ? m.cur : m.open
+	pv_name := pv < len(m.sections) ? m.sections[pv].name : ""
+
+	// ---- header: crumb · query · count
+	hh := 56 * S
+	crumb, ph, count: string
+	switch m.focus {
+	case .Menu:
+		crumb = sc ? "SHORTCUTS" : "MENU"
+		ph = sc ? "Press a letter   / to search" : "Search…   g␣ web   = calc"
+		count = sc ? "" : fmt.tprintf("%d items", len(m.shown_sections))
+	case .Sub:
+		crumb = fmt.tprintf("%s › %s", sc ? "SHORTCUTS" : "MENU", strings.to_upper(pv_name, context.temp_allocator))
+		ph = sc ? "Press a number   / to search" : fmt.tprintf("Search %s…", pv_name)
+		count = sc ? "" : fmt.tprintf("%d actions", len(m.shown_actions))
+	case .View:
+		v := m.views[m.view]
+		crumb = strings.to_upper(fmt.tprintf("%s › %s", pv_name, v.title), context.temp_allocator)
+		ph = fmt.tprintf("Filter %ss…", strings.to_lower(v.title, context.temp_allocator))
+		count = fmt.tprintf("%d %ss", len(m.shown_items), strings.to_lower(v.title, context.temp_allocator))
+	case .Web:
+		crumb, ph = "g DUCKDUCKGO", "Search the web…"
+		count = q_of(a) != "" ? "Enter to open" : ""
+	case .Calc:
+		crumb, ph = "= CALC", "sqrt(2) * 15"
+	}
+	cx := x0 + 16 * S
+	cw := tw(m.f_small, crumb) + 16 * S
+	chh := 24 * S
+	fill_rect(cv, cx, y + (hh - chh) / 2, cw, chh, argb(acc, 0xff))
+	text_in(cv, m.f_small, crumb, cx + 8 * S, y + (hh - chh) / 2, chh, argb(bg, 0xff))
+	qx := cx + cw + 12 * S
+	cnt_w := count != "" ? tw(m.f_small, count) : 0
+	if cnt_w > 0 do text_in(cv, m.f_small, count, x1 - 16 * S - cnt_w, y, hh, argb(dim, 0xff))
+	qclip := x1 - 16 * S - cnt_w - 12 * S
+	q := string(a.query[:])
+	if q == "" do text_in(cv, m.f_big, ph, qx, y, hh, argb(dim, 0xff), qclip)
+	else do text_in(cv, m.f_big, q, qx, y, hh, argb(fgb, 0xff), qclip)
+	if !sc {
+		qs := shape(m.f_big, q)
+		cur_cp := utf8.rune_count_in_string(string(a.query[:a.cursor]))
+		caret := qx + int(qs.cp_x[min(cur_cp, len(qs.cp_x) - 1)])
+		fill_rect(cv, caret, y + (hh - int(m.f_big.line_h)) / 2, max(S, 2), int(m.f_big.line_h), argb(acc, 0xff))
+	}
+	y += hh
+	fill_rect(cv, x0, y, x1 - x0, S, sep)
+	y += S
+
+	// ---- footer: key hints (or a toast) · brand
+	fh := 40 * S
+	fy := cv.h - B - fh
+	fill_rect(cv, x0, fy, x1 - x0, S, sep)
+	if m.toast != "" {
+		text_in(cv, m.f_small, m.toast, x0 + 16 * S, fy, fh, argb(acc, 0xff), x1 - 60 * S)
+	} else {
+		hints: [][2]string
+		switch {
+		case sc && m.focus == .Menu: hints = {{"a–z", "Open"}, {"/", "Search"}, {"Esc", "Close"}}
+		case sc: hints = {{"1–9", "Run"}, {"⌫", "Back"}, {"/", "Search"}, {"Esc", "Back"}}
+		case m.focus == .Menu: hints = {{"↑↓", "Move"}, {"→ ↵", "Open"}, {"Esc", "Shortcuts"}}
+		case m.focus == .Sub: hints = {{"↑↓", "Move"}, {"↵", "Run"}, {"← ⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
+		case m.focus == .Web: hints = {{"↑↓", "Bang"}, {"↵", "Open in browser"}, {"⌫", "Exit mode"}}
+		case m.focus == .Calc: hints = {{"↵", "Copy result"}, {"⌫", "Exit mode"}, {"Esc", "Back"}}
+		case m.views[m.view].name == "wall": hints = {{"←→↑↓", "Move"}, {"↵", "Set wallpaper"}, {"⌫", "Back"}}
+		case: hints = {{"↑↓", "Move"}, {"↵", "Apply"}, {"⌫", "Back"}}
+		}
+		hx := x0 + 16 * S
+		for h in hints {
+			hx += kbd(cv, a, h[0], hx, fy + fh / 2, S) + 6 * S
+			text_in(cv, m.f_small, h[1], hx, fy, fh, argb(dim, 0xff))
+			hx += tw(m.f_small, h[1]) + 16 * S
+		}
+	}
+	text_in(cv, m.f_small, "k4", x1 - 16 * S - tw(m.f_small, "k4"), fy, fh, argb(acc, 0xff))
+
+	body := [4]int{x0, y, x1 - x0, fy - y}
+	switch m.focus {
+	case .Menu, .Sub: draw_panes(a, cv, S, body, sc)
+	case .View: draw_view(a, cv, S, body)
+	case .Web: draw_web(a, cv, S, body)
+	case .Calc: draw_calc(a, cv, S, body)
+	}
+}
+
+@(private)
+draw_panes :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
+	m := a.menu
+	t := a.theme
+	bg, fg, fgb, dim, acc := t.bg, t.fg, t.fg_bright, t.fg_dim, t.accent
+	x0, by, bw, bh := body[0], body[1], body[2], body[3]
+	x1, fy := x0 + bw, by + bh
+	lw := 250 * S
+	fill_rect(cv, x0 + lw, by, S, bh, argb(mix(bg, fg, 0.12), 0xff))
+
+	// left: sections
+	ry, rh := by + 6 * S, 28 * S
+	if len(m.shown_sections) == 0 do text_in(cv, m.f_body, "No match", x0 + 14 * S, ry + 4 * S, rh, argb(dim, 0xff))
+	for i in m.shown_sections {
+		if ry + rh > fy do break
+		s := m.sections[i]
+		on := i == (m.focus == .Menu ? m.cur : m.open)
+		strong := on && m.focus == .Menu
+		col := fg
+		if strong { fill_rect(cv, x0, ry, lw, rh, argb(acc, 0xff)); col = bg }
+		else if on { fill_rect(cv, x0, ry, lw, rh, argb(t.selection, 0xff)); col = fgb }
+		tx := x0 + 14 * S
+		if s.icon != "" do text_in(cv, m.f_body, s.icon, tx, ry, rh, argb(col, 0xff))
+		tx += 15 * S + 12 * S
+		key := sc ? strings.to_lower(s.key, context.temp_allocator) : s.key
+		kbg, kfg := sc ? (strong ? bg : acc) : bg, sc ? (strong ? acc : bg) : (strong ? bg : dim)
+		kw := badge(cv, m.f_tiny, key, x0 + lw - 14 * S, ry, rh, S, kbg, kfg, sc)
+		text_in(cv, m.f_body, s.name, tx, ry, rh, argb(col, 0xff), x0 + lw - 14 * S - kw - 8 * S)
+		ry += rh
+	}
+
+	// right: title, Alt+key, description, actions
+	pv := m.focus == .Menu ? m.cur : m.open
+	if pv < 0 || pv >= len(m.sections) do return
+	s := &m.sections[pv]
+	px := x0 + lw + S
+	py := by + 16 * S
+	tf := m.f_title
+	draw_text_f(cv, tf, s.name, px + 20 * S, py, argb(m.focus == .Sub ? acc : fgb, 0xff))
+	if s.key != "" {
+		hint := sc ? fmt.tprintf("press %s", strings.to_lower(s.key, context.temp_allocator)) : fmt.tprintf("Alt+%s", s.key)
+		draw_text_f(cv, m.f_tiny, hint, px + 20 * S + tw(tf, s.name) + 12 * S, py + int(tf.ascent - m.f_tiny.ascent), argb(dim, 0xff))
+	}
+	py += int(tf.line_h) + 4 * S
+	if s.desc != "" {
+		draw_text_f(cv, m.f_small, s.desc, px + 20 * S, py, argb(dim, 0xff), nil, 0, x1 - 20 * S)
+		py += int(m.f_small.line_h) + 14 * S
+	}
+	ah := 34 * S
+	tip_h := m.focus == .Menu && !sc && q_of(a) == "" ? 28 * S : 0
+	switch s.load.state {
+	case .Lazy, .Loading:
+		text_in(cv, m.f_body, "Loading…", px + 20 * S, py, ah, argb(dim, 0xff))
+	case .Failed:
+		text_in(cv, m.f_body, "Could not load this section", px + 20 * S, py, ah, argb(dim, 0xff))
+	case .Ready:
+		if len(m.shown_actions) == 0 {
+			text_in(cv, m.f_body, len(s.actions) == 0 ? "Nothing here" : "No match", px + 20 * S, py, ah, argb(dim, 0xff))
+		}
+		visible := max((fy - 8 * S - tip_h - py) / ah, 1)
+		if m.focus == .Sub {
+			if m.si < m.scroll do m.scroll = m.si
+			if m.si >= m.scroll + visible do m.scroll = m.si - visible + 1
+		} else do m.scroll = 0
+		for j in m.scroll ..< min(m.scroll + visible, len(m.shown_actions)) {
+			act := s.actions[m.shown_actions[j]]
+			on := m.focus == .Sub && j == m.si
+			lc, mc, arrow := m.focus == .Sub ? fgb : fg, dim, mix(bg, fg, 0.35)
+			if on { fill_rect(cv, px, py, x1 - px, ah, argb(acc, 0xff)); lc, mc, arrow = bg, bg, bg }
+			num := sc && m.focus == .Sub && j < 9
+			mark := num ? fmt.tprintf("%d", j + 1) : (act.view != "" ? "»" : "›")
+			mx := px + 20 * S
+			if num do badge(cv, m.f_tiny, mark, mx + 16 * S, py, ah, S, on ? bg : acc, on ? acc : bg, true)
+			else do text_in(cv, m.f_body, mark, mx + 4 * S, py, ah, argb(arrow, 0xff))
+			mw := act.meta != "" ? tw(m.f_small, act.meta) : 0
+			lx := mx + 16 * S + 12 * S
+			text_in(cv, m.f_body, act.label, lx, py, ah, argb(lc, 0xff), x1 - 20 * S - mw - 12 * S)
+			if mw > 0 do text_in(cv, m.f_small, act.meta, x1 - 20 * S - mw, py, ah, argb(mc, 0xff))
+			py += ah
+		}
+	}
+	if tip_h > 0 {
+		tx := px + 20 * S
+		ty := fy - 8 * S - tip_h
+		tips := [][2]string{{"g␣", " DuckDuckGo"}, {"=", " Calculator"}, {"Esc", " Shortcuts"}}
+		for tip in tips {
+			text_in(cv, m.f_small, tip[0], tx, ty, tip_h, argb(acc, 0xff)); tx += tw(m.f_small, tip[0])
+			text_in(cv, m.f_small, tip[1], tx, ty, tip_h, argb(dim, 0xff)); tx += tw(m.f_small, tip[1]) + 20 * S
+		}
+	}
+}
+
+@(private)
+draw_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
+	m := a.menu
+	t := a.theme
+	bg, fg, fgb, dim, acc := t.bg, t.fg, t.fg_bright, t.fg_dim, t.accent
+	x0, by, bw, bh := body[0], body[1], body[2], body[3]
+	x1, fy := x0 + bw, by + bh
+	v := &m.views[m.view]
+	grid := v.name == "wall"
+	pad := 20 * S
+	py := by + 16 * S
+	draw_text_f(cv, m.f_title, v.title, x0 + pad, py, argb(acc, 0xff))
+	draw_text_f(cv, m.f_small, v.subtitle, x0 + pad + tw(m.f_title, v.title) + 12 * S, py + int(m.f_title.ascent - m.f_small.ascent), argb(dim, 0xff), nil, 0, x1 - pad)
+	py += int(m.f_title.line_h) + (grid ? 12 : 14) * S
+	if v.load.state != .Ready {
+		text_in(cv, m.f_body, v.load.state == .Failed ? "Could not load" : "Loading…", x0 + pad, py, 34 * S, argb(dim, 0xff))
+		return
+	}
+	if len(m.shown_items) == 0 {
+		text_in(cv, m.f_body, grid ? "No wallpaper matches" : "No theme matches", x0 + pad, py, 34 * S, argb(dim, 0xff))
+		return
+	}
+	if grid {
+		cols, gx, gy := 4, 14 * S, 18 * S
+		tile_w := (bw - 2 * pad - (cols - 1) * gx) / cols
+		tile_h := 100 * S
+		cell_h := tile_h + 8 * S + int(m.f_small.line_h) + gy
+		rows_vis := max((fy - 8 * S - py + gy) / cell_h, 1)
+		row := m.si / cols
+		if row < m.scroll do m.scroll = row
+		if row >= m.scroll + rows_vis do m.scroll = row - rows_vis + 1
+		for j in m.scroll * cols ..< min((m.scroll + rows_vis) * cols, len(m.shown_items)) {
+			it := v.items[m.shown_items[j]]
+			c, r := j % cols, j / cols - m.scroll
+			tx := x0 + pad + c * (tile_w + gx)
+			ty := py + r * cell_h
+			on := j == m.si
+			if on do rounded_rect(cv, tx - 4 * S, ty - 4 * S, tile_w + 8 * S, tile_h + 8 * S, 0, 0, f32(2 * S), argb(acc, 0xff))
+			fill_rect(cv, tx, ty, tile_w, tile_h, argb(mix(bg, fg, 0.08), 0xff))
+			if it.image != "" {
+				img := image_cover(a, it.image, tile_w, tile_h)
+				if img.ok do blit_image(cv, img.px, img.w, img.h, tx, ty)
+			}
+			ly := ty + tile_h + 8 * S
+			tag_w := it.current ? tw(m.f_small, "current") : 0
+			draw_text_f(cv, m.f_small, it.label, tx, ly, argb(on ? fgb : fg, 0xff), nil, 0, tx + tile_w - tag_w - 6 * S)
+			if it.current do draw_text_f(cv, m.f_small, "current", tx + tile_w - tag_w, ly, argb(acc, 0xff))
+		}
+		return
+	}
+	rh := 34 * S
+	visible := max((fy - 8 * S - py) / rh, 1)
+	if m.si < m.scroll do m.scroll = m.si
+	if m.si >= m.scroll + visible do m.scroll = m.si - visible + 1
+	for j in m.scroll ..< min(m.scroll + visible, len(m.shown_items)) {
+		it := v.items[m.shown_items[j]]
+		on := j == m.si
+		lc, mc := fgb, dim
+		if on { fill_rect(cv, x0, py, bw, rh, argb(acc, 0xff)); lc, mc = bg, bg }
+		tag_w := it.current ? tw(m.f_small, "current") : 0
+		text_in(cv, m.f_row, it.label, x0 + pad, py, rh, argb(lc, 0xff), x1 - pad - tag_w - 12 * S)
+		if it.current do text_in(cv, m.f_small, "current", x1 - pad - tag_w, py, rh, argb(mc, 0xff))
+		py += rh
+	}
+}
+
+@(private)
+draw_web :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
+	m := a.menu
+	t := a.theme
+	bg, fgb, dim, acc := t.bg, t.fg_bright, t.fg_dim, t.accent
+	x0, by, bw := body[0], body[1], body[2]
+	x1 := x0 + bw
+	py := by + 12 * S
+	rows := web_rows(a)
+	if len(rows) == 0 {
+		text_in(cv, m.f_body, "Type a query. Prefix a !bang to search a site directly.", x0 + 20 * S, py, 34 * S, argb(dim, 0xff))
+		return
+	}
+	for r, j in rows {
+		h := (j == 0 ? 48 : 36) * S
+		on := j == m.si
+		lc, tc, mc := fgb, acc, dim
+		if on { fill_rect(cv, x0, py, bw, h, argb(acc, 0xff)); lc, tc, mc = bg, bg, bg }
+		text_in(cv, m.f_small, r.tag, x0 + 20 * S, py, h, argb(tc, 0xff))
+		mw := tw(m.f_small, r.meta)
+		text_in(cv, m.f_row, r.label, x0 + 20 * S + 40 * S + 14 * S, py, h, argb(lc, 0xff), x1 - 20 * S - mw - 14 * S)
+		text_in(cv, m.f_small, r.meta, x1 - 20 * S - mw, py, h, argb(mc, 0xff))
+		py += h
+	}
+}
+
+@(private)
+draw_calc :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
+	m := a.menu
+	t := a.theme
+	bg, fg, fgb, dim, acc := t.bg, t.fg, t.fg_bright, t.fg_dim, t.accent
+	x0, by, bw, bh := body[0], body[1], body[2], body[3]
+	pad := 20 * S
+	x, y, w := x0 + pad, by + pad, bw - 2 * pad
+	q := q_of(a)
+	out, ok := logic.calc_eval(q)
+	if !ok do out = q != "" ? "…" : "0"
+	box_h := 22 * S * 2 + int(m.f_small.line_h) + 8 * S + int(m.f_huge.line_h)
+	rounded_rect(cv, x, y, w, box_h, 0, argb(mix(bg, fg, 0.05), 0xff), f32(S), argb(mix(bg, fg, 0.18), 0xff))
+	draw_text_f(cv, m.f_small, q != "" ? q : "Type an expression", x + 24 * S, y + 22 * S, argb(dim, 0xff), nil, 0, x + w - 24 * S)
+	draw_text_f(cv, m.f_huge, out, x + 24 * S, y + 22 * S + int(m.f_small.line_h) + 8 * S, argb(ok ? acc : mix(bg, fg, 0.3), 0xff), nil, 0, x + w - 24 * S)
+	y += box_h + 14 * S + 6 * S
+	draw_text_f(cv, m.f_tiny, "HISTORY", x, y, argb(dim, 0xff))
+	y += int(m.f_tiny.line_h) + 14 * S
+	if len(m.history) == 0 {
+		draw_text_f(cv, m.f_body, "Press Enter to copy a result; it lands here.", x, y, argb(dim, 0xff))
+	}
+	for h in m.history {
+		r := fmt.tprintf("= %s", h[1])
+		text_in(cv, m.f_row, h[0], x, y, 26 * S, argb(fg, 0xff), x + w - tw(m.f_row, r) - 12 * S)
+		text_in(cv, m.f_row, r, x + w - tw(m.f_row, r), y, 26 * S, argb(fgb, 0xff))
+		y += 26 * S
+	}
+	note := "Supports + − × / ^ % ( ), 0x hex, pi, e, sqrt sin cos tan log ln abs round"
+	draw_text_f(cv, m.f_small, note, x, by + bh - pad - int(m.f_small.line_h), argb(dim, 0xff), nil, 0, x + w)
+}
+
+// ---------- setup ----------
+
+menu_setup :: proc(a: ^App, data: string) {
+	m := new(Menu)
+	a.menu = m
+	menu_parse(m, data)
+	base := &a.font
+	m.f_body = font_sized(base, 13)
+	m.f_small = font_sized(base, 12)
+	m.f_tiny = font_sized(base, 11)
+	m.f_big = font_sized(base, 17)
+	m.f_row = font_sized(base, 14)
+	m.f_huge = font_sized(base, 44)
+	m.f_title = font_sized(base, 18)
+	if bold, ok := bold_font(a, 18); ok do m.f_title = bold
+	append(&a.fonts, m.f_body, m.f_small, m.f_tiny, m.f_big, m.f_row, m.f_huge, m.f_title)
+	a.width, a.height = MENU_W, MENU_H
+	menu_refilter(a)
+	menu_start_loaders(m)
+}
+
+@(private)
+bold_font :: proc(a: ^App, px: f32) -> (^Font, bool) {
+	f := new(Font)
+	if !font_load(f, strings.concatenate({a.family, ":weight=bold"}, context.temp_allocator), px, true) do return nil, false
+	f.fallback = a.font.fallback
+	return f, true
+}

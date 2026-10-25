@@ -88,6 +88,7 @@ set_scale :: proc(s: int) {
 	if s == W.scale do return
 	W.scale = s
 	font_resize(&W.app.font, W.app.font_px * f32(s))
+	for f in W.app.fonts do font_resize(f, f.base_px * f32(s))
 	W.dirty = true
 }
 surf_enter :: proc "c" (data: rawptr, s: ^wl.surface, o: ^wl.output) {
@@ -178,6 +179,7 @@ handle_keycode :: proc(code: u32) {
 	if W.state == nil do return
 	sym := state_key_get_one_sym(W.state, code)
 	ctrl := state_mod_name_is_active(W.state, "Control", XKB_STATE_MODS_EFFECTIVE) > 0
+	alt := state_mod_name_is_active(W.state, "Mod1", XKB_STATE_MODS_EFFECTIVE) > 0
 	buf: [64]u8
 	text: string
 	if W.compose != nil && !ctrl && compose_state_feed(W.compose, sym) == XKB_COMPOSE_FEED_ACCEPTED {
@@ -194,12 +196,12 @@ handle_keycode :: proc(code: u32) {
 	}
 	k := keysym_to_key(sym)
 	ch := rune(keysym_to_utf32(sym))
-	if k == .None && !ctrl {
+	if k == .None && !ctrl && !alt {
 		n := state_key_get_utf8(W.state, code, &buf[0], len(buf))
 		text = string(buf[:max(n, 0)])
 	}
-	if ctrl && ch >= 'A' && ch <= 'Z' do ch += 'a' - 'A'
-	if app_key(W.app, k, ctrl, ch, text) do W.dirty = true
+	if (ctrl || alt) && ch >= 'A' && ch <= 'Z' do ch += 'a' - 'A'
+	if app_key(W.app, k, ctrl, ch, text, alt) do W.dirty = true
 }
 
 // ---------- buffers and drawing ----------
@@ -320,13 +322,17 @@ run_wayland :: proc(a: ^App) -> bool {
 			timeout = i32(max(time.duration_milliseconds(left), 0))
 		}
 		if W.dirty && !W.frame_pending && W.configured do timeout = 0
-		fds := []linux.Poll_Fd{{fd = fd, events = {.IN}}}
-		n, _ := linux.poll(fds, timeout)
-		if n > 0 {
+		fds := make([dynamic]linux.Poll_Fd, 0, 8, context.temp_allocator)
+		append(&fds, linux.Poll_Fd{fd = fd, events = {.IN}})
+		if a.menu != nil do menu_poll_fds(a.menu, &fds) // background section loaders
+		n, _ := linux.poll(fds[:], timeout)
+		if n > 0 && .IN in fds[0].revents {
 			if i(wl.display_read_events(W.display)) < 0 { a.exit = 1; break }
 		} else {
 			wl.display_cancel_read(W.display)
 		}
+		for pf in fds[1:] do if pf.revents != {} && menu_on_readable(a, pf.fd) do W.dirty = true
+		free_all(context.temp_allocator)
 		if i(wl.display_dispatch_pending(W.display)) < 0 { a.exit = 1; break }
 		if W.repeat_key != 0 && time.tick_diff(W.repeat_at, time.tick_now()) >= 0 {
 			handle_keycode(W.repeat_key)

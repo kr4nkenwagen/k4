@@ -2,6 +2,7 @@ package k4
 
 import "base:runtime"
 import "core:c"
+import "core:fmt"
 import "core:math"
 import "core:os"
 import "core:strconv"
@@ -10,27 +11,36 @@ import "core:unicode/utf8"
 import kbts "vendor_k4:kb_text_shape"
 
 // A font face: kb_text_shape shapes (ligatures, kerning), stb_truetype rasterises.
-// Glyphs the main font lacks (id 0) come from a fallback face, unshaped.
+// Glyphs the main font lacks (id 0) come from fallback faces, unshaped: for each missing
+// character fontconfig is asked which installed font has it (cached per character).
 Font :: struct {
 	data:      []u8,
 	info:      rawptr,
 	shaper:    ^kbts.shape_context,
-	px:        f32, // em size in pixels
+	px:        f32, // em size in pixels (base_px * buffer scale)
+	base_px:   f32, // logical em size
+	index:     int,
 	scale:     f32, // font units -> pixels
 	ascent:    f32,
 	descent:   f32,
 	line_h:    f32,
-	fallback:  ^Font,
+	fallback:  ^Fallbacks, // shared by every size of every font
 	glyphs:    map[Glyph_Key]Glyph,
 	shaped:    map[string]Shaped,
 	alloc:     runtime.Allocator, // kept alive for kb_text_shape
 }
 
 Glyph_Key :: struct { face: u8, id: u16, sub: u8 }
+
+Face :: struct { data: []u8, info: rawptr, path: string }
+Fallbacks :: struct {
+	faces:  [dynamic]Face,
+	misses: map[rune]bool, // characters no installed font has
+}
 Glyph :: struct { w, h, xoff, yoff: i32, alpha: []u8 }
 
 Shaped_Glyph :: struct {
-	face:     u8, // 0 main, 1 fallback
+	face:     u8, // 0 the font itself, n = fallback face n-1
 	id:       u16,
 	x:        f32, // pen position in px
 	cp_index: i32,
@@ -58,8 +68,10 @@ font_load :: proc(f: ^Font, family: string, px: f32, shape: bool) -> bool {
 	data, err := os.read_entire_file(path, context.allocator)
 	if err != nil do return false
 	f.data = data
+	f.index = index
 	f.info = k4_font_new(raw_data(data), c.int(index))
 	if f.info == nil do return false
+	f.base_px = px
 	font_resize(f, px)
 	if shape {
 		f.alloc = context.allocator
@@ -71,14 +83,38 @@ font_load :: proc(f: ^Font, family: string, px: f32, shape: bool) -> bool {
 }
 
 @(private)
-fallback_glyph :: proc(f: ^Font, cp: rune) -> (id: u16, adv: f32, ok: bool) {
+fallback_glyph :: proc(f: ^Font, cp: rune) -> (face: u8, id: u16, adv: f32, ok: bool) {
 	fb := f.fallback
-	if fb == nil || fb.info == nil do return
-	g := k4_font_glyph_index(fb.info, c.int(cp))
-	if g == 0 do return
-	a, l: c.int
-	k4_font_glyph_hmetrics(fb.info, g, &a, &l)
-	return u16(g), f32(a) * fb.scale, true
+	if fb == nil || cp < 0x20 do return
+	find :: proc(f: ^Font, fb: ^Fallbacks, cp: rune) -> (u8, u16, f32, bool) {
+		for fc, i in fb.faces {
+			g := k4_font_glyph_index(fc.info, c.int(cp))
+			if g == 0 do continue
+			a, l: c.int
+			k4_font_glyph_hmetrics(fc.info, g, &a, &l)
+			return u8(i + 1), u16(g), f32(a) * k4_font_scale_em(fc.info, f.px), true
+		}
+		return 0, 0, 0, false
+	}
+	if face, id, adv, ok := find(f, fb, cp); ok do return face, id, adv, true
+	if fb.misses[cp] || len(fb.faces) >= 250 do return
+	// ask fontconfig for a font that covers this character
+	pattern := fmt.tprintf("sans-serif:charset=%x", u32(cp))
+	path, index, found := font_file(pattern)
+	if found {
+		known := false
+		for fc in fb.faces do if fc.path == path { known = true; break }
+		if !known {
+			if data, err := os.read_entire_file(path, context.allocator); err == nil {
+				if info := k4_font_new(raw_data(data), c.int(index)); info != nil {
+					append(&fb.faces, Face{data, info, strings.clone(path)})
+				}
+			}
+		}
+		if face, id, adv, ok := find(f, fb, cp); ok do return face, id, adv, true
+	}
+	fb.misses[cp] = true
+	return
 }
 
 // Shaped text is cached per string: rows rarely change between frames.
@@ -95,8 +131,8 @@ shape :: proc(f: ^Font, text: string) -> Shaped {
 			run := run
 			for g in kbts.GlyphIteratorNext(&run.Glyphs) {
 				if g.Id == 0 {
-					if id, adv, ok := fallback_glyph(f, g.Codepoint); ok {
-						append(&out, Shaped_Glyph{1, id, x, i32(g.UserIdOrCodepointIndex)})
+					if face, id, adv, ok := fallback_glyph(f, g.Codepoint); ok {
+						append(&out, Shaped_Glyph{face, id, x, i32(g.UserIdOrCodepointIndex)})
 						x += adv
 						continue
 					}
@@ -111,8 +147,8 @@ shape :: proc(f: ^Font, text: string) -> Shaped {
 			g := k4_font_glyph_index(f.info, c.int(r))
 			a, l: c.int
 			if g == 0 {
-				if id, adv, ok := fallback_glyph(f, r); ok {
-					append(&out, Shaped_Glyph{1, id, x, i}); x += adv; i += 1; continue
+				if face, id, adv, ok := fallback_glyph(f, r); ok {
+					append(&out, Shaped_Glyph{face, id, x, i}); x += adv; i += 1; continue
 				}
 			}
 			k4_font_glyph_hmetrics(f.info, g, &a, &l)
@@ -143,10 +179,14 @@ glyph_bitmap :: proc(f: ^Font, face: u8, id: u16, x: f32) -> (Glyph, f32) {
 	frac := x - math.floor(x)
 	sub := u8(frac * 4) & 3
 	key := Glyph_Key{face, id, sub}
-	src := face == 1 && f.fallback != nil ? f.fallback : f
 	if g, ok := f.glyphs[key]; ok do return g, math.floor(x)
+	info, scale := f.info, f.scale
+	if face > 0 && f.fallback != nil && int(face) <= len(f.fallback.faces) {
+		fc := f.fallback.faces[face - 1]
+		info, scale = fc.info, k4_font_scale_em(fc.info, f.px)
+	}
 	w, h, xo, yo: c.int
-	bm := k4_font_glyph_bitmap(src.info, src.scale, f32(sub) / 4, c.int(id), &w, &h, &xo, &yo)
+	bm := k4_font_glyph_bitmap(info, scale, f32(sub) / 4, c.int(id), &w, &h, &xo, &yo)
 	g := Glyph{w = i32(w), h = i32(h), xoff = i32(xo), yoff = i32(yo)}
 	if bm != nil {
 		g.alpha = make([]u8, int(w * h))
@@ -172,5 +212,22 @@ font_resize :: proc(f: ^Font, px: f32) {
 	clear(&f.glyphs)
 	for k, sh in f.shaped { delete(k); delete(sh.glyphs); delete(sh.cp_x) }
 	clear(&f.shaped)
-	if f.fallback != nil do font_resize(f.fallback, px)
+}
+
+// Another size of the same face: shares the file and stb state, gets its own caches and shaper.
+font_sized :: proc(src: ^Font, px: f32) -> ^Font {
+	f := new(Font)
+	f.data = src.data
+	f.index = src.index
+	f.info = src.info
+	f.fallback = src.fallback
+	f.base_px = px
+	font_resize(f, px)
+	if src.shaper != nil {
+		f.alloc = context.allocator
+		fn, data_ptr := kbts.AllocatorFromOdinAllocator(&f.alloc)
+		f.shaper = kbts.CreateShapeContext(fn, data_ptr)
+		if f.shaper != nil do kbts.ShapePushFontFromMemory(f.shaper, f.data, c.int(f.index))
+	}
+	return f
 }

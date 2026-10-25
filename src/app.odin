@@ -30,6 +30,7 @@ Options :: struct {
 	scale:         int,    // dry runs only
 	theme_file:    string,
 	no_icons:      bool,
+	menu:          bool,
 }
 
 Icon :: struct { px: []u32, w, h: int, ok: bool }
@@ -38,7 +39,6 @@ App :: struct {
 	opts:     Options,
 	theme:    logic.Theme,
 	font:     Font,
-	fallback: Font,
 	rows:     []logic.Row,
 	matches:  [dynamic]logic.Match,
 	query:    [dynamic]u8,
@@ -47,6 +47,9 @@ App :: struct {
 	scroll:   int,
 	icons:    map[string]Icon,
 	font_px:  f32, // logical em size; the font is resized to font_px * scale for drawing
+	fonts:    [dynamic]^Font, // extra sizes (menu mode), resized with the buffer scale
+	family:   string,
+	menu:     ^Menu,
 	has_icons: bool,
 	// layout in logical pixels
 	pad, row_h, prompt_h, icon_px, gap, width, height, shown: int,
@@ -57,6 +60,7 @@ App :: struct {
 }
 
 app_rematch :: proc(a: ^App) {
+	if a.menu != nil { menu_on_query(a); return }
 	logic.match_rows(a.rows, string(a.query[:]), &a.matches)
 	a.selected = 0
 	a.scroll = 0
@@ -87,8 +91,14 @@ app_layout :: proc(a: ^App) {
 }
 
 @(private)
-icon_get :: proc(a: ^App, path: string, size: int) -> ^Icon {
-	key := fmt.tprintf("%d:%s", size, path)
+icon_get :: proc(a: ^App, path: string, size: int) -> ^Icon { return image_scaled(a, path, size, size, false) }
+
+// The picture scaled to cover a w x h tile (centre crop), like CSS object-fit: cover.
+image_cover :: proc(a: ^App, path: string, w, h: int) -> ^Icon { return image_scaled(a, path, w, h, true) }
+
+@(private)
+image_scaled :: proc(a: ^App, path: string, tw, th: int, cover: bool) -> ^Icon {
+	key := fmt.tprintf("%d:%d:%v:%s", tw, th, cover, path)
 	if ic, ok := &a.icons[key]; ok do return ic
 	a.icons[strings.clone(key)] = Icon{}
 	ic := &a.icons[key]
@@ -98,14 +108,18 @@ icon_get :: proc(a: ^App, path: string, size: int) -> ^Icon {
 	data := k4_image_load(cpath, &w, &h)
 	if data == nil do return ic
 	defer k4_free(data)
-	// fit inside size x size, box-filter downscale, premultiply
-	s := f32(size) / f32(max(w, h))
+	// fit inside (or cover) tw x th, box-filter downscale, premultiply
+	s := cover ? max(f32(tw) / f32(w), f32(th) / f32(h)) : min(f32(tw) / f32(w), f32(th) / f32(h))
 	ow, oh := max(int(f32(w) * s), 1), max(int(f32(h) * s), 1)
+	ox0, oy0 := 0, 0
+	if cover { ox0, oy0 = (ow - tw) / 2, (oh - th) / 2; ow, oh = tw, th }
 	px := make([]u32, ow * oh)
 	for oy in 0 ..< oh {
-		sy0, sy1 := int(f32(oy) / s), max(int(f32(oy + 1) / s), int(f32(oy) / s) + 1)
+		syf := f32(oy + oy0)
+		sy0, sy1 := int(syf / s), max(int((syf + 1) / s), int(syf / s) + 1)
 		for ox in 0 ..< ow {
-			sx0, sx1 := int(f32(ox) / s), max(int(f32(ox + 1) / s), int(f32(ox) / s) + 1)
+			sxf := f32(ox + ox0)
+			sx0, sx1 := int(sxf / s), max(int((sxf + 1) / s), int(sxf / s) + 1)
 			r, g, b, al, n: u32
 			for sy in sy0 ..< min(sy1, int(h)) do for sx in sx0 ..< min(sx1, int(w)) {
 				i := (sy * int(w) + sx) * 4
@@ -123,7 +137,10 @@ icon_get :: proc(a: ^App, path: string, size: int) -> ^Icon {
 
 @(private)
 draw_text :: proc(cv: ^Canvas, a: ^App, text: string, x, y_top, scale: int, color: u32, hl: []int = nil, hl_color: u32 = 0, clip_x1 := max(int)) {
-	f := &a.font
+	draw_text_f(cv, &a.font, text, x, y_top, color, hl, hl_color, clip_x1)
+}
+
+draw_text_f :: proc(cv: ^Canvas, f: ^Font, text: string, x, y_top: int, color: u32, hl: []int = nil, hl_color: u32 = 0, clip_x1 := max(int)) {
 	s := shape(f, text)
 	baseline := y_top + int(f.ascent)
 	for g, gi in s.glyphs {
@@ -139,6 +156,7 @@ draw_text :: proc(cv: ^Canvas, a: ^App, text: string, x, y_top, scale: int, colo
 }
 
 app_draw :: proc(a: ^App, cv: ^Canvas, scale: int) {
+	if a.menu != nil { menu_draw(a, cv, scale); return }
 	t := a.theme
 	S :: proc(v, scale: int) -> int { return v * scale }
 	canvas_clear(cv)
@@ -235,7 +253,13 @@ next_cp :: proc(s: []u8, i: int) -> int {
 }
 
 // Returns true when the frame needs redrawing.
-app_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> bool {
+app_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string, alt := false) -> bool {
+	if a.menu != nil do return menu_key(a, k, ctrl, alt, ch, text)
+	return app_edit_key(a, k, ctrl, ch, text)
+}
+
+// dmenu keys, and the query editing keys menu mode shares.
+app_edit_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> bool {
 	q := &a.query
 	if ctrl {
 		switch ch {
