@@ -10,7 +10,7 @@ cc=${CC:-cc}; ar=${AR:-ar}
 # The pinned compiler from mise.toml when mise is around (Ubuntu's apt "odin" is an unrelated
 # MRI tool, so a bare `odin` on PATH is not trusted there).
 MISE=$(command -v mise 2>/dev/null || true)
-for m in "$HOME/.local/bin/mise" "$HOME/.local/share/mise/bin/mise" /usr/bin/mise /usr/local/bin/mise; do
+for m in "$HOME/.local/bin/mise" "$HOME/.local/share/mise/bin/mise" /snap/bin/mise /usr/bin/mise /usr/local/bin/mise; do
   [ -n "$MISE" ] && break; [ -x "$m" ] && MISE=$m
 done
 if [ -n "$MISE" ]; then
