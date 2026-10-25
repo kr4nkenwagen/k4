@@ -9,10 +9,18 @@ cd "$(dirname "$0")"
 cc=${CC:-cc}; ar=${AR:-ar}
 # The pinned compiler from mise.toml when mise is around (Ubuntu's apt "odin" is an unrelated
 # MRI tool, so a bare `odin` on PATH is not trusted there).
-if command -v mise >/dev/null 2>&1; then
-  mise trust -q "$PWD/mise.toml" >/dev/null 2>&1 || true
-  mise install -q >/dev/null 2>&1 || mise install
-  odin() { mise exec -- odin "$@"; }
+MISE=$(command -v mise 2>/dev/null || true)
+for m in "$HOME/.local/bin/mise" "$HOME/.local/share/mise/bin/mise" /usr/bin/mise /usr/local/bin/mise; do
+  [ -n "$MISE" ] && break; [ -x "$m" ] && MISE=$m
+done
+if [ -n "$MISE" ]; then
+  "$MISE" trust -q "$PWD/mise.toml" >/dev/null 2>&1 || true
+  "$MISE" install -q odin >/dev/null 2>&1 || "$MISE" install odin   # only the compiler, not the user's global tools
+  odin() { "$MISE" exec -- odin "$@"; }
+elif ! command -v odin >/dev/null 2>&1 || odin version 2>&1 | grep -qv '^odin version'; then
+  echo "build.sh: needs mise to fetch the pinned Odin compiler:" >&2
+  echo "  curl -fsSL https://mise.run | sh    # installs ~/.local/bin/mise" >&2
+  exit 1
 fi
 mkdir -p lib vendor/kb_text_shape/lib
 if [ ! -f lib/k4c.a ] || [ csrc/k4c.c -nt lib/k4c.a ]; then
