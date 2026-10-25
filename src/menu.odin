@@ -3,6 +3,7 @@ package k4
 import "core:fmt"
 import "core:math"
 import "core:os"
+import "core:strconv"
 import "core:strings"
 import "core:sys/linux"
 import "core:unicode/utf8"
@@ -17,7 +18,9 @@ import "logic"
 //                                                     name, Enter opens that view instead. flags,
 //                                                     ';'-separated: stay (run via R and keep the
 //                                                     menu open), confirm=<title>|<body>,
-//                                                     jump=<section id>, app
+//                                                     jump=<section id>, app, slider=<0-100>
+//                                                     [step=<n>] (← → adjust; R runs with
+//                                                     K4_VALUE set to the new value)
 //   H <text>                                         a heading between actions (not selectable)
 //   R <shell command>                                runs "stay" actions: R <id>; its last stdout
 //                                                     line becomes the footer message, then the
@@ -32,6 +35,8 @@ Action :: struct {
 	id, label, meta, view: string,
 	heading: bool,
 	stay, app: bool,
+	slider: bool,
+	value, step: int,
 	jump: string,
 	confirm_title, confirm_body: string,
 }
@@ -81,6 +86,8 @@ Menu :: struct {
 	results:  [dynamic]Result,   // global search
 	run_cmd:  string,
 	runner:   Loader,            // the stay action in flight
+	slide_pending: bool,         // a slider moved while the runner was busy
+	slide_sec, slide_act: int,
 	pending:  Result,            // confirmation target
 	confirm_from: Focus,
 	cf:       int,               // 0 Yes, 1 No
@@ -129,6 +136,11 @@ action_from :: proc(f: []string) -> Action {
 		switch {
 		case flag == "stay": a.stay = true
 		case flag == "app": a.app = true
+		case strings.has_prefix(flag, "slider="):
+			a.slider, a.stay = true, true
+			if v, ok := strconv.parse_int(flag[7:]); ok do a.value = clamp(v, 0, 100)
+		case strings.has_prefix(flag, "step="):
+			if v, ok := strconv.parse_int(flag[5:]); ok do a.step = v
 		case strings.has_prefix(flag, "jump="): a.jump = strings.clone(flag[5:])
 		case strings.has_prefix(flag, "confirm="):
 			t := flag[8:]
@@ -196,6 +208,11 @@ menu_on_readable :: proc(a: ^App, fd: linux.Fd) -> bool {
 		for line in strings.split_lines_iterator(&text) do if strings.trim_space(line) != "" do last = line
 		if last != "" do m.toast = strings.clone(last)
 		m.runner = {}
+		if m.slide_pending {
+			m.slide_pending = false
+			execute(a, m.slide_sec, m.slide_act)
+			return true
+		}
 		menu_reload(m)
 		return true
 	}
@@ -508,12 +525,37 @@ execute :: proc(a: ^App, sec, idx: int) {
 	act := m.sections[sec].actions[idx]
 	if !act.stay || m.run_cmd == "" { finish(a, act.id); return }
 	if m.runner.state == .Loading do return
-	m.runner = Loader{cmd = strings.concatenate({m.run_cmd, " '", act.id, "'"}), state = .Lazy}
+	cmd := strings.concatenate({m.run_cmd, " '", act.id, "'"})
+	if act.slider do cmd = fmt.aprintf("K4_VALUE=%d %s", act.value, cmd)
+	m.runner = Loader{cmd = cmd, state = .Lazy}
 	saved := m.loading // the runner skips the section-loader cap, but counts while it runs
 	m.loading = 0
 	loader_start(m, &m.runner)
 	m.loading = saved + (m.runner.state == .Loading ? 1 : 0)
-	m.toast = strings.concatenate({act.label, "  …"})
+	m.toast = act.slider ? fmt.aprintf("%s  %d%%", act.label, act.value) : strings.concatenate({act.label, "  …"})
+}
+
+// ← → on a slider row: move the value now, apply it in the background (coalescing repeats).
+@(private)
+slide :: proc(a: ^App, d: int) -> bool {
+	m := a.menu
+	sec, idx := -1, -1
+	if m.focus == .Sub && m.si < len(m.sel_actions) do sec, idx = m.open, m.sel_actions[m.si]
+	else if searching(m, a) && m.si < len(m.results) && m.results[m.si].act >= 0 do sec, idx = m.results[m.si].sec, m.results[m.si].act
+	if sec < 0 do return false
+	act := &m.sections[sec].actions[idx]
+	if !act.slider do return false
+	step := act.step > 0 ? act.step : 5
+	nv := clamp(act.value + d * step, 0, 100)
+	if nv == act.value do return true
+	act.value = nv
+	if m.runner.state == .Loading {
+		m.slide_pending, m.slide_sec, m.slide_act = true, sec, idx
+		m.toast = fmt.aprintf("%s  %d%%", act.label, nv)
+	} else {
+		execute(a, sec, idx)
+	}
+	return true
 }
 
 @(private)
@@ -588,6 +630,7 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 			if m.focus == .Sub { m.focus, m.cur = .Menu, m.open; menu_refilter(a) } else { a.exit = 1; a.done = true }
 		case k == .Tab || text == "/":
 			m.shortcut = false; menu_refilter(a)
+		case (k == .Left || k == .Right) && m.focus == .Sub && slide(a, k == .Left ? -1 : 1):
 		case k == .Backspace || k == .Left:
 			if m.focus == .Sub { m.focus, m.cur = .Menu, m.open; menu_refilter(a) }
 		case k == .Down || text == "j": menu_move(a, 1)
@@ -612,6 +655,7 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 		return app_edit_key(a, k, ctrl, ch, text)
 	}
 	if m.focus == .View && (k == .Left || k == .Right) { menu_move(a, k == .Left ? -1 : 1); return true }
+	if (k == .Left || k == .Right) && (m.focus == .Sub || searching(m, a)) && slide(a, k == .Left ? -1 : 1) do return true
 	switch k {
 	case .Down: menu_move(a, m.focus == .View ? 4 : 1)
 	case .Up: menu_move(a, m.focus == .View ? -4 : -1)
@@ -755,6 +799,7 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		case m.focus == .Confirm: hints = {{"y", "Yes"}, {"n Esc", "No"}, {"← →", "Choose"}}
 		case srch: hints = {{"↑↓", "Move"}, {"↵", "Run"}, {"Esc", "Shortcuts"}}
 		case m.focus == .Menu: hints = {{"↑↓", "Move"}, {"→ ↵", "Open"}, {"type", "Search all"}, {"Esc", "Shortcuts"}}
+		case m.focus == .Sub && on_slider(m): hints = {{"↑↓", "Move"}, {"← →", "Adjust"}, {"⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
 		case m.focus == .Sub: hints = {{"↑↓", "Move"}, {"↵", "Run"}, {"← ⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
 		case m.focus == .Web: hints = {{"↑↓", "Bang"}, {"↵", "Open in browser"}, {"⌫", "Exit mode"}}
 		case m.focus == .Calc: hints = {{"↵", "Copy result"}, {"⌫", "Exit mode"}, {"Esc", "Back"}}
@@ -780,6 +825,11 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	case .Web: draw_web(a, cv, S, body)
 	case .Calc: draw_calc(a, cv, S, body)
 	}
+}
+
+@(private)
+on_slider :: proc(m: ^Menu) -> bool {
+	return m.focus == .Sub && m.si < len(m.sel_actions) && m.sections[m.open].actions[m.sel_actions[m.si]].slider
 }
 
 @(private)
@@ -882,8 +932,14 @@ draw_panes :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
 			meta := act.meta
 			if meta == "" && act.confirm_title != "" do meta = "asks first"
 			if meta == "" && act.jump != "" do meta = "→"
-			mw := meta != "" ? tw(m.f_small, meta) : 0
 			lx := mx + 16 * S + 12 * S
+			if act.slider {
+				sw := draw_slider(a, cv, S, act.value, x1 - 20 * S, py, ah, on)
+				text_in(cv, m.f_body, act.label, lx, py, ah, argb(lc, 0xff), x1 - 20 * S - sw - 12 * S)
+				py += ah
+				continue
+			}
+			mw := meta != "" ? tw(m.f_small, meta) : 0
 			text_in(cv, m.f_body, act.label, lx, py, ah, argb(lc, 0xff), x1 - 20 * S - mw - 12 * S)
 			if mw > 0 do text_in(cv, m.f_small, meta, x1 - 20 * S - mw, py, ah, argb(mc, 0xff))
 			py += ah
@@ -898,6 +954,26 @@ draw_panes :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
 			text_in(cv, m.f_small, tip[1], tx, ty, tip_h, argb(dim, 0xff)); tx += tw(m.f_small, tip[1]) + 20 * S
 		}
 	}
+}
+
+// The design's slider: a 120 px track with the accent fill, then the value (36 px, right-aligned).
+// Right-aligned at x_right; returns its width.
+@(private)
+draw_slider :: proc(a: ^App, cv: ^Canvas, S, value, x_right, y, h: int, on: bool) -> int {
+	m := a.menu
+	t := a.theme
+	tw_, th := 120 * S, 4 * S
+	vw := 36 * S
+	w := tw_ + 10 * S + vw
+	x := x_right - w
+	cy := y + (h - th) / 2
+	track, fill, txt := argb(mix(t.bg, t.fg, 0.18), 0xff), argb(t.accent, 0xff), argb(t.fg, 0xff)
+	if on do track, fill, txt = argb(mix(t.accent, t.bg, 0.45), 0xff), argb(t.bg, 0xff), argb(t.bg, 0xff)
+	rounded_rect(cv, x, cy, tw_, th, f32(2 * S), track)
+	if value > 0 do rounded_rect(cv, x, cy, max(tw_ * value / 100, th), th, f32(2 * S), fill)
+	pct := fmt.tprintf("%d%%", value)
+	text_in(cv, m.f_small, pct, x_right - tw(m.f_small, pct), y, h, txt)
+	return w
 }
 
 @(private)
@@ -933,6 +1009,13 @@ draw_results :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		x += 15 * S + 12 * S
 		tag_x := x1 - 20 * S - 90 * S
 		text_in(cv, m.f_tiny, tag, x1 - 20 * S - tw(m.f_tiny, tag), py, rh, argb(tc, 0xff))
+		if r.act >= 0 && sec.actions[r.act].slider {
+			meta = ""
+			sw := draw_slider(a, cv, S, sec.actions[r.act].value, tag_x - 12 * S, py, rh, on)
+			text_in(cv, m.f_row, label, x, py, rh, argb(lc, 0xff), tag_x - 24 * S - sw)
+			py += rh
+			continue
+		}
 		mw := meta != "" ? tw(m.f_small, meta) : 0
 		if mw > 0 do text_in(cv, m.f_small, meta, tag_x - 12 * S - mw, py, rh, argb(mc, 0xff))
 		text_in(cv, m.f_row, label, x, py, rh, argb(lc, 0xff), tag_x - 12 * S - mw - (mw > 0 ? 12 * S : 0))
