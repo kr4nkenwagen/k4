@@ -119,30 +119,13 @@ main :: proc() {
 	if !ok do os.exit(2)
 	a := new(App)
 	a.opts = opts
-
-	// theme
-	theme_path := opts.theme_file != "" ? opts.theme_file : state_file("theme/colors.toml")
-	a.theme = logic.DEFAULT_THEME
-	if data, err := os.read_entire_file(theme_path, context.temp_allocator); err == nil {
-		a.theme = logic.theme_from_colors(string(data))
-	}
-
-	// font: the desktop font chosen with sway-font-set, else monospace
-	family := opts.font
-	if family == "" {
-		if data, err := os.read_entire_file(state_file("font.name"), context.temp_allocator); err == nil {
-			family = strings.trim_space(string(data))
-		}
-	}
-	if family == "" do family = "monospace"
-	a.family = family
+	a.scale = 1
 	px := opts.font_pt * 4 / 3
 	a.font_px = px
-	if !font_load(&a.font, family, px, true) {
-		fmt.eprintfln("k4: cannot load font %q", family)
+	if !app_load_style(a, true) {
+		fmt.eprintfln("k4: cannot load font %q", a.family)
 		os.exit(2)
 	}
-	a.font.fallback = new(Fallbacks) // filled per missing character
 
 	// rows, or the menu tree
 	if opts.menu {
@@ -163,6 +146,7 @@ main :: proc() {
 		if a.menu != nil do menu_load_all(a) // a stay action started by the keys, and the reload after it
 		if a.menu == nil do app_move(a, opts.select)
 		s := opts.scale
+		a.scale = s
 		if s != 1 {
 			font_resize(&a.font, px * f32(s))
 			for f in a.fonts do font_resize(f, f.base_px * f32(s))
@@ -185,6 +169,35 @@ main :: proc() {
 	}
 	if a.exit == 0 do fmt.println(a.result)
 	os.exit(a.exit)
+}
+
+// The theme (colors.toml) and font (font.name) of the desktop, unless given as options. Called
+// at start and after every in-place menu action, which may have switched either.
+app_load_style :: proc(a: ^App, first: bool) -> bool {
+	theme_path := a.opts.theme_file != "" ? a.opts.theme_file : state_file("theme/colors.toml")
+	if first do a.theme = logic.DEFAULT_THEME
+	if data, err := os.read_entire_file(theme_path, context.temp_allocator); err == nil {
+		a.theme = logic.theme_from_colors(string(data))
+	}
+	family := a.opts.font
+	if family == "" {
+		if data, err := os.read_entire_file(state_file("font.name"), context.temp_allocator); err == nil {
+			family = strings.trim_space(string(data))
+		}
+	}
+	if family == "" do family = "monospace"
+	if !first && family == a.family do return true
+	f: Font
+	if !font_load(&f, family, a.font_px, true) {
+		if first do a.family = family
+		return false
+	}
+	f.fallback = first ? new(Fallbacks) : a.font.fallback // filled per missing character
+	a.font = f
+	a.family = strings.clone(family)
+	if a.scale > 1 do font_resize(&a.font, a.font_px * f32(a.scale))
+	if a.menu != nil do menu_fonts(a)
+	return true
 }
 
 // --keys: text is typed; <name> presses a key (see USAGE).
@@ -216,11 +229,13 @@ press_keys :: proc(a: ^App, keys: string) {
 					if !ctrl && !alt do text = tok
 				}
 				app_key(a, k, ctrl, ch, text, alt)
+				if a.menu != nil && a.opts.dry_run != "" do menu_load_all(a) // pages and runs a key started
 				continue
 			}
 		}
 		r, n := utf8.decode_rune_in_string(s)
 		app_key(a, .None, false, r, s[:n])
+		if a.menu != nil && a.opts.dry_run != "" do menu_load_all(a)
 		s = s[n:]
 	}
 }

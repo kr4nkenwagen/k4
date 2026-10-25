@@ -87,6 +87,7 @@ set_scale :: proc(s: int) {
 	s := max(s, 1)
 	if s == W.scale do return
 	W.scale = s
+	W.app.scale = s
 	font_resize(&W.app.font, W.app.font_px * f32(s))
 	for f in W.app.fonts do font_resize(f, f.base_px * f32(s))
 	W.dirty = true

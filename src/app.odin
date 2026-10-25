@@ -50,6 +50,7 @@ App :: struct {
 	font_px:  f32, // logical em size; the font is resized to font_px * scale for drawing
 	fonts:    [dynamic]^Font, // extra sizes (menu mode), resized with the buffer scale
 	family:   string,
+	scale:    int, // buffer scale of the output (fonts are sized for it)
 	menu:     ^Menu,
 	has_icons: bool,
 	// layout in logical pixels

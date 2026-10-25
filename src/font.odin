@@ -51,8 +51,11 @@ Shaped :: struct {
 	cp_x:   []f32, // x where each codepoint starts, len = codepoints + 1
 }
 
-// fc-match picks the file the same way every other app on the desktop does.
+// The installed family of exactly that name first (fc-match applies the desktop's
+// substitution rules, and Omarchy's swap any named monospace for its own), then fc-match.
+// "Family:weight=bold" asks for the bold face.
 font_file :: proc(family: string) -> (path: string, index: int, ok: bool) {
+	if path, index, ok = font_file_exact(family); ok do return
 	state, out, _, err := os.process_exec({command = {"fc-match", "-f", "%{file}\n%{index}", family}}, context.allocator)
 	if err != nil || !state.success do return
 	lines := strings.split_lines(string(out), context.temp_allocator)
@@ -60,6 +63,37 @@ font_file :: proc(family: string) -> (path: string, index: int, ok: bool) {
 	path = lines[0]
 	if len(lines) > 1 do index, _ = strconv.parse_int(lines[1])
 	return path, index, true
+}
+
+@(private)
+font_file_exact :: proc(family: string) -> (path: string, index: int, ok: bool) {
+	name, bold := family, false
+	if c := strings.index_byte(family, ':'); c >= 0 do name, bold = family[:c], strings.contains(family[c:], "bold")
+	if name == "" do return
+	state, out, _, err := os.process_exec({command = {"fc-list", "-f", "%{file}\t%{index}\t%{style}\n", name}}, context.temp_allocator)
+	if err != nil || !state.success do return
+	best := min(int)
+	text := string(out)
+	for line in strings.split_lines_iterator(&text) {
+		f := strings.split(line, "\t", context.temp_allocator)
+		if len(f) < 3 || f[0] == "" do continue
+		st := strings.to_lower(f[2], context.temp_allocator)
+		score := 0
+		if strings.contains(st, "italic") || strings.contains(st, "oblique") do score -= 10
+		has_bold := strings.contains(st, "bold")
+		if bold do score += has_bold && !strings.contains(st, "semi") && !strings.contains(st, "extra") ? 5 : (has_bold ? 2 : 0)
+		else {
+			if strings.contains(st, "regular") || strings.contains(st, "book") || st == "normal" do score += 5
+			for w in ([]string{"bold", "light", "thin", "medium", "black", "heavy", "semi", "extra", "retina"}) do if strings.contains(st, w) do score -= 2
+		}
+		if score > best {
+			best = score
+			path = strings.clone(f[0])
+			index, _ = strconv.parse_int(f[1])
+			ok = true
+		}
+	}
+	return
 }
 
 font_load :: proc(f: ^Font, family: string, px: f32, shape: bool) -> bool {

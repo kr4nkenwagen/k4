@@ -18,12 +18,29 @@ k4 --prompt-only 'Password ❯ ' --password
 - **Window:** a `zwlr_layer_shell_v1` overlay with exclusive keyboard focus, drawn in
   software into `wl_shm` buffers, re-rasterised at the output's integer scale.
 - **Keyboard:** libxkbcommon keymaps, compose sequences (dead keys, `compose:caps`), key repeat.
-- **Text:** fontconfig (`fc-match`) picks the file, kb_text_shape shapes it (ligatures,
+- **Text:** fontconfig picks the file (the installed family of exactly that name, else
+  `fc-match`), kb_text_shape shapes it (ligatures,
   kerning), stb_truetype rasterises; a sans-serif face fills in missing glyphs.
 - **Matching:** space-separated terms, each a case-insensitive fuzzy subsequence, ranked
   for consecutive runs and word starts.
 - **Theme:** `~/.local/state/omarchy/current/theme/colors.toml` and `…/current/font.name`,
   the same files Omarchy and the dotfiles' `sway-theme-set`/`sway-font-set` write.
+
+## Menu mode
+
+`k4 --menu` reads a tree on stdin (the format is at the top of `src/menu.odin`): sections
+on the left, their actions on the right, and full-width pages, lists and picture grids.
+Everything happens inside the launcher:
+
+- **Pages** (`P`, `F` records) are pickers whose rows come from a command: Wi-Fi networks,
+  fonts with a live preview, search results. ⌫ returns to the row that opened them.
+- **In place:** `stay` rows and view items run through the `R` command while the menu stays
+  open; its last line of output is shown in the footer, and the theme and font are read
+  again, so a theme or font switch recolours the launcher itself.
+- **Text input:** an `input=` row (or a `k4:input` line from the runner) asks for text in the
+  header field, masked for passwords, and hands it over as `$K4_INPUT` in the runner's
+  environment. Runner lines `k4:page`, `k4:back` and `k4:close` chain the next step.
+- **Sliders and confirmations:** `slider=` rows adjust with ← →, `confirm=` rows ask first.
 
 ## Build
 
@@ -55,5 +72,5 @@ would pick, which is how layout and selection are tested headlessly.
 
 ## Not yet
 
-Grid layout for pictures, popups anchored to a bar module, clipboard paste, app-launcher
+Popups anchored to a bar module, clipboard paste, app-launcher
 mode, fractional scaling.
