@@ -1510,7 +1510,8 @@ draw_panes :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
 	}
 	tip_h := m.focus == .Menu && !sc && q_of(a) == "" ? 28 * S : 0
 	bottom := fy - 8 * S - tip_h
-	draw_actions(a, cv, S, s, px, py, x1, bottom, sc)
+	if s.weather do draw_weather_pane(a, cv, S, s, px + 20 * S, py, x1 - 20 * S, bottom)
+	else do draw_actions(a, cv, S, s, px, py, x1, bottom, sc)
 	if tip_h > 0 {
 		tx := px + 20 * S
 		ty := fy - 8 * S - tip_h
@@ -2636,4 +2637,89 @@ draw_theme_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	ty += lh + 4 * S
 	sw := (pr - px - 24 * S - 5 * 3 * S) / 6
 	for c in 0 ..< 6 do fill_rect(cv, px + 12 * S + c * (sw + 3 * S), ty, sw, 10 * S, argb(P[2 + c], 0xff))
+}
+
+// The Weather section highlighted in the menu: the dashboard stacked to fit the right pane
+// (now, details, today's hourly strip, the seven days); Enter opens the full one.
+@(private)
+draw_weather_pane :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, x, y_, xr, bottom: int) {
+	m := a.menu
+	t := a.theme
+	bg, fg, fgb, dim, acc := t.bg, t.fg, t.fg_bright, t.fg_dim, t.accent
+	y := y_
+	if s.wx_now[0] == "" {
+		text_in(cv, m.f_body, s.load.state == .Failed ? "Weather unavailable" : "Loading…", x, y, 30 * S, argb(dim, 0xff))
+		return
+	}
+	// now: icon · temperature · condition, place / feels below
+	big, icf, c14 := msize(a, 40, true, S), msize(a, 34, false, S), msize(a, 14, false, S)
+	glyph, gc := wx_icon(t, s.wx_now[2])
+	rowh := max(int(big.line_h), 40 * S)
+	text_in(cv, icf, glyph, x, y, rowh, argb(gc, 0xff))
+	tx := x + 40 * S + 12 * S
+	text_in(cv, big, s.wx_now[3], tx, y, rowh, argb(fgb, 0xff))
+	tx += tw(big, s.wx_now[3]) + 14 * S
+	cy := y + (rowh - int(c14.line_h) - 3 * S - int(m.f_small.line_h)) / 2
+	draw_text_f(cv, c14, ellipsize(c14, fmt.tprintf("%s · %s", s.wx_now[4], s.wx_now[0]), xr - tx), tx, cy, argb(fgb, 0xff))
+	draw_text_f(cv, m.f_small, ellipsize(m.f_small, s.wx_now[5], xr - tx), tx, cy + int(c14.line_h) + 3 * S, argb(mix(dim, fg, 0.5), 0xff))
+	y += rowh + 10 * S
+	// details: three columns
+	colw := (xr - x - 2 * 14 * S) / 3
+	for d, i in s.wx_details {
+		cx := x + (i % 3) * (colw + 14 * S)
+		ry := y + (i / 3) * (int(m.f_small.line_h) + 4 * S)
+		draw_text_f(cv, m.f_small, d[0], cx, ry, argb(dim, 0xff))
+		draw_text_f(cv, m.f_small, d[1], cx + colw - tw(m.f_small, d[1]), ry, argb(fg, 0xff))
+	}
+	y += ((len(s.wx_details) + 2) / 3) * (int(m.f_small.line_h) + 4 * S) + 8 * S
+	// today's hourly strip
+	draw_text_f(cv, m.f_tiny, "TODAY · NEXT 16 H", x, y, argb(dim, 0xff))
+	y += int(m.f_tiny.line_h) + 6 * S
+	hours := make([dynamic]Wx_Hour, 0, 8, context.temp_allocator)
+	for h in s.wx_hours do if h.day == 0 && len(hours) < 8 do append(&hours, h)
+	cw := (xr - x) / 8
+	hi16, b12 := msize(a, 16, false, S), msize(a, 12, true, S)
+	center :: proc(cv: ^Canvas, f: ^Font, s: string, cx, y: int, c: u32) { draw_text_f(cv, f, s, cx - tw(f, s) / 2, y, c) }
+	for h, i in hours {
+		cx := x + i * cw + cw / 2
+		yy := y
+		center(cv, m.f_tiny, h.t, cx, yy, argb(dim, 0xff))
+		yy += int(m.f_tiny.line_h) + 3 * S
+		g, gcol := wx_icon(t, h.kind)
+		center(cv, hi16, g, cx, yy, argb(gcol, 0xff))
+		yy += int(hi16.line_h) + 3 * S
+		center(cv, b12, h.temp, cx, yy, argb(fgb, 0xff))
+		yy += int(b12.line_h) + 4 * S
+		bh := 20 * S
+		fill_rect(cv, cx - 4 * S, yy, 8 * S, bh, argb(mix(bg, fg, 0.08), 0xff))
+		fh := bh * clamp(h.rain, 0, 100) / 100
+		if fh > 0 do fill_rect(cv, cx - 4 * S, yy + bh - fh, 8 * S, fh, argb(t.blue, 0xff))
+	}
+	y += int(m.f_tiny.line_h) + 3 * S + int(hi16.line_h) + 3 * S + int(b12.line_h) + 4 * S + 20 * S + 12 * S
+	// the seven days: name · icon · rain · low – range – high
+	wk_lo, wk_hi := max(int), min(int)
+	for act in s.actions do if act.kind == .Day { wk_lo = min(wk_lo, act.wlo); wk_hi = max(wk_hi, act.whi) }
+	span := max(wk_hi - wk_lo, 1)
+	rh := 24 * S
+	i14 := msize(a, 14, false, S)
+	for act in s.actions {
+		if act.kind != .Day do continue
+		if y + rh > bottom do break
+		xx := x
+		text_in(cv, m.f_body, act.label, xx, y, rh, argb(fgb, 0xff))
+		xx += 60 * S
+		g, gcol := wx_icon(t, act.glyph)
+		text_in(cv, i14, g, xx, y, rh, argb(gcol, 0xff))
+		xx += 16 * S + 8 * S
+		r := fmt.tprintf("%d%%", act.pct)
+		text_in(cv, m.f_small, r, xx + 34 * S - tw(m.f_small, r), y, rh, argb(act.pct >= 50 ? t.blue : dim, 0xff))
+		xx += 34 * S + 10 * S
+		text_in(cv, m.f_body, act.meta, xx + 30 * S - tw(m.f_body, act.meta), y, rh, argb(dim, 0xff))
+		xx += 30 * S + 10 * S
+		bar_w := xr - 30 * S - 10 * S - xx
+		fill_rect(cv, xx, y + (rh - 4 * S) / 2, bar_w, 4 * S, argb(mix(bg, fg, 0.18), 0xff))
+		fill_rect(cv, xx + bar_w * (act.wlo - wk_lo) / span, y + (rh - 4 * S) / 2, max(bar_w * (act.whi - act.wlo) / span, 2 * S), 4 * S, argb(acc, 0xff))
+		text_in(cv, m.f_body, act.line2, xr - 30 * S, y, rh, argb(fgb, 0xff))
+		y += rh
+	}
 }
