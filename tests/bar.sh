@@ -85,5 +85,13 @@ check "tray: ctrl-p pins" "* Tailscale · on the bar|toast (pin tailscale)" "$(t
 check "tray: enter opens the app's menu, k4's rows last" "tray menu Nextcloud|* Open Nextcloud folder|  [IN K4]|  Show on the bar (switch on)" "$(K4_TRAY_MENU="$(cat ../tray/menu.txt)" tr --keys "<down><down><enter>" | grep 'menu\|^\*\|IN K4\|Show on' | paste -sd'|')"
 check "tray: a submenu and back" "tray menu Nextcloud · Recent activity" "$(K4_TRAY_MENU="$(cat ../tray/menu.txt)" tr --keys "<down><down><enter><down><down><down><enter>" | head -1 | sed 's/ › / · /')"
 check "tray: a menu row runs" "toast (event nextcloud 2)" "$(K4_TRAY_MENU="$(cat ../tray/menu.txt)" tr --keys "<down><down><enter><down><enter>" | grep '^toast')"
+# the System popup: the pages and the utilities (live numbers are not compared; no runner, no kills)
+pf() { K4_PERF_NOKILL=1 "$K4" --perf --dump "$@" < ../perf/utils.txt 2>&1; }
+check "perf: overview first, Tab and 1–3 switch pages" "perf overview|perf processes|perf utilities" "$( (pf | head -1; pf --keys "<tab>" | head -1; pf --keys "3" | head -1) | paste -sd'|')"
+check "perf: processes sort by cpu, → memory" "sort cpu · 12 shown|sort mem · 12 shown" "$( (pf --keys "2" | sed -n 2p; pf --keys "2<right>" | sed -n 2p) | paste -sd'|')"
+check "perf: utilities left column first" "* Free up space · Empty trash|  Free up space · Clear thumbnails|  Fix things · Restart audio" "$(pf --keys "3" | sed -n 2,4p | paste -sd'|')"
+check "perf: a utility marked ask asks first" "* Free up space · Empty trash (asking)" "$(pf --keys "3<enter>" | sed -n 2p)"
+check "perf: y runs it, n cancels" "toast (trash)|* Free up space · Empty trash" "$( (pf --keys "3<enter>y" | grep '^toast'; pf --keys "3<enter>n" | sed -n 2p) | paste -sd'|')"
+check "perf: a step row moves its value" "toast (profile Performance)" "$(pf --keys "3<right><down><right>" | grep '^toast')"
 echo "bar tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

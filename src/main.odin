@@ -43,6 +43,7 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --notify-ctl CMD        a command to the service: list status clear dnd on|off|toggle … (prints its reply)
   --clip                  the clipboard history: search, preview, paste (Super+Ctrl+V; entries on stdin, clip.odin)
   --tray                  the system tray's apps and their menus (Super+.; k4-tray list on stdin, tray.odin)
+  --perf                  performance, processes and utilities (Super+Shift+Esc; utilities on stdin, perf.odin)
   --output NAME           the bar's output (default: the compositor's choice)
   --config FILE           accepted and ignored (fuzzel compatibility)
   --dry-run FILE.png      render one frame to a PNG without Wayland, then print the selection
@@ -131,6 +132,7 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--notifyd": o.notifyd = true
 		case "--clip": o.clip = true
 		case "--tray": o.tray = true
+		case "--perf": o.perf = true
 		case "--notify-center": o.notify_center = true
 		case "--notify-ctl": o.notify_ctl = value(args, &i, inline, has_inline)
 		case "--osd": o.osd = value(args, &i, inline, has_inline)
@@ -189,6 +191,10 @@ main :: proc() {
 		}
 		a.width, a.height = nd_size(a)
 		a.width, a.height = max(a.width, 1), max(a.height, 1)
+	} else if opts.perf {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		perf_setup(a, string(data))
+		a.width, a.height = PERF_W, PERF_H
 	} else if opts.tray {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		tray_setup(a, string(data))
@@ -242,7 +248,7 @@ main :: proc() {
 			a.width = a.opts.width_chars > 0 ? a.opts.width_chars : 1280 // dry runs: a 1280 px strip unless -w
 			a.bar.width = a.width
 		} else if a.menu != nil { if wait || nowait == "keys" do menu_load_all(a) }
-		else if a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil do app_layout(a)
+		else if a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil && a.perf == nil do app_layout(a)
 		// shaders: where the selection was before the keys, so a cursor shader shows the move
 		pre: [4]int
 		if opts.dry_run != "" && os.get_env("K4_DRY_SHADERS", context.temp_allocator) != "" && opts.keys != "" {
@@ -256,7 +262,7 @@ main :: proc() {
 		press_keys(a, opts.keys)
 		if a.menu != nil && wait do menu_load_all(a) // a stay action started by the keys, and the reload after it
 		if a.menu != nil && !wait { time.sleep(time.Duration(clamp(a.menu.slow_ms, 0, 2000) + 50) * time.Millisecond); menu_on_tick(a) }
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil do app_move(a, opts.select)
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil && a.perf == nil do app_move(a, opts.select)
 		if a.menu != nil do a.width, a.height = menu_size(a)
 		if a.bar != nil { bar_tick(a); a.height = a.bar.want_h } // a tooltip or the preview grows it
 		s := opts.scale
@@ -296,15 +302,16 @@ main :: proc() {
 		if opts.dump && a.nc != nil && !a.done do fmt.print(nc_dump(a))
 		if opts.dump && a.clip != nil && !a.done do fmt.print(clip_dump(a))
 		if opts.dump && a.tray != nil && !a.done do fmt.print(tray_dump(a))
+		if opts.dump && a.perf != nil && !a.done do fmt.print(perf_dump(a))
 		if a.nd != nil do a.exit = 0
 		if opts.dump && a.osd != nil do fmt.printfln("osd %s %d/%d %s %s", a.osd.icon, a.osd.pct, a.osd.vmax, a.osd.value, a.osd.label)
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil && !a.done do app_accept(a)
-		if (a.menu != nil || a.bar != nil || a.ov != nil || a.pw != nil || a.nc != nil || a.clip != nil || a.tray != nil) && !a.done do a.exit = 1
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil && a.perf == nil && !a.done do app_accept(a)
+		if (a.menu != nil || a.bar != nil || a.ov != nil || a.pw != nil || a.nc != nil || a.clip != nil || a.tray != nil || a.perf != nil) && !a.done do a.exit = 1
 		if a.osd != nil do a.exit = 0
 	} else {
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil do app_layout(a)
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil && a.perf == nil do app_layout(a)
 		press_keys(a, opts.keys)
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil do app_move(a, opts.select)
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil && a.perf == nil do app_move(a, opts.select)
 		if a.menu != nil do a.width, a.height = menu_size(a)
 		if a.osd != nil do osd_listen(a.osd)
 		menu_like := a.bar == nil && a.osd == nil && a.nd == nil // the service is not a menu
