@@ -10,7 +10,7 @@ import "logic"
 // The calendar (a page with O cal: the bar clock's popup, 644×474): the Kestrel design's month
 // grid with the day's events beside it, an agenda, event details, quick add and the calendars,
 // over data a script prints (k4-cal: Google Calendar, cached):
-//   CS <conn> <status>        ok | sync | offline | none, and the header's status text
+//   CS <conn> <status>        ok | sync | offline | none | setup (no OAuth client yet), and the header's status text
 //   CX <command>              actions run as `<command> VERB ARGS…` (join, open, copy, rsvp,
 //                             delete, add, toggle, sync, connect, disconnect, later)
 //   CC <id> <name> <tone> <account> <1|0 shown> <1|0 read-only>
@@ -123,7 +123,7 @@ Cal_Occ :: struct { ev: int, part: string }
 // The events on a day, shown calendars only: all-day first, then by start.
 cal_day :: proc(d: ^Cal_Data, day: int) -> []Cal_Occ {
 	out := make([dynamic]Cal_Occ, 0, 8, context.temp_allocator)
-	if d.conn == "none" do return out[:]
+	if !cal_connected(d) do return out[:]
 	for e, i in d.evs {
 		c := cal_by_id(d, e.cal)
 		if c != nil && !c.on do continue
@@ -383,7 +383,7 @@ cal_open :: proc(a: ^App) {
 cal_loaded :: proc(a: ^App, s: ^Section) {
 	m := a.menu
 	cal_open(a)
-	if !m.calu.synced && s.cd.conn != "none" && s.cd.conn != "" && s.cd.cx != "" && m.runner.state != .Loading && os.get_env("K4_CAL_NOSYNC", context.temp_allocator) == "" {
+	if !m.calu.synced && cal_connected(&s.cd) && s.cd.cx != "" && m.runner.state != .Loading && os.get_env("K4_CAL_NOSYNC", context.temp_allocator) == "" {
 		m.calu.synced = true
 		cal_run(a, "", "sync")
 	}
@@ -410,7 +410,7 @@ cal_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> bool {
 	d := &s.cd
 	u := &m.calu
 	cal_open(a)
-	connected := d.conn != "none" && d.conn != ""
+	connected := cal_connected(d)
 	close :: proc(a: ^App) {
 		m := a.menu
 		if at_entry(m) { a.exit = 1; a.done = true } else do menu_back(a)
@@ -427,7 +427,7 @@ cal_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> bool {
 	}
 	if k == .Escape { if !cal_back(a) do close(a); return true }
 	if k == .Backspace { if !cal_back(a) && !at_entry(m) do menu_back(a); return true }
-	if !connected && k == .Enter && (u.view == .Month || u.view == .Agenda) { cal_run(a, "Opening the Google sign-in…", "connect"); return true }
+	if !connected && k == .Enter && (u.view == .Month || u.view == .Agenda) { cal_run(a, a.menu.sections[a.menu.open].cd.conn == "setup" ? "Looking for the OAuth client…" : "Opening the Google sign-in…", "connect"); return true }
 	if u.view == .Month || u.view == .Agenda {
 		switch {
 		case k == .Tab: u.view, u.list = u.view == .Month ? .Agenda : .Month, false; m.toast = ""; return true
@@ -504,10 +504,10 @@ cal_cal_row :: proc(a: ^App, i: int) {
 
 cal_hints :: proc(m: ^Menu, d: ^Cal_Data) -> [][2]string {
 	u := &m.calu
-	connected := d.conn != "none" && d.conn != ""
+	connected := cal_connected(d)
 	h: [][2]string
 	switch {
-	case !connected && (u.view == .Month || u.view == .Agenda): h = {{"↵", "Connect Google"}, {"←→↑↓", "Day"}, {"Esc", "Close"}}
+	case !connected && (u.view == .Month || u.view == .Agenda): h = {{"↵", d.conn == "setup" ? "Set up Google" : "Connect Google"}, {"←→↑↓", "Day"}, {"Esc", "Close"}}
 	case u.view == .Month && !u.list: h = {{"←→↑↓", "Day"}, {"↵", "Events"}, {"PgUp/Dn", "Month"}, {"Tab", "Agenda"}, {"n", "New"}, {"t", "Today"}}
 	case u.view == .Month: h = {{"↑↓", "Event"}, {"↵", "Details"}, {"j", "Join"}, {"←", "Days"}, {"n", "New"}}
 	case u.view == .Agenda: h = {{"↑↓", "Event"}, {"↵", "Details"}, {"j", "Join"}, {"Tab", "Month"}, {"c", "Calendars"}}
@@ -521,6 +521,9 @@ cal_hints :: proc(m: ^Menu, d: ^Cal_Data) -> [][2]string {
 }
 
 @(private)
+// Signed in to Google ("none": not yet; "setup": not yet, and no OAuth client to sign in with).
+cal_connected :: proc(d: ^Cal_Data) -> bool { return d.conn != "none" && d.conn != "setup" && d.conn != "" }
+
 chit :: proc(a: ^App, x, y, w, h: int, what: Cal_Hit, i: int) { hit_add(a, x, y, w, h, .Cal, int(what), i) }
 
 draw_calendar :: proc(a: ^App, cv: ^Canvas, S: int) {
@@ -538,7 +541,7 @@ draw_calendar :: proc(a: ^App, cv: ^Canvas, S: int) {
 	frame(cv, 0, 0, cv.w, cv.h, S, argb(mix(t.bg, acc, 0.17), 0xff), argb(acc, 0xff))
 	x0, x1 := B, cv.w - B
 	y := B
-	connected := d.conn != "none" && d.conn != ""
+	connected := cal_connected(d)
 	f14b := msize(a, 14, true, S)
 	f17b := msize(a, 17, true, S)
 	f10 := msize(a, 10, false, S)
@@ -571,6 +574,7 @@ draw_calendar :: proc(a: ^App, cv: ^Canvas, S: int) {
 	case u.syncing && m.runner.state == .Loading: status, sc = "↻ syncing…", acc
 	case d.conn == "offline": sc = t.yellow
 	case d.conn == "sync": sc = acc
+	case d.conn == "setup": status = "not set up"
 	case d.conn == "none" || d.conn == "": status = "not connected"
 	}
 	text_in(cv, m.f_tiny, status, x1 - 12 * S - tw(m.f_tiny, status), y, hh, argb(sc, 0xff))
@@ -650,7 +654,7 @@ cal_draw_month :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	d := &m.sections[m.open].cd
 	u := &m.calu
 	bg, fg, dim, acc, sel := t.bg, t.fg, t.fg_dim, t.accent, t.selection
-	connected := d.conn != "none" && d.conn != ""
+	connected := cal_connected(d)
 	now_day, now_m := cal_now()
 	// left: the month grid, 312 px
 	lw := 312 * S
@@ -776,17 +780,20 @@ cal_draw_month :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	}
 	if !connected {
 		bx, bw := rx + 14 * S, rr - rx - 28 * S
-		lines := wrap_text(m.f_small, "Sign in once in your browser. k4 keeps the token in the system keyring and syncs every 5 minutes and each time this opens.", bw - 24 * S)
+		setup := d.conn == "setup"
+		title := setup ? "Set up Google Calendar" : "Connect Google Calendar"
+		para := setup ? "Once: in Google Cloud, enable the Google Calendar API and create an OAuth client ID (Desktop app), then download its JSON and press ↵ here again: k4 takes it from Downloads and signs you in." : "Sign in once in your browser. k4 keeps the token in the system keyring and syncs every 5 minutes and each time this opens."
+		lines := wrap_text(m.f_small, para, bw - 24 * S)
 		bh := 24 * S + int(m.f_bold13.line_h) + 6 * S + len(lines) * (int(m.f_small.line_h) + 2 * S)
 		ry += 4 * S
 		fill_rect(cv, bx, ry, bw, bh, argb(sel, 0xff))
 		yy := ry + 12 * S
-		draw_text_f(cv, m.f_bold13, "Connect Google Calendar", bx + 12 * S, yy, argb(fg, 0xff))
+		draw_text_f(cv, m.f_bold13, title, bx + 12 * S, yy, argb(fg, 0xff))
 		yy += int(m.f_bold13.line_h) + 6 * S
 		for l in lines { draw_text_f(cv, m.f_small, l, bx + 12 * S, yy, argb(dim, 0xff)); yy += int(m.f_small.line_h) + 2 * S }
 		ry += bh + 8 * S
 		fill_rect(cv, rx, ry, rr - rx, 30 * S, argb(acc, 0xff))
-		text_in(cv, m.f_bold12, "Connect Google account", rx + 14 * S, ry, 30 * S, argb(bg, 0xff))
+		text_in(cv, m.f_bold12, setup ? "Open Google Cloud" : "Connect Google account", rx + 14 * S, ry, 30 * S, argb(bg, 0xff))
 		text_in(cv, m.f_small, "opens browser", rr - 14 * S - tw(m.f_small, "opens browser"), ry, 30 * S, argb(bg, 0xff))
 		chit(a, rx, ry, rr - rx, 30 * S, .Connect, 0)
 		ry += 30 * S
@@ -863,7 +870,7 @@ cal_draw_agenda :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	t := a.theme
 	d := &m.sections[m.open].cd
 	u := &m.calu
-	connected := d.conn != "none" && d.conn != ""
+	connected := cal_connected(d)
 	x, x1 := body[0], body[0] + body[2]
 	y := body[1] + 4 * S
 	bottom := body[1] + body[3] - 8 * S
@@ -1100,7 +1107,7 @@ cal_click :: proc(a: ^App, h: Hit) {
 			if h.b < len(acts) do cal_act(a, acts[h.b])
 		}
 	case .Cal_Row: u.ci = h.b; cal_cal_row(a, h.b)
-	case .Connect: cal_run(a, "Opening the Google sign-in…", "connect")
+	case .Connect: cal_run(a, a.menu.sections[a.menu.open].cd.conn == "setup" ? "Looking for the OAuth client…" : "Opening the Google sign-in…", "connect")
 	case .Not_Now: cal_run(a, "", "later")
 	}
 }

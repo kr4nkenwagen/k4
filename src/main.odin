@@ -301,6 +301,7 @@ app_load_style :: proc(a: ^App, first: bool) -> bool {
 
 // Dry runs: draw once (scale 1) so the pointer tokens find what is where.
 hits_refresh :: proc(a: ^App) {
+	if a.menu != nil do a.width, a.height = menu_size(a) // a popup or the calendar is not the launcher's size
 	if a.width <= 0 || a.height <= 0 do return
 	cv := Canvas{make([]u32, a.width * a.height, context.temp_allocator), a.width, a.height}
 	app_draw(a, &cv, 1)
