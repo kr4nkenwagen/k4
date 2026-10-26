@@ -222,7 +222,7 @@ prev_draw :: proc(a: ^App, cv: ^Canvas, S, x0, y0: int) {
 	x := clamp(x0, 8 * S, max(cv.w - 8 * S - w, 8 * S))
 	y := y0
 	p.x, p.y, p.w, p.h = x / S, y / S, PREV_W, prev_h(p)
-	fill_rect(cv, x, y, w, h, argb(t.bg, 0xff))
+	fill_rect(cv, x, y, w, h, argb(t.bg, a.bg_alpha))
 	rounded_rect(cv, x, y, w, h, 0, 0, f32(S), argb(t.fg_dim, 0xff))
 	hit_add(a, x, y, w, h, .Web, -1, -1) // the card itself: the pointer may rest here
 	sel := t.selection

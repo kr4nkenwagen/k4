@@ -16,7 +16,7 @@ import "logic"
 // 2 px accent rule, modules text-coloured on the theme background; only hover (selection),
 // open (accent block, while its click command runs: a popup) and alarm (red block) fill.
 // Modules come from stdin, one a line, tab-separated:
-//   B <key>=<value>…    height=26 · position=top|bottom · transparent=1 (55% background)
+//   B <key>=<value>…    height=26 · position=top|bottom · transparent=1 (Ghostty's background-opacity, else 55%)
 //   M <id> <side> <kind> <arg> <interval> <tone> <left> <right> <middle> <up> <down> [flags]
 //      side: left center right · kind: workspaces, window, clock, text / icon (arg), exec
 //      (arg = a shell command: interval > 0 runs it every that many seconds and keeps its last
@@ -620,7 +620,7 @@ bar_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		x := clamp(m.x * S, 8 * S, max(cv.w - 8 * S - w, 8 * S))
 		y := b.bottom ? oy - 6 * S - h : sh + 6 * S
 		if y >= 0 && y + h <= cv.h {
-			rounded_rect(cv, x, y, w, h, 0, argb(t.bg, 0xff), f32(S), argb(t.fg_dim, 0xff))
+			rounded_rect(cv, x, y, w, h, 0, argb(t.bg, a.bg_alpha), f32(S), argb(t.fg_dim, 0xff))
 			text_in(cv, b.f_text, ellipsize(b.f_text, tip, w - 18 * S), x + 9 * S, y, h, argb(t.fg, 0xff))
 		}
 	}
@@ -630,7 +630,7 @@ bar_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 bar_draw_strip :: proc(a: ^App, cv: ^Canvas, S: int) {
 	b := a.bar
 	t := a.theme
-	fill_rect(cv, 0, 0, cv.w, cv.h, argb(t.bg, b.transparent ? 0x8c : 0xff))
+	fill_rect(cv, 0, 0, cv.w, cv.h, argb(t.bg, b.transparent ? (a.bg_alpha < 0xff ? a.bg_alpha : 0x8c) : 0xff)) // see-through: as the terminal
 	// the 2 px rule: along the bottom (top when the bar sits at the bottom); dim on an output
 	// without focus
 	focused_here := true

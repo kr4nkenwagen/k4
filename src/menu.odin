@@ -1368,7 +1368,7 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	sep := argb(mix(bg, t.accent, 0.17), 0xff)
 	B := 2 * S
 	canvas_clear(cv)
-	fill_rect(cv, 0, 0, cv.w, cv.h, argb(bg, 0xf2))
+	fill_rect(cv, 0, 0, cv.w, cv.h, argb(bg, a.bg_alpha))
 	frame(cv, 0, 0, cv.w, cv.h, S, argb(mix(bg, acc, 0.17), 0xff), argb(acc, 0xff))
 	x0, x1 := B, cv.w - B
 	y := B
@@ -1545,7 +1545,7 @@ menu_draw_compact :: proc(a: ^App, cv: ^Canvas, S: int) {
 	s := &m.sections[m.open]
 	B := 2 * S
 	canvas_clear(cv)
-	fill_rect(cv, 0, 0, cv.w, cv.h, argb(bg, 0xff))
+	fill_rect(cv, 0, 0, cv.w, cv.h, argb(bg, a.bg_alpha))
 	frame(cv, 0, 0, cv.w, cv.h, S, argb(mix(bg, acc, 0.17), 0xff), argb(acc, 0xff))
 	x0, x1 := B, cv.w - B
 	y := B

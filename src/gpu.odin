@@ -70,7 +70,7 @@ shader_paths :: proc() -> [dynamic]string {
 	if env == "off" do return out
 	if env == "list" { // print what Ghostty's config gives, for checking
 		home := os.get_env("HOME", context.temp_allocator)
-		ghostty_shaders(strings.concatenate({home, "/.config/ghostty/config"}, context.temp_allocator), &out, 0)
+		ghostty_config(strings.concatenate({home, "/.config/ghostty/config"}, context.temp_allocator), &out, nil, 0)
 		for p in out do fmt.eprintln(p)
 		return out
 	}
@@ -80,12 +80,26 @@ shader_paths :: proc() -> [dynamic]string {
 	}
 	home := os.get_env("HOME", context.temp_allocator)
 	cfg := strings.concatenate({home, "/.config/ghostty/config"}, context.temp_allocator)
-	ghostty_shaders(cfg, &out, 0)
+	ghostty_config(cfg, &out, nil, 0)
 	return out
 }
 
+// Ghostty's background-opacity as a byte: k4's backgrounds are as see-through as the terminal
+// (the last value in include order wins; opaque when nothing sets it). K4_BG_OPACITY=0..1
+// overrides it.
+ghostty_bg_alpha :: proc() -> u8 {
+	op: f32 = 1
+	if v := os.get_env("K4_BG_OPACITY", context.temp_allocator); v != "" {
+		if f, ok := strconv.parse_f32(v); ok do op = f
+	} else {
+		cfg := strings.concatenate({os.get_env("HOME", context.temp_allocator), "/.config/ghostty/config"}, context.temp_allocator)
+		ghostty_config(cfg, nil, &op, 0)
+	}
+	return u8(clamp(op, 0, 1) * 255 + 0.5)
+}
+
 @(private)
-ghostty_shaders :: proc(path: string, out: ^[dynamic]string, depth: int) {
+ghostty_config :: proc(path: string, shaders: ^[dynamic]string, opacity: ^f32, depth: int) {
 	if depth > 3 do return
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil do return
@@ -102,9 +116,13 @@ ghostty_shaders :: proc(path: string, out: ^[dynamic]string, depth: int) {
 		else if len(val) > 0 && val[0] != '/' do val = strings.concatenate({dir, "/", val}, context.temp_allocator)
 		switch key {
 		case "custom-shader":
-			if val == "" do clear(out)
-			else do append(out, strings.clone(val))
-		case "config-file": ghostty_shaders(val, out, depth + 1)
+			if shaders == nil do continue
+			if val == "" do clear(shaders)
+			else do append(shaders, strings.clone(val))
+		case "background-opacity":
+			if opacity == nil do continue
+			if f, ok := strconv.parse_f32(strings.trim_space(l[eq + 1:])); ok do opacity^ = f
+		case "config-file": ghostty_config(val, shaders, opacity, depth + 1)
 		}
 	}
 }

@@ -52,6 +52,7 @@ Icon :: struct { px: []u32, w, h: int, ok: bool }
 App :: struct {
 	opts:     Options,
 	theme:    logic.Theme,
+	bg_alpha: u8, // the backgrounds' alpha: Ghostty's background-opacity
 	font:     Font,
 	rows:     []logic.Row,
 	matches:  [dynamic]logic.Match,
@@ -193,7 +194,7 @@ app_draw :: proc(a: ^App, cv: ^Canvas, scale: int) {
 	t := a.theme
 	S :: proc(v, scale: int) -> int { return v * scale }
 	canvas_clear(cv)
-	rounded_rect(cv, 0, 0, cv.w, cv.h, a.opts.radius * f32(scale), argb(t.bg, 0xee), f32(a.opts.border * scale), argb(t.accent, 0xff))
+	rounded_rect(cv, 0, 0, cv.w, cv.h, a.opts.radius * f32(scale), argb(t.bg, min(a.bg_alpha, 0xee)), f32(a.opts.border * scale), argb(t.accent, 0xff))
 	inner := S(a.opts.border + a.pad, scale)
 	right := cv.w - inner
 

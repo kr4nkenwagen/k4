@@ -294,13 +294,25 @@ spaced_fit :: proc(f: ^Font, s: string, sp, w: int) -> string { // cut with an e
 	return ""
 }
 
-// A rectangle with its top-right corner cut (the cards).
+// A rectangle with its top-right corner cut (the cards), and its outline (`t` thick).
 @(private)
 cut_rect :: proc(cv: ^Canvas, x, y, w, h, c: int, color: u32) {
 	for yy in 0 ..< h {
 		l, r := x, x + w
 		if yy < c do r = x + w - (c - yy)
 		fill_rect(cv, l, y + yy, r - l, 1, color)
+	}
+}
+
+@(private)
+cut_outline :: proc(cv: ^Canvas, x, y, w, h, c, t: int, color: u32) {
+	for yy in 0 ..< h {
+		r := x + w
+		if yy < c do r = x + w - (c - yy)
+		if yy < t || yy >= h - t { fill_rect(cv, x, y + yy, r - x, 1, color); continue }
+		fill_rect(cv, x, y + yy, t, 1, color)
+		d := yy < c + t ? 2 * t : t // the diagonal a little thicker, so it reads as thick as the sides
+		fill_rect(cv, r - d, y + yy, d, 1, color)
 	}
 }
 
@@ -359,12 +371,18 @@ ov_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	o := a.ov
 	H := hud(a.theme)
 	canvas_clear(cv)
-	fill_rect(cv, 0, 0, cv.w, cv.h, argb(H.bg, 0xb8)) // the dimmed desktop
 	w := min(OV_W * S, cv.w - 40 * S)
 	h := min(OV_H * S, cv.h - 40 * S)
 	x, y := (cv.w - w) / 2, (cv.h - h) / 2
 	o.x, o.y, o.w, o.h = x, y, w, h
-	fill_rect(cv, x, y, w, h, argb(H.bg, 0xff))
+	// the dimmed desktop round the window, the window as see-through as the terminal; what is
+	// drawn on it are light tints, so it stays about that see-through
+	dim := argb(H.bg, 0xb8)
+	fill_rect(cv, 0, 0, cv.w, y, dim)
+	fill_rect(cv, 0, y + h, cv.w, cv.h - y - h, dim)
+	fill_rect(cv, 0, y, x, h, dim)
+	fill_rect(cv, x + w, y, cv.w - x - w, h, dim)
+	fill_rect(cv, x, y, w, h, argb(H.bg, a.bg_alpha))
 	frame(cv, x, y, w, h, S, argb(H.line, 0xff), argb(H.acc, 0xff), 26)
 	hit_add(a, x, y, w, h, .Web, -1, -1)
 	q := ov_query(a)
@@ -392,7 +410,7 @@ ov_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	bx, bw := px, rx - 22 * S - px
 	bh := 36 * S
 	by := hy + (hh - bh) / 2
-	fill_rect(cv, bx, by, bw, bh, argb(H.panel, 0xff))
+	fill_rect(cv, bx, by, bw, bh, argb(a.theme.fg, 0x0a))
 	rounded_rect(cv, bx, by, bw, bh, 0, 0, f32(S), argb(H.line, 0xff))
 	fill_rect(cv, bx, by, 3 * S, bh, argb(H.acc, 0xff))
 	spaced(cv, o.f16b, "›", bx + 12 * S, by, bh, H.acc, 0)
@@ -462,12 +480,12 @@ ov_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		for wv in c.wins do if ov_match(wv, q) { any_hit = true; break }
 		cut := 10 * S
 		if on {
-			for k in 1 ..= 3 do cut_rect(cv, cx - k * 2 * S, cy - k * 2 * S, cardw + k * 4 * S, cardh + k * 4 * S, cut + k * S, argb(H.acc, u8(0x0c / k + 1)))
+			for k in 1 ..= 3 do cut_outline(cv, cx - k * 2 * S, cy - k * 2 * S, cardw + k * 4 * S, cardh + k * 4 * S, cut + k * S, 2 * S, argb(H.acc, u8(0x0c / k + 1)))
 			mark_sel(a, cx, cy, cardw, cardh) // the card; a window row picked in it below takes over
 		}
 		edge := on ? argb(H.acc, 0xff) : (ws.urgent ? argb(H.hot, 0x88) : (ws.focused ? argb(H.acc, 0x80) : argb(H.line, 0xff)))
-		cut_rect(cv, cx, cy, cardw, cardh, cut, edge)
-		cut_rect(cv, cx + S, cy + S, cardw - 2 * S, cardh - 2 * S, cut - S, argb(on ? H.card_sel : H.card, 0xff))
+		cut_rect(cv, cx + S, cy + S, cardw - 2 * S, cardh - 2 * S, cut - S, on ? argb(H.acc, 0x12) : argb(a.theme.fg, 0x08))
+		cut_outline(cv, cx, cy, cardw, cardh, cut, S, edge)
 		// header: 2 · name / meta · tag
 		hh2 := 40 * S
 		hit_add(a, cx, cy, cardw, hh2, .Row, ci, -1)
@@ -509,7 +527,7 @@ ov_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		mx, my := cx + 10 * S, my0 + 3 * S + 6 * S
 		MW := cardw - 20 * S
 		MH := MW * 9 / 16
-		fill_rect(cv, mx, my, MW, MH, argb(H.screen, 0xff))
+		fill_rect(cv, mx, my, MW, MH, argb(H.screen, 0x66))
 		rounded_rect(cv, mx, my, MW, MH, 0, 0, f32(S), argb(H.line, 0xff))
 		if n == 0 {
 			text_in(cv, o.f11, "empty", mx + (MW - tw(o.f11, "empty")) / 2, my, MH, argb(H.dim, 0xff))

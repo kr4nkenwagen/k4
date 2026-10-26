@@ -534,7 +534,7 @@ draw_calendar :: proc(a: ^App, cv: ^Canvas, S: int) {
 	sel := t.selection
 	B := 2 * S
 	canvas_clear(cv)
-	fill_rect(cv, 0, 0, cv.w, cv.h, argb(bg, 0xff))
+	fill_rect(cv, 0, 0, cv.w, cv.h, argb(bg, a.bg_alpha))
 	frame(cv, 0, 0, cv.w, cv.h, S, argb(mix(t.bg, acc, 0.17), 0xff), argb(acc, 0xff))
 	x0, x1 := B, cv.w - B
 	y := B
