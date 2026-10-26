@@ -1,0 +1,22 @@
+focus Sub
+popup 424x524
+crumb NETWORK › BLUETOOTH
+query (Filter options…)
+count 
+toast Ran  bt-visible
+title Bluetooth · Devices (full width)
+* Bluetooth | [on]
+  Visible as k4-laptop | [off]
+== CONNECTED
+  Earbuds | › (mark 󰋋, · connected · Headphones, bat 64%, bold)
+  Keyboard K3 | › (mark 󰌌, · connected · Keyboard, bat 12%, bold)
+== PAIRED
+  MX Master 3 (mark 󰍽, · Mouse)
+  Pixel 8 (mark 󰏲, · couldn’t connect · ↵ to retry)
+== NEARBY · ↻ scanning
+  JBL Flip 6 (mark 󰓃, · Speaker · strong signal)
+  4C:8B:2A:91:E0:17 (mark 󰂯, dim, · Unknown device · weak signal)
+  Bluetooth settings | Blueman ↗
+exit 1
+log: load apps
+log: run bt-visible

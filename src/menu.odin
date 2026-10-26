@@ -71,7 +71,7 @@ import "logic"
 // alt=<label>|<id> (Tab runs it).
 // Enter prints the chosen action's or item's id; a web search prints "url:<url>".
 
-Entry_Kind :: enum { Row, Heading, Empty, Notice, Bars, Card, Progress, Day, Hero }
+Entry_Kind :: enum { Row, Heading, Empty, Notice, Bars, Card, Progress, Day, Hero, Qr, Big }
 
 // The Weather dashboard's data (WN/WD/WH records), drawn by draw_weather.
 Wx_Hour :: struct { day: int, t, kind, temp: string, rain: int }
@@ -102,6 +102,11 @@ Action :: struct {
 	input: bool, input_password: bool,
 	input_prompt, input_hint: string,
 	current: bool,
+	// popup rows (the Wi-Fi and Bluetooth designs): a second line, a bold or coloured label, a
+	// lock, a small battery, a key column (field=)
+	under, underc, labelc, field: string, // under: the second line (flag line2=)
+	bold, lock, tall: bool,
+	bat: int, // -1: none
 }
 Item :: struct {
 	id, label, image: string,
@@ -142,6 +147,10 @@ Section :: struct {
 	pane:    bool, // a page drawn in the right pane, next to the sections (O pane)
 	weather: bool, // O weather: the design's Weather dashboard instead of rows
 	cal:     bool, // O cal: the calendar (cal.odin) instead of rows
+	popup_h: int,  // O height=N: the popup's height, whatever it shows (Wi-Fi, Bluetooth)
+	refresh: int,  // O refresh=N: load again every N s while shown (scans)
+	status, statusc: string, // ST: the popup header's status on the right, and its tone
+	keybinds: [dynamic][2]string, // KB <key> <id>: a letter runs an action in the popup
 	cd:      Cal_Data, // its data (CS CX CC CE CG CN lines)
 	popup_w: int,  // O width=N: the compact popup's width (default 420)
 	wx_now:  [6]string, // city, location note, icon kind, temperature, condition, feels/high/low
@@ -195,6 +204,7 @@ Menu :: struct {
 	// text input (input= flag, k4:input)
 	input_id, input_label, input_prompt, input_hint: string,
 	input_password: bool,
+	input_reveal: bool, // the popup's password form: Tab shows what was typed
 	input_from: Focus,
 	input_from_si: int,
 	dyn_pages: int,
@@ -280,8 +290,16 @@ section_line :: proc(s: ^Section, f: []string) {
 			if flag == "pane" do s.pane = true
 			if flag == "weather" do s.weather = true
 			if flag == "cal" do s.cal = true
+			if strings.has_prefix(flag, "height=") do s.popup_h, _ = strconv.parse_int(flag[7:])
+			if strings.has_prefix(flag, "refresh=") do s.refresh, _ = strconv.parse_int(flag[8:])
 			if strings.has_prefix(flag, "width=") do s.popup_w, _ = strconv.parse_int(flag[6:])
 		}
+	case "ST": s.status, s.statusc = strings.clone(get(f, 1)), strings.clone(get(f, 2))
+	case "KB": append(&s.keybinds, [2]string{strings.clone(get(f, 1)), strings.clone(get(f, 2))})
+	case "QR": // a picture centred with a title and a line under it (Wi-Fi: share by QR code)
+		append(&s.actions, Action{kind = .Qr, heading = true, thumb = strings.clone(get(f, 1)), label = strings.clone(get(f, 2)), meta = strings.clone(get(f, 3)), bat = -1})
+	case "BIG": // a code large in a box (Bluetooth pairing)
+		append(&s.actions, Action{kind = .Big, heading = true, label = strings.clone(get(f, 1)), bat = -1})
 	case "X": // the battery popup's charge: X <percent> <line> [charging]
 		p, _ := strconv.parse_int(get(f, 1))
 		append(&s.actions, Action{kind = .Hero, heading = true, pct = clamp(p, 0, 100), meta = strings.clone(get(f, 2)), active = get(f, 3) == "charging"})
@@ -308,6 +326,8 @@ section_line :: proc(s: ^Section, f: []string) {
 section_reset :: proc(s: ^Section) {
 	clear(&s.actions)
 	clear(&s.hints)
+	clear(&s.keybinds)
+	s.status, s.statusc = "", ""
 	cal_reset(s)
 	clear(&s.wx_details)
 	clear(&s.wx_hours)
@@ -319,8 +339,8 @@ section_reset :: proc(s: ^Section) {
 @(private)
 action_from :: proc(f: []string) -> Action {
 	get :: proc(f: []string, i: int) -> string { return i < len(f) ? f[i] : "" }
-	if f[0] == "H" do return Action{kind = .Heading, label = strings.clone(get(f, 1)), count = strings.clone(get(f, 2)), heading = true}
-	a := Action{id = strings.clone(get(f, 1)), label = strings.clone(get(f, 2)), meta = strings.clone(get(f, 3)), view = strings.clone(get(f, 4))}
+	if f[0] == "H" do return Action{kind = .Heading, label = strings.clone(get(f, 1)), count = strings.clone(get(f, 2)), meta = strings.clone(get(f, 3)), metac = strings.clone(get(f, 4)), heading = true, bat = -1}
+	a := Action{id = strings.clone(get(f, 1)), label = strings.clone(get(f, 2)), meta = strings.clone(get(f, 3)), view = strings.clone(get(f, 4)), bat = -1}
 	for flag in strings.split(get(f, 5), ";", context.temp_allocator) {
 		switch {
 		case flag == "stay": a.stay = true
@@ -346,6 +366,14 @@ action_from :: proc(f: []string) -> Action {
 		case strings.has_prefix(flag, "metac="): a.metac = strings.clone(flag[6:])
 		case strings.has_prefix(flag, "thumb="): a.thumb = strings.clone(flag[6:])
 		case strings.has_prefix(flag, "key="): a.key = strings.to_upper(flag[4:])
+		case strings.has_prefix(flag, "line2="): a.under = strings.clone(flag[6:])
+		case strings.has_prefix(flag, "line2c="): a.underc = strings.clone(flag[7:])
+		case strings.has_prefix(flag, "labelc="): a.labelc = strings.clone(flag[7:])
+		case strings.has_prefix(flag, "field="): a.field = strings.clone(flag[6:])
+		case strings.has_prefix(flag, "bat="): if v, ok := strconv.parse_int(flag[4:]); ok do a.bat = clamp(v, 0, 100)
+		case flag == "bold": a.bold = true
+		case flag == "lock": a.lock = true
+		case flag == "tall": a.tall = true
 		case strings.has_prefix(flag, "choice="):
 			a.stay = true
 			cs := strings.split(flag[7:], "|")
@@ -398,12 +426,22 @@ section_slow :: proc(m: ^Menu, s: ^Section) -> bool {
 // count), or -1.
 menu_tick_ms :: proc(m: ^Menu) -> int {
 	if m.focus != .Sub || m.open < 0 || m.open >= len(m.sections) do return -1
-	if m.sections[m.open].load.state != .Loading do return -1
+	s := &m.sections[m.open]
+	if s.refresh > 0 && s.load.state == .Ready do return max(s.refresh * 1000 - int(time.duration_milliseconds(time.tick_since(s.load.started))), 0) + 1
+	if s.load.state != .Loading do return -1
 	return 1000
 }
 
-// Called when menu_tick_ms ran out: the slow lines may have to show now.
+// Called when menu_tick_ms ran out: the slow lines may have to show now, a scanning page loads
+// again (O refresh=N; not while an action runs).
 menu_on_tick :: proc(a: ^App) {
+	m := a.menu
+	if m.focus == .Sub && m.open >= 0 && m.open < len(m.sections) {
+		s := &m.sections[m.open]
+		if s.refresh > 0 && s.load.state == .Ready && m.runner.state != .Loading && time.duration_seconds(time.tick_since(s.load.started)) >= f64(s.refresh) {
+			loader_refresh(m, &s.load)
+		}
+	}
 	menu_refilter(a)
 }
 
@@ -595,6 +633,10 @@ menu_directive :: proc(a: ^App, line: string) {
 		m.dyn_pages += 1
 		if idx >= 0 { if m.sections[idx].load.state != .Loading do m.sections[idx] = pg } else { append(&m.sections, pg); idx = len(m.sections) - 1 }
 		page_open(a, idx)
+	case "k4:launcher": // the popup hands over to the full launcher at that section or page
+		a.result = fmt.aprintf("launcher:%s", get(f, 1))
+		a.exit = 0
+		a.done = true
 	case "k4:back":
 		if m.focus != .Menu do menu_back(a)
 	case "k4:close":
@@ -1041,7 +1083,7 @@ enter_input :: proc(a: ^App, id, label, prompt, hint: string, password: bool) {
 	if m.focus != .Input do m.input_from, m.input_from_si = m.focus, m.si
 	m.input_id, m.input_label = strings.clone(id), strings.clone(label)
 	m.input_prompt, m.input_hint = strings.clone(prompt != "" ? prompt : label), strings.clone(hint)
-	m.input_password = password
+	m.input_password, m.input_reveal = password, false
 	m.focus = .Input
 	clear_query(a)
 	menu_refilter(a)
@@ -1150,6 +1192,7 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 	}
 	if m.focus == .Input {
 		switch {
+		case k == .Tab && m.input_password && compact_now(a): m.input_reveal = !m.input_reveal
 		case k == .Enter: menu_run(a)
 		case k == .Escape: menu_back(a)
 		case k == .Backspace && empty: menu_back(a)
@@ -1401,6 +1444,11 @@ menu_size :: proc(a: ^App) -> (int, int) {
 	m := a.menu
 	s := &m.sections[m.open]
 	w := s.popup_w > 0 ? s.popup_w : COMPACT_W
+	if s.popup_h > 0 do return w, s.popup_h
+	if m.focus != .Sub && m.open >= 0 { // a confirm or an input keeps the page's fixed height
+		home := m.sections[m.open].home
+		if home >= 0 && home < len(m.sections) && m.sections[home].popup_h > 0 do return w, m.sections[home].popup_h
+	}
 	body := 0
 	switch {
 	case m.focus == .Confirm: body = 200
@@ -1432,6 +1480,11 @@ compact_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> bool
 	if ctrl && k == .Enter { to_launcher(a); return true }
 	if ctrl && (ch == 'c' || ch == 'g') { a.exit = 1; a.done = true; return true }
 	if s.cal do return cal_key(a, k, ctrl, ch, text)
+	if len(text) == 1 && text != " " do for kb in s.keybinds do if kb[0] == text {
+		if m.runner.state == .Loading { m.toast = "Still running the last action…"; return true }
+		start_runner(a, kb[1], "", "", "")
+		return true
+	}
 	switch {
 	case k == .Escape:
 		if at_entry(m) { a.exit = 1; a.done = true } else do menu_back(a)
@@ -1470,21 +1523,14 @@ menu_draw_compact :: proc(a: ^App, cv: ^Canvas, S: int) {
 	cx := x0 + 12 * S
 	fill_rect(cv, cx, y + (hh - chh) / 2, cw, chh, argb(acc, 0xff))
 	text_in(cv, m.f_bold11, crumb, cx + 6 * S, y + (hh - chh) / 2, chh, argb(bg, 0xff))
-	hint := "⌃↵ launcher"
+	hint := s.status != "" ? s.status : "⌃↵ launcher"
 	hw := tw(m.f_tiny, hint)
-	text_in(cv, m.f_tiny, hint, x1 - 12 * S - hw, y, hh, argb(dim, 0xff))
+	text_in(cv, m.f_tiny, hint, x1 - 12 * S - hw, y, hh, argb(s.status != "" ? tone_color(t, s.statusc, dim) : dim, 0xff))
 	tx := cx + cw + 10 * S
 	tclip := x1 - 12 * S - hw - 10 * S
 	a.caret = {}
 	if m.focus == .Input {
-		q := string(a.query[:])
-		if m.input_password do q = strings.repeat("•", utf8.rune_count_in_string(q), context.temp_allocator)
-		if q == "" do text_in(cv, m.f_bold13, m.input_label != "" ? m.input_label : m.input_prompt, tx, y, hh, argb(dim, 0xff), tclip)
-		else do text_in(cv, m.f_bold13, q, tx, y, hh, argb(fgb, 0xff), tclip)
-		qs := shape(m.f_bold13, q)
-		cur := utf8.rune_count_in_string(string(a.query[:a.cursor]))
-		caret := tx + int(qs.cp_x[min(cur, len(qs.cp_x) - 1)])
-		fill_rect(cv, caret, y + (hh - int(m.f_bold13.line_h)) / 2, max(S, 2), int(m.f_bold13.line_h), argb(acc, 0xff))
+		text_in(cv, m.f_bold13, ellipsize(m.f_bold13, s.desc, tclip - tx), tx, y, hh, argb(fgb, 0xff))
 	} else {
 		title := s.desc
 		text_in(cv, m.f_bold13, ellipsize(m.f_bold13, title, tclip - tx), tx, y, hh, argb(fgb, 0xff))
@@ -1502,21 +1548,61 @@ menu_draw_compact :: proc(a: ^App, cv: ^Canvas, S: int) {
 		hints := menu_hints(a, false)
 		hx := x0 + 12 * S
 		for h in hints {
-			w := tw(m.f_tiny, h[0]) + 10 * S
+			kf := msize(a, 10, false, S)
+			w := tw(kf, h[0]) + 10 * S
 			if hx + w > x1 - 12 * S do break
-			kh := int(m.f_tiny.line_h) + 2 * S
+			kh := int(kf.line_h) + 2 * S
 			fill_rect(cv, hx, fy + (fh - kh) / 2, w, kh, sel)
-			text_in(cv, m.f_tiny, h[0], hx + 5 * S, fy + (fh - kh) / 2, kh, argb(t.fg, 0xff))
+			text_in(cv, kf, h[0], hx + 5 * S, fy + (fh - kh) / 2, kh, argb(t.fg, 0xff))
 			hx += w + 5 * S
 			text_in(cv, m.f_tiny, h[1], hx, fy, fh, argb(dim, 0xff), x1 - 12 * S)
-			hx += tw(m.f_tiny, h[1]) + 14 * S
+			hx += tw(m.f_tiny, h[1]) + 10 * S
 		}
 	}
 	body := [4]int{x0, y + 6 * S, x1 - x0, fy - y - 12 * S}
 	switch {
 	case m.focus == .Confirm: draw_confirm(a, cv, S, body)
-	case m.focus == .Input: draw_input(a, cv, S, body)
+	case m.focus == .Input: draw_input_form(a, cv, S, body)
 	case: draw_actions(a, cv, S, s, x0, body[1], x1, body[1] + body[3], false, true)
+	}
+}
+
+// The popup's text input (a Wi-Fi password): the question, the field, an error from the last
+// try (a hint that starts with "!"), Show password (Tab) for passwords, the hint as a note.
+draw_input_form :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
+	m := a.menu
+	t := a.theme
+	x, x1 := body[0] + 16 * S, body[0] + body[2] - 16 * S
+	y := body[1] + 10 * S
+	err := strings.has_prefix(m.input_hint, "!")
+	for l in wrap_text(m.f_body, m.input_prompt, x1 - x) { draw_text_f(cv, m.f_body, l, x, y, argb(t.fg, 0xff)); y += int(m.f_body.line_h) + 3 * S }
+	y += 8 * S
+	ih := 38 * S
+	rounded_rect(cv, x, y, x1 - x, ih, 0, argb(t.bg, 0xff), f32(S), argb(err ? t.red : t.accent, 0xff))
+	f := msize(a, 14, false, S)
+	q := string(a.query[:])
+	if m.input_password && !m.input_reveal do q = strings.repeat("•", utf8.rune_count_in_string(q), context.temp_allocator)
+	if q == "" do text_in(cv, f, m.input_password ? "Password" : m.input_label, x + 12 * S, y, ih, argb(t.fg_dim, 0xff))
+	else do text_in(cv, f, q, x + 12 * S, y, ih, argb(t.fg, 0xff), x1 - 12 * S)
+	qs := shape(f, q)
+	cur := utf8.rune_count_in_string(string(a.query[:a.cursor]))
+	caret := x + 12 * S + int(qs.cp_x[min(cur, len(qs.cp_x) - 1)])
+	fill_rect(cv, caret, y + (ih - int(f.line_h)) / 2, max(S, 2), int(f.line_h), argb(t.accent, 0xff))
+	a.caret = {caret, y + (ih - int(f.line_h)) / 2, max(S, 2), int(f.line_h)}
+	y += ih + 10 * S
+	if err {
+		draw_text_f(cv, m.f_small, m.input_hint[1:], x, y, argb(t.red, 0xff), nil, 0, x1)
+		y += int(m.f_small.line_h) + 10 * S
+	}
+	if m.input_password {
+		text_in(cv, m.f_body, "Show password", x, y, 30 * S, argb(t.fg, 0xff))
+		sw := draw_switch(a, cv, S, x1, y, 30 * S, m.input_reveal, false)
+		text_in(cv, m.f_tiny, "Tab", x1 - sw - 10 * S - tw(m.f_tiny, "Tab"), y, 30 * S, argb(t.fg_dim, 0xff))
+	}
+	if !err && m.input_hint != "" {
+		lines := wrap_text(m.f_tiny, m.input_hint, x1 - x)
+		ny := body[1] + body[3] - 8 * S - len(lines) * (int(m.f_tiny.line_h) + 3 * S)
+		for l in lines { draw_text_f(cv, m.f_tiny, l, x, ny, argb(t.fg_dim, 0xff)); ny += int(m.f_tiny.line_h) + 3 * S }
 	}
 }
 
@@ -1641,6 +1727,7 @@ menu_hints :: proc(a: ^App, sc: bool) -> (hints: [][2]string) {
 	case sc: hints = {{"1–9", "Run"}, {"j k", "Move"}, {"⌫", "Back"}, {"/", "Search"}}
 	case m.focus == .Confirm: hints = {{"y", "Yes"}, {"n Esc", "No"}, {"← →", "Choose"}}
 	case m.focus == .Sub && !sc && m.sections[m.open].cal: hints = cal_hints(m, &m.sections[m.open].cd)
+	case m.focus == .Input && m.input_password && compact_now(a): hints = {{"↵", "Connect"}, {"Tab", "Show password"}, {"Esc", "Cancel"}}
 	case m.focus == .Input: hints = {{"↵", "Submit"}, {"Esc", "Cancel"}}
 	case m.focus == .Sub && !sc && is_page(m, m.open) && m.sections[m.open].kind == .Font: hints = {{"↑↓", "Preview"}, {"↵", "Apply font"}, {"⌫", "Back"}}
 	case m.focus == .Sub && !sc && len(m.sections[m.open].hints) > 0: hints = m.sections[m.open].hints[:]
@@ -1775,6 +1862,9 @@ tone_color :: proc(t: logic.Theme, tone: string, def: u32) -> u32 {
 	case "dim": return mix(t.fg_dim, t.fg, 0.5)
 	case "faint": return mix(t.bg, t.fg, 0.3)
 	case "fg": return t.fg_bright
+	case "yellow": return t.yellow
+	case "green": return t.green
+	case "blue": return t.blue
 	}
 	return def
 }
@@ -1783,7 +1873,14 @@ tone_color :: proc(t: logic.Theme, tone: string, def: u32) -> u32 {
 @(private)
 entry_h :: proc(m: ^Menu, act: Action, S: int, compact := false) -> int {
 	if compact && act.kind == .Row && act.slider do return 34 * S
+	if compact && act.kind == .Row && act.under != "" do return (act.tall ? 40 : 34) * S
+	if compact && act.kind == .Notice { // the popup's card: its text wrapped
+		n := len(wrap_text(m.f_small, act.meta, (COMPACT_W - 56) * S))
+		return 8 * S + 12 * S + int(m.f_bold13.line_h) + 6 * S + n * (int(m.f_small.line_h) + 2 * S) + 10 * S + 8 * S
+	}
 	switch act.kind {
+	case .Qr: return 18 * S + 220 * S + 12 * S + int(m.f_bold13.line_h) + 8 * S + 2 * int(m.f_small.line_h) + 12 * S
+	case .Big: return 20 * S + int(m.f_hero.line_h) + 28 * S + 20 * S
 	case .Hero: return 10 * S + int(m.f_hero.line_h) + 8 * S + 12 * S + 8 * S + int(m.f_small.line_h) + 12 * S
 	case .Row, .Empty, .Day: return 30 * S
 	case .Heading: return 10 * S + int(m.f_tiny.line_h) + 4 * S
@@ -1867,6 +1964,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 				fill_rect(cv, bx, by, bw, bh, argb(zero ? t.selection : acc, 0xff))
 				text_in(cv, m.f_tiny, act.count, bx + 5 * S, by, bh, argb(zero ? dim : bg, 0xff))
 			}
+			if act.meta != "" do draw_text_f(cv, m.f_tiny, act.meta, x1 - (compact ? 16 : 20) * S - tw(m.f_tiny, act.meta), py + 10 * S, argb(tone_color(t, act.metac, dim), 0xff))
 		case .Day: // outside the dashboard: a plain row
 			on := m.focus == .Sub && e == sel_entry
 			hit_add(a, px, py, x1 - px, ah, .Action, sec_index(m, s), m.shown_actions[e])
@@ -1885,10 +1983,39 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			fill_rect(cv, mx + 3 * S, y + 3 * S, (bw - 6 * S) * act.pct / 100, 6 * S, argb(c, 0xff))
 			y += 12 * S + 8 * S
 			draw_text_f(cv, m.f_small, act.meta, mx, y, argb(dim, 0xff), nil, 0, x1 - 16 * S)
+		case .Qr: // a picture on the foreground colour, centred, a title and a line under it
+			qs := 220 * S
+			qx := px + (x1 - px - qs - 24 * S) / 2
+			y := py + 18 * S
+			fill_rect(cv, qx, y, qs + 24 * S, qs + 24 * S, argb(fg, 0xff))
+			img := image_scaled(a, act.thumb, qs, qs, false)
+			if img.ok do blit_image(cv, img.px, img.w, img.h, qx + 12 * S + (qs - img.w) / 2, y + 12 * S + (qs - img.h) / 2)
+			y += qs + 24 * S + 12 * S
+			draw_text_f(cv, m.f_bold13, act.label, px + (x1 - px - tw(m.f_bold13, act.label)) / 2, y, argb(fgb, 0xff))
+			y += int(m.f_bold13.line_h) + 8 * S
+			for l in wrap_text(m.f_small, act.meta, x1 - px - 32 * S) {
+				draw_text_f(cv, m.f_small, l, px + (x1 - px - tw(m.f_small, l)) / 2, y, argb(dim, 0xff))
+				y += int(m.f_small.line_h)
+			}
+		case .Big: // a code large in a box, centred (Bluetooth pairing)
+			bw := tw(m.f_hero, act.label) + 44 * S
+			bh := int(m.f_hero.line_h) + 28 * S
+			bx := px + (x1 - px - bw) / 2
+			rounded_rect(cv, bx, py + 20 * S, bw, bh, 0, 0, f32(S), argb(t.selection, 0xff))
+			text_in(cv, m.f_hero, act.label, bx + 22 * S, py + 20 * S, bh, argb(acc, 0xff))
 		case .Empty:
 			text_in(cv, m.f_body, "–", mx + 4 * S, py, ah, argb(faint, 0xff))
 			text_in(cv, m.f_body, act.label, mx + 28 * S, py, ah, argb(dim, 0xff), x1 - 20 * S)
 		case .Notice:
+			if compact { // the popup's notice: a filled card, bold title, the text wrapped
+				nx, nw := mx, x1 - 16 * S - mx
+				fill_rect(cv, nx, py + 8 * S, nw, h - 16 * S, argb(t.selection, 0xff))
+				ty := py + 8 * S + 12 * S
+				draw_text_f(cv, m.f_bold13, ellipsize(m.f_bold13, act.label, nw - 24 * S), nx + 12 * S, ty, argb(fgb, 0xff))
+				ty += int(m.f_bold13.line_h) + 6 * S
+				for l in wrap_text(m.f_small, act.meta, nw - 24 * S) { draw_text_f(cv, m.f_small, l, nx + 12 * S, ty, argb(dim, 0xff)); ty += int(m.f_small.line_h) + 2 * S }
+				break
+			}
 			tc := tone_color(t, act.tone, acc)
 			nx, ny, nw := mx, py + 8 * S, x1 - 20 * S - mx
 			nh := h - 16 * S
@@ -1941,14 +2068,14 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 		case .Row:
 			j := row - 1
 			on := m.focus == .Sub && e == sel_entry
-			hit_add(a, px, py, x1 - px, ah, .Action, sec_index(m, s), m.shown_actions[e])
+			hit_add(a, px, py, x1 - px, h, .Action, sec_index(m, s), m.shown_actions[e])
 			lc := m.focus == .Sub ? fgb : fg
 			if act.dim do lc = faint
 			mc := tone_color(t, act.metac, dim)
 			markc := tone_color(t, act.markc, act.mark != "" ? faint : mix(bg, fg, 0.35))
 			subc, chipc := dim, tone_color(t, act.chipc, dim)
 			if on {
-				fill_rect(cv, px, py, x1 - px, ah, argb(acc, 0xff))
+				fill_rect(cv, px, py, x1 - px, h, argb(acc, 0xff))
 				lc, mc, markc, subc, chipc = bg, bg, bg, bg, bg
 			}
 			// mark column: shortcut letter or number, a status glyph, or › / »
@@ -1961,9 +2088,9 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			if badge_label != "" do badge(cv, m.f_tiny, badge_label, mx + 16 * S, py, ah, S, on ? bg : acc, on ? acc : bg, true)
 			else if !bare {
 				mark := act.mark != "" ? act.mark : (act.view != "" || act.jump != "" ? "»" : "›")
-				text_in(cv, m.f_body, mark, mx + (16 * S - tw(m.f_body, mark)) / 2, py, ah, argb(markc, 0xff))
+				text_in(cv, m.f_body, mark, mx + (16 * S - tw(m.f_body, mark)) / 2, py, h, argb(markc, 0xff))
 			}
-			lx := bare ? mx : mx + 16 * S + 12 * S
+			lx := bare ? mx : mx + 16 * S + (compact ? 10 : 12) * S
 			right := x1 - (compact ? 16 : 20) * S
 			if act.slider && compact { // the popup's slider: label 88 px, the track, the value 44 px
 				sh := h
@@ -1981,6 +2108,48 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 				if act.value > 100 do fill_rect(cv, tx + tw_ * 100 / vm, ty, tw_ * (min(act.value, vm) - 100) / vm, 4 * S, argb(t.red, 0xff))
 				if vm > 100 do fill_rect(cv, tx + tw_ * 100 / vm, ty - 4 * S, S, 12 * S, argb(on ? bg : dim, 0xff))
 				hit_add(a, tx - 4 * S, py, tw_ + 8 * S, sh, .Slider, sec_index(m, s), m.shown_actions[e], tx, tw_)
+				break
+			}
+			if compact && !act.slider { // the popup's row: a switch, a lock, the meta, a battery; one or two lines
+				if act.toggle do right -= draw_switch(a, cv, S, right, py, h, act.on, on) + 10 * S
+				if act.lock {
+					g := "󰌾"
+					text_in(cv, m.f_small, g, right - tw(m.f_small, g), py, h, argb(mc, 0xff))
+					right -= tw(m.f_small, g) + 10 * S
+				}
+				meta := act.meta
+				if len(act.choices) > 0 do meta = fmt.tprintf("‹ %s ›", act.meta)
+				if meta == "" && act.confirm_title != "" do meta = "asks first"
+				if meta == "" && act.field != "" && on do meta = "copy"
+				if meta != "" {
+					meta = ellipsize(m.f_small, meta, (right - lx) * 55 / 100)
+					text_in(cv, m.f_small, meta, right - tw(m.f_small, meta), py, h, argb(mc, 0xff))
+					right -= tw(m.f_small, meta) + 10 * S
+				}
+				if act.bat >= 0 {
+					bc := on ? bg : (act.bat <= 20 ? t.yellow : fg)
+					pct := fmt.tprintf("%d%%", act.bat)
+					bx := right - tw(m.f_small, pct) - 6 * S - 20 * S
+					by := py + (h - 9 * S) / 2
+					rounded_rect(cv, bx, by, 18 * S, 9 * S, 0, 0, f32(S), argb(bc, 0xff))
+					fill_rect(cv, bx + 2 * S, by + 2 * S, 14 * S * act.bat / 100, 5 * S, argb(bc, 0xff))
+					fill_rect(cv, bx + 18 * S, by + 3 * S, 2 * S, 3 * S, argb(bc, 0xff))
+					text_in(cv, m.f_small, pct, right - tw(m.f_small, pct), py, h, argb(bc, 0xff))
+					right = bx - 10 * S
+				}
+				if act.field != "" {
+					text_in(cv, m.f_small, act.field, lx, py, h, argb(on ? bg : dim, 0xff))
+					lx += 94 * S
+				}
+				lf := act.bold ? m.f_bold13 : m.f_body
+				lcol := on ? bg : tone_color(t, act.labelc, lc)
+				if act.dim && !on do lcol = faint
+				if act.under != "" {
+					total := int(lf.line_h) + 2 * S + int(m.f_tiny.line_h)
+					ty := py + (h - total) / 2
+					draw_text_f(cv, lf, ellipsize(lf, act.label, right - lx), lx, ty, argb(lcol, 0xff))
+					draw_text_f(cv, m.f_tiny, ellipsize(m.f_tiny, act.under, right - lx), lx, ty + int(lf.line_h) + 2 * S, argb(on ? bg : tone_color(t, act.underc, dim), 0xff))
+				} else do text_in(cv, lf, ellipsize(lf, act.label, right - lx), lx, py, h, argb(lcol, 0xff))
 				break
 			}
 			if act.slider {
@@ -2529,7 +2698,7 @@ menu_dump :: proc(a: ^App) -> string {
 	sc := m.shortcut && (m.focus == .Menu || m.focus == .Sub)
 	crumb, ph, count := menu_header(a, sc)
 	q := string(a.query[:])
-	if m.focus == .Input && m.input_password do q = strings.repeat("•", utf8.rune_count_in_string(q), context.temp_allocator)
+	if m.focus == .Input && m.input_password && !m.input_reveal do q = strings.repeat("•", utf8.rune_count_in_string(q), context.temp_allocator)
 	fmt.sbprintfln(&b, "focus %v%s", m.focus, sc ? " shortcuts" : "")
 	if compact_now(a) {
 		w, h := menu_size(a)
@@ -2581,13 +2750,15 @@ menu_dump :: proc(a: ^App) -> string {
 			act := s.actions[e]
 			sel := m.si < len(m.sel_actions) && m.sel_actions[m.si] == e
 			switch act.kind {
-			case .Heading: fmt.sbprintfln(&b, "== %s%s", strings.to_upper(act.label, context.temp_allocator), act.count != "" ? fmt.tprintf(" [%s]", act.count) : "")
+			case .Heading: fmt.sbprintfln(&b, "== %s%s%s", strings.to_upper(act.label, context.temp_allocator), act.count != "" ? fmt.tprintf(" [%s]", act.count) : "", act.meta != "" ? fmt.tprintf(" · %s", act.meta) : "")
 			case .Empty: fmt.sbprintfln(&b, "-- %s", act.label)
 			case .Notice: fmt.sbprintfln(&b, "!! %s: %s · %s", act.tone, act.label, act.meta)
 			case .Bars: fmt.sbprintfln(&b, "~~ %d loading bars", act.bars)
 			case .Card: fmt.sbprintfln(&b, "[] %s %s · %s · %s", act.state, act.label, act.meta, act.line2)
 			case .Progress: fmt.sbprintfln(&b, "↓ %s %d%% · %s", act.label, act.pct, act.meta)
 			case .Hero: fmt.sbprintfln(&b, "## %d%%%s · %s", act.pct, act.active ? " charging" : "", act.meta)
+			case .Qr: fmt.sbprintfln(&b, "[qr] %s · %s", act.label, act.meta)
+			case .Big: fmt.sbprintfln(&b, "[code] %s", act.label)
 			case .Day: fmt.sbprintfln(&b, "%s day %s %s rain %d%% %s–%s", sel ? "*" : " ", act.label, act.glyph, act.pct, act.meta, act.line2)
 			case .Row:
 				meta := act.meta
@@ -2600,6 +2771,11 @@ menu_dump :: proc(a: ^App) -> string {
 				if act.chip != "" do append(&extra, fmt.tprintf("chip %s", act.chip))
 				if act.key != "" do append(&extra, fmt.tprintf("key %s", act.key))
 				if act.dim do append(&extra, "dim")
+				if act.under != "" do append(&extra, fmt.tprintf("· %s", act.under))
+				if act.field != "" do append(&extra, fmt.tprintf("field %s", act.field))
+				if act.bat >= 0 do append(&extra, fmt.tprintf("bat %d%%", act.bat))
+				if act.lock do append(&extra, "lock")
+				if act.bold do append(&extra, "bold")
 				fmt.sbprintf(&b, "%s %s", sel ? "*" : " ", act.label)
 				if meta != "" do fmt.sbprintf(&b, " | %s", meta)
 				if len(extra) > 0 do fmt.sbprintf(&b, " (%s)", strings.join(extra[:], ", ", context.temp_allocator))

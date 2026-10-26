@@ -1,0 +1,18 @@
+O	width=424;height=524
+KB	b	bt-power
+KB	v	bt-visible
+A	bt-power	Bluetooth			stay;toggle=on
+A	bt-visible	Visible as k4-laptop			stay;toggle=off
+D	Devices		
+ST	Keyboard K3 battery 12%	yellow
+H	Connected
+A	earbuds	Earbuds	›		stay;mark=󰋋;markc=accent;bold;tall;line2=connected · Headphones;bat=64
+A	kbd	Keyboard K3	›		stay;mark=󰌌;markc=accent;bold;tall;line2=connected · Keyboard;bat=12
+H	Paired
+A	mx	MX Master 3			stay;mark=󰍽;tall;line2=Mouse
+A	pixel	Pixel 8			stay;mark=󰏲;tall;line2=couldn’t connect · ↵ to retry;line2c=red
+H	Nearby		↻ scanning	accent
+A	jbl	JBL Flip 6			stay;mark=󰓃;tall;line2=Speaker · strong signal
+A	unk	4C:8B:2A:91:E0:17			stay;mark=󰂯;markc=muted;dim;tall;line2=Unknown device · weak signal
+A	settings	Bluetooth settings	Blueman ↗		stay
+Y	↑↓	Move	↵	Connect / pair	v	Visible	b	On/off

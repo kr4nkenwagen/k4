@@ -1,0 +1,17 @@
+O	width=424;height=524
+KB	w	wifi-power
+KB	r	wifi-rescan
+A	wifi-power	Wi-Fi			stay;toggle=on
+D	Home-5G		
+ST	5 GHz · 97%	dim
+H	Connected
+A	cur	Home-5G	›		stay;mark=󰤨;markc=accent;bold;labelc=accent;line2=connected · 5 GHz · 866 Mb/s;lock
+H	Networks		↻ scanning	accent
+A	home24	Home-2.4G			stay;mark=󰤥;line2=2.4 GHz · saved;lock
+A	telia	Telia-2G3F			stay;mark=󰤥;line2=5 GHz;lock;input=Telia-2G3F needs a password (WPA2).|Saved to NetworkManager, k4 never stores the password itself.|password
+A	iphone	Elin’s iPhone			stay;mark=󰤨;line2=5 GHz · hotspot;lock
+A	cafe	Kaffekoppen Guest			stay;mark=󰤢;line2=2.4 GHz · sign-in page
+A	edu	eduroam			stay;mark=󰤟;line2=5 GHz · 802.1X;lock
+A	hidden	Connect to hidden network…			stay;input=Network name|The name (SSID) of the hidden network
+A	settings	Network settings	⌃↵ launcher		stay
+Y	↑↓	Move	↵	Connect	r	Rescan	w	Wi-Fi on/off

@@ -1,0 +1,10 @@
+focus Sub
+popup 424x524
+crumb NETWORK › SHARE
+query (Filter options…)
+count 
+hints ↑↓ Move · ↵ ␣ Run · Esc Close
+title Share · Share Home-5G (full width)
+[qr] Scan to join Home-5G · Phone camera, no typing. The code carries the network name, the security and the password.
+exit 1
+log: load apps

@@ -71,6 +71,13 @@ ask for a width (`O width=N`), a large charge row (`X percent line [charging]`) 
 weeks, a dot per calendar), the day's events with a now line and the next meeting, an agenda,
 event details (reply, join, open, copy, delete), quick add from plain text and the calendars,
 over CS/CX/CC/CE/CG/CN lines a script prints (the dotfiles' `k4-cal`: Google Calendar).
+Popup pages also take a fixed size (`O width=N;height=N`), a reload every N seconds while shown
+(`O refresh=N`, scans), a status in the header (`ST text tone`), letters that run actions
+(`KB key id`), a picture with a caption (`QR`), a large code (`BIG`), and rows with a second line,
+a bold or coloured label, a lock, a small battery or a key column (`line2=`, `bold`, `labelc=`,
+`lock`, `bat=`, `field=`); a password asked in a popup gets its own form (Tab shows it), and a run
+can print `k4:launcher ID` to hand over to the full launcher. The bar's Wi-Fi and Bluetooth
+popups are built from these.
 A click outside any k4 menu closes it: a transparent surface under it catches the click, clear
 of the bar.
 

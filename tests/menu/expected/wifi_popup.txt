@@ -1,0 +1,20 @@
+focus Sub
+popup 424x524
+crumb NETWORK › WI-FI
+query (Filter options…)
+count 
+hints ↑↓ Move · ↵ Connect · r Rescan · w Wi-Fi on/off · Esc Close
+title Wi-Fi · Home-5G (full width)
+* Wi-Fi | [on]
+== CONNECTED
+  Home-5G | › (mark 󰤨, · connected · 5 GHz · 866 Mb/s, lock, bold)
+== NETWORKS · ↻ scanning
+  Home-2.4G (mark 󰤥, · 2.4 GHz · saved, lock)
+  Telia-2G3F (mark 󰤥, · 5 GHz, lock)
+  Elin’s iPhone (mark 󰤨, · 5 GHz · hotspot, lock)
+  Kaffekoppen Guest (mark 󰤢, · 2.4 GHz · sign-in page)
+  eduroam (mark 󰤟, · 5 GHz · 802.1X, lock)
+  Connect to hidden network…
+  Network settings | ⌃↵ launcher
+exit 1
+log: load apps

@@ -1,0 +1,3 @@
+O	width=424;height=524
+D	Share Home-5G		
+QR	$K4_TEST_DIR/qr.png	Scan to join Home-5G	Phone camera, no typing. The code carries the network name, the security and the password.
