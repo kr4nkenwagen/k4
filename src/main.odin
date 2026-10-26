@@ -41,7 +41,7 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --dry-run FILE.png      render one frame to a PNG without Wayland, then print the selection
   --dump                  like --dry-run without the PNG: print the menu state as text (tests)
   --keys KEYS, --select N keys pressed before the first frame: text plus <down> <up> <left>
-                          <right> <enter> <esc> <tab> <bs> <alt-x> <ctrl-x>, and the pointer:
+                          <right> <enter> <esc> <tab> <bs> <pgup> <pgdn> <alt-x> <ctrl-x>, and the pointer:
                           <move:x,y> <click:x,y> <rclick:x,y> <mclick:x,y> <wheel:n>; then move the selection
   --scale N               dry runs: buffer scale
 
@@ -323,6 +323,8 @@ press_keys :: proc(a: ^App, keys: string) {
 				case "esc": k = .Escape
 				case "tab": k = .Tab
 				case "bs": k = .Backspace
+				case "pgup": k = .Page_Up
+				case "pgdn": k = .Page_Down
 				}
 				ch := rune(0)
 				text := ""

@@ -1,0 +1,7 @@
+focus Sub
+popup 644x474
+calendar Month · 2026-12-03 · ok · synced 09:05
+hints ←→↑↓ Day · ↵ Events · PgUp/Dn Month · Tab Agenda · n New · t Today
+exit 1
+log: load apps
+log: cal sync

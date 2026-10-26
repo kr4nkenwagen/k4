@@ -35,7 +35,9 @@ import "logic"
 //      click's command runs the module is drawn open, so a popup's module stays an accent block.
 //      flags (k=v;…): px=N (inner padding, default 7), maxw=N / maxw2=N (text caps),
 //      compact (text hidden below 1440 px), flash (the wheel shows the percentage for 1.2 s),
-//      tip=TEXT (a tooltip for modules that print none).
+//      tip=TEXT (a tooltip for modules that print none), next=PATH (the clock: a meeting from
+//      that TSV of today's "start end title video" replaces the date: "Review in 8 min" in
+//      yellow 10 min before, "Review · j join" in the accent while it runs).
 // Hovering a module for 500 ms shows its tooltip under it (one line): the surface grows for it,
 // its input region and exclusive zone stay the strip.
 
@@ -50,6 +52,7 @@ Module :: struct {
 	px, maxw, maxw2: int, // flags
 	compact, flash: bool,
 	tip: string, // flags' tip=: the tooltip when the module prints none
+	next_file: string, // clock flag next=PATH: today's meetings (start end title video, TSV)
 	// what it shows
 	text, tooltip, class, icon, icon_tone, text_tone, text2, text2_tone: string,
 	level, battery, pct: int, // -1: none
@@ -131,6 +134,10 @@ bar_setup :: proc(a: ^App, data: string) {
 				case "compact": m.compact = true
 				case "flash": m.flash = true
 				case "tip": m.tip = strings.clone(v)
+				case "next":
+					p := v
+					if strings.has_prefix(p, "~/") do p = strings.concatenate({os.get_env("HOME", context.temp_allocator), p[1:]}, context.temp_allocator)
+					m.next_file = strings.clone(p)
 				}
 			}
 			append(&b.mods, m)
@@ -293,16 +300,40 @@ bar_tick :: proc(a: ^App) -> int {
 			if tf == "" do tf = "%H:%M"
 			t := clock_text(tf, utc)
 			d := utc ? "UTC" : clock_text(df, false)
+			tone := utc ? "accent" : ""
+			if !utc && m.next_file != "" do if md, mt, ok := clock_meeting(m.next_file); ok do d, tone = md, mt
 			// m.text outlives this frame's temp allocator: keep heap copies
 			if t != m.text { if len(m.text) > 0 do delete(m.text); m.text = strings.clone(t) }
 			if d != m.text2 { if len(m.text2) > 0 do delete(m.text2); m.text2 = strings.clone(d) }
-			if len(m.text2_tone) > 0 do delete(m.text2_tone)
-			m.text2_tone = utc ? strings.clone("accent") : ""
+			if tone != m.text2_tone {
+				if len(m.text2_tone) > 0 do delete(m.text2_tone)
+				m.text2_tone = strings.clone(tone)
+			}
 			wait = min(wait, 1000 - int(time.to_unix_nanoseconds(time.now()) / 1_000_000 % 1000) + 5)
 		case .Workspaces, .Window, .Text:
 		}
 	}
 	return wait
+}
+
+// The meeting the clock shows instead of the date: one running now, or one starting within
+// 10 minutes.
+@(private)
+clock_meeting :: proc(path: string) -> (text, tone: string, ok: bool) {
+	data, err := os.read_entire_file(path, context.temp_allocator)
+	if err != nil do return
+	now := i64(libc.time(nil))
+	text_ := string(data)
+	for line in strings.split_lines_iterator(&text_) {
+		f := strings.split(line, "\t", context.temp_allocator)
+		if len(f) < 3 do continue
+		st, _ := strconv.parse_i64(f[0])
+		en, _ := strconv.parse_i64(f[1])
+		video := len(f) > 3 && f[3] != ""
+		if st <= now && now < en do return fmt.tprintf("%s · %s", f[2], video ? "j join" : "now"), "accent", true
+		if now < st && st - now <= 600 do return fmt.tprintf("%s in %d min", f[2], (st - now + 59) / 60), "yellow", true
+	}
+	return
 }
 
 @(private) first_field :: proc(s: string) -> string { if i := strings.index_byte(s, '|'); i >= 0 do return s[:i]; return s }

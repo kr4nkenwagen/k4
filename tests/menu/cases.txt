@@ -59,8 +59,19 @@ popup_typing_ignored	net	xyz<down>	COMPACT=1
 popup_esc_closes	net	<esc>	COMPACT=1
 popup_bs_stays	net	<bs>	COMPACT=1
 popup_launcher	net	<down><ctrl-enter>	COMPACT=1
-popup_cal	cal	-	COMPACT=1|K4_TODAY=2026-10-26
-popup_cal_keys	cal	<down><right><right>	COMPACT=1|K4_TODAY=2026-10-26
-popup_cal_today	cal	<left><left>t	COMPACT=1|K4_TODAY=2026-10-26
 popup_hero	bat	-	COMPACT=1
 popup_page_back	net	<enter>	COMPACT=1
+cal_month	gcal	-	COMPACT=1
+cal_events	gcal	<enter>	COMPACT=1
+cal_detail	gcal	<enter><enter>	COMPACT=1
+cal_rsvp	gcal	<enter><enter><right>	COMPACT=1
+cal_back	gcal	<enter><enter><esc><esc>	COMPACT=1
+cal_esc_closes	gcal	<esc>	COMPACT=1
+cal_days	gcal	<right><down><pgdn>	COMPACT=1
+cal_today	gcal	<down><down>t	COMPACT=1
+cal_agenda	gcal	<tab><down>	COMPACT=1
+cal_add	gcal	nLunch with Elin fri 12	COMPACT=1
+cal_add_create	gcal	nDentist tomorrow 3pm<tab><enter>	COMPACT=1
+cal_cals	gcal	c<down><enter>	COMPACT=1
+cal_join	gcal	j	COMPACT=1
+cal_delete_asks	gcal	<enter><down><down><enter><down><down><down><enter>	COMPACT=1

@@ -1,0 +1,25 @@
+focus Sub
+popup 644x474
+calendar Agenda · 2026-10-26 · ok · synced 09:05
+hints ↑↓ Event · ↵ Details · j Join · Tab Month · c Calendars
+== Mon 26 Oct
+  09:00–09:15 · Standup
+* 11:00–12:00 · Design review: k4 bar
+  17:30–18:00 · Pick up parcel
+== Tue 27 Oct
+  10:00–10:30 · 1:1 with Anna
+== Wed 28 Oct
+  all day · k4 0.4 release
+  14:00–14:45 · Dentist
+== Sat 31 Oct
+  all day · Alla helgons dag
+  19:00–23:00 · Dinner at Elin’s
+== Mon 2 Nov
+  all day · Berlin trip
+== Tue 3 Nov
+  all day · Berlin trip
+== Wed 4 Nov
+  all day · Berlin trip
+exit 1
+log: load apps
+log: cal sync

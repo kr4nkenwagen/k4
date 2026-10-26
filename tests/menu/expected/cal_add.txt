@@ -1,0 +1,8 @@
+focus Sub
+popup 644x474
+calendar Add · 2026-10-26 · ok · synced 09:05
+hints ↵ Create · Tab Calendar · Esc Cancel
+new "Lunch with Elin" · 2026-10-30 · 12:00
+exit 1
+log: load apps
+log: cal sync

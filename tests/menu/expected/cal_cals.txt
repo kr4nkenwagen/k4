@@ -1,0 +1,13 @@
+focus Sub
+popup 644x474
+calendar Cals · 2026-10-26 · ok · synced 09:05
+hints ↑↓ Move · ␣ Show / hide · s Sync · Esc Back
+  Work shown
+* Personal shown
+  Family shown
+  Holidays in Sweden shown
+toast Ran  toggle
+exit 1
+log: load apps
+log: cal sync
+log: cal toggle personal Personal off

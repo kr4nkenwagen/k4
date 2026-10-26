@@ -54,6 +54,12 @@ Wl :: struct {
 	repeat_at:  time.Tick,
 	cpu:        []u32, // GPU path: the CPU frame before the shaders
 	bar_h:      int,   // the bar's requested surface height (it grows for a tooltip)
+	// the menu's click catcher: a transparent surface under it over the rest of the output
+	// (clear of the bar's exclusive zone): a click there closes k4
+	catcher:    ^wl.surface,
+	catcher_layer: ^wlr.layer_surface_v1,
+	catcher_buf: Buffer,
+	ptr_surf:   ^wl.surface, // the surface the pointer is on
 }
 
 W: Wl
@@ -230,8 +236,10 @@ set_cursor :: proc(serial: uint) {
 ptr_xy :: proc(x, y: wl.fixed_t) { W.ptr_x, W.ptr_y = int(f32(x) / 256 * f32(W.scale)), int(f32(y) / 256 * f32(W.scale)) }
 ptr_enter :: proc "c" (data: rawptr, p: ^wl.pointer, serial: uint, s: ^wl.surface, x, y: wl.fixed_t) {
 	context = W.ctx
-	ptr_xy(x, y)
+	W.ptr_surf = s
 	set_cursor(serial)
+	if s == W.catcher do return
+	ptr_xy(x, y)
 }
 ptr_leave :: proc "c" (data: rawptr, p: ^wl.pointer, serial: uint, s: ^wl.surface) {
 	context = W.ctx
@@ -239,12 +247,14 @@ ptr_leave :: proc "c" (data: rawptr, p: ^wl.pointer, serial: uint, s: ^wl.surfac
 }
 ptr_motion :: proc "c" (data: rawptr, p: ^wl.pointer, t: uint, x, y: wl.fixed_t) {
 	context = W.ctx
+	if W.ptr_surf == W.catcher && W.catcher != nil do return
 	ptr_xy(x, y)
 	if app_pointer_move(W.app, W.ptr_x, W.ptr_y) do W.dirty = true
 }
 ptr_button :: proc "c" (data: rawptr, p: ^wl.pointer, serial, t, button: uint, state: wl.pointer_button_state) {
 	context = W.ctx
 	if state != .pressed do return
+	if W.ptr_surf == W.catcher && W.catcher != nil { W.app.exit = 1; W.app.done = true; return } // a click outside closes
 	b := 0
 	switch u(button) { case 0x110: b = 1; case 0x111: b = 3; case 0x112: b = 2 } // BTN_LEFT, RIGHT, MIDDLE
 	if b != 0 && app_pointer_click(W.app, W.ptr_x, W.ptr_y, b) do W.dirty = true
@@ -411,6 +421,37 @@ menu_resize :: proc(a: ^App) {
 	wl.surface_commit(W.surface)
 }
 
+// The click catcher: on the top layer (under k4's overlay surface), anchored to every edge with
+// exclusive zone 0, so it covers the output except the bar: clicks there close k4, the bar's
+// still reach the bar.
+catcher_configure :: proc "c" (data: rawptr, ls: ^wlr.layer_surface_v1, serial, w, h: u32) {
+	context = W.ctx
+	wlr.layer_surface_v1_ack_configure(ls, serial)
+	if w == 0 || h == 0 do return
+	b := &W.catcher_buf
+	if b.w != int(w) || b.h != int(h) {
+		if !buffer_make(b, int(w), int(h)) do return
+		for &p in b.px do p = 0 // transparent
+	}
+	wl.surface_attach(W.catcher, b.wl, 0, 0)
+	wl.surface_damage_buffer(W.catcher, 0, 0, b.w, b.h)
+	wl.surface_commit(W.catcher)
+}
+catcher_closed :: proc "c" (data: rawptr, ls: ^wlr.layer_surface_v1) {}
+catcher_listener := wlr.layer_surface_v1_listener{configure = catcher_configure, closed = catcher_closed}
+
+catcher_make :: proc() {
+	if os.get_env("K4_NO_CATCHER", context.temp_allocator) != "" do return
+	TOP, BOTTOM, LEFT, RIGHT :: i32(1), i32(2), i32(4), i32(8)
+	W.catcher = wl.compositor_create_surface(W.compositor)
+	W.catcher_layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.catcher, nil, .top, "k4-catcher")
+	wlr.layer_surface_v1_add_listener(W.catcher_layer, &catcher_listener, nil)
+	wlr.layer_surface_v1_set_anchor(W.catcher_layer, wlr.layer_surface_v1_anchor(TOP | BOTTOM | LEFT | RIGHT))
+	wlr.layer_surface_v1_set_exclusive_zone(W.catcher_layer, 0)
+	wlr.layer_surface_v1_set_keyboard_interactivity(W.catcher_layer, .none)
+	wl.surface_commit(W.catcher)
+}
+
 // ---------- main loop ----------
 run_wayland :: proc(a: ^App) -> bool {
 	W.app = a
@@ -491,6 +532,7 @@ run_wayland :: proc(a: ^App) -> bool {
 	if a.opts.popup.set do popup_place(a)
 	wlr.layer_surface_v1_set_keyboard_interactivity(W.layer, .exclusive)
 	wl.surface_commit(W.surface)
+	catcher_make()
 	// Ghostty's shaders when it has any and EGL / OpenGL 4.3 work; else the shm path
 	if !gpu_init_window(W.display, W.surface, a.width * W.scale, a.height * W.scale) && G.display != nil && len(shader_paths()) > 0 {
 		fmt.eprintln("k4: shaders need EGL with OpenGL 4.3; drawing without them")

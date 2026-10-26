@@ -141,7 +141,8 @@ Section :: struct {
 	has_d:   bool, // a D line set the count (an empty one hides it)
 	pane:    bool, // a page drawn in the right pane, next to the sections (O pane)
 	weather: bool, // O weather: the design's Weather dashboard instead of rows
-	cal:     bool, // O cal: the month grid (the bar's clock popup) instead of rows
+	cal:     bool, // O cal: the calendar (cal.odin) instead of rows
+	cd:      Cal_Data, // its data (CS CX CC CE CG CN lines)
 	popup_w: int,  // O width=N: the compact popup's width (default 420)
 	wx_now:  [6]string, // city, location note, icon kind, temperature, condition, feels/high/low
 	wx_details: [dynamic][2]string,
@@ -201,7 +202,7 @@ Menu :: struct {
 	top_crumb, top_ph, top_count: string, // T record
 	sizes:    map[int]^Font, // msize: more sizes of the UI font
 	slow_ms: int,
-	cal_y, cal_m, cal_d: int, // the month grid's cursor (month 1–12)
+	calu:     Cal_UI, // the calendar's view, cursor and selections
 	f_body, f_small, f_tiny, f_big, f_title, f_row, f_huge, f_confirm, f_bold13, f_bold12, f_bold11, f_bold10, f_glyph, f_hero: ^Font,
 }
 
@@ -284,6 +285,7 @@ section_line :: proc(s: ^Section, f: []string) {
 	case "X": // the battery popup's charge: X <percent> <line> [charging]
 		p, _ := strconv.parse_int(get(f, 1))
 		append(&s.actions, Action{kind = .Hero, heading = true, pct = clamp(p, 0, 100), meta = strings.clone(get(f, 2)), active = get(f, 3) == "charging"})
+	case "CS", "CX", "CC", "CE", "CG", "CN": cal_line(s, f)
 	case "WN":
 		for i in 0 ..< 6 do s.wx_now[i] = strings.clone(get(f, i + 1))
 	case "WD":
@@ -306,6 +308,7 @@ section_line :: proc(s: ^Section, f: []string) {
 section_reset :: proc(s: ^Section) {
 	clear(&s.actions)
 	clear(&s.hints)
+	cal_reset(s)
 	clear(&s.wx_details)
 	clear(&s.wx_hours)
 	s.wx_now = {}
@@ -493,6 +496,7 @@ menu_on_readable :: proc(a: ^App, fd: linux.Fd) -> bool {
 		}
 		m.toast = last != "" ? strings.clone(last) : "" // no message: drop the "Label  …" of the run
 		m.runner = {}
+		m.calu.syncing = false
 		if m.slide_pending {
 			m.slide_pending = false
 			execute(a, m.slide_sec, m.slide_act, true)
@@ -519,6 +523,7 @@ menu_on_readable :: proc(a: ^App, fd: linux.Fd) -> bool {
 		menu_start_loaders(m)
 		menu_refilter(a)
 		if first && m.focus == .Sub && m.open == si do select_current_action(m)
+		if s.cal && m.focus == .Sub && m.open == si do cal_loaded(a, &s)
 		return true
 	}
 	for &v in m.views {
@@ -739,7 +744,10 @@ menu_enter :: proc(a: ^App, idx: int) {
 	m := a.menu
 	if idx < 0 || idx >= len(m.sections) do return
 	m.focus, m.open, m.cur, m.si, m.scroll, m.toast = .Sub, idx, root(m, idx), 0, 0, ""
-	m.cal_m = 0 // the month grid starts at today (cal_ready)
+	{ // a calendar opens at today, in the month view
+		rs := m.calu.rsvp
+		m.calu = {rsvp = rs}
+	}
 	refresh_if_stale(m, &m.sections[idx].load)
 	loader_start(m, &m.sections[idx].load)
 	clear_query(a)
@@ -1152,7 +1160,7 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 		return true
 	}
 	if compact_now(a) && m.focus == .Sub && compact_key(a, k, ctrl, ch, text) do return true
-	if m.focus == .Sub && m.sections[m.open].cal && !ctrl && !alt do return cal_key(a, k, text)
+	if m.focus == .Sub && m.sections[m.open].cal && !alt && !(ctrl && (ch == 'c' || ch == 'g')) do return cal_key(a, k, ctrl, ch, text)
 	if alt && ch != 0 {
 		up := strings.to_upper(utf8.runes_to_string({ch}, context.temp_allocator), context.temp_allocator)
 		for s, i in m.sections do if s.key == up { menu_enter(a, i); return true }
@@ -1293,6 +1301,7 @@ badge :: proc(cv: ^Canvas, f: ^Font, label: string, x_right, y, h, S: int, bg_c,
 }
 
 menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
+	if a.menu.focus == .Sub && a.menu.sections[a.menu.open].cal { draw_calendar(a, cv, S); return }
 	if compact_now(a) { menu_draw_compact(a, cv, S); return }
 	m := a.menu
 	t := a.theme
@@ -1359,7 +1368,6 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		case srch: draw_results(a, cv, S, body)
 		case m.focus == .Sub && is_page(m, m.open) && m.sections[m.open].kind == .Font: draw_font(a, cv, S, body)
 		case m.focus == .Sub && m.sections[m.open].weather: draw_weather(a, cv, S, body)
-		case m.focus == .Sub && m.sections[m.open].cal: draw_cal(a, cv, S, {body[0] + (body[2] - 340 * S) / 2, body[1] + 16 * S, 340 * S, body[3] - 16 * S})
 		case m.focus == .Sub && is_page(m, m.open) && !m.sections[m.open].pane: draw_page(a, cv, S, body, sc)
 		case: draw_panes(a, cv, S, body, sc)
 		}
@@ -1397,7 +1405,7 @@ menu_size :: proc(a: ^App) -> (int, int) {
 	switch {
 	case m.focus == .Confirm: body = 200
 	case m.focus == .Input: body = 130
-	case s.cal: body = cal_h(m)
+	case s.cal: return 644, 474 // the calendar: a month and a day side by side
 	case len(m.shown_actions) == 0: body = 30
 	case:
 		for e in m.shown_actions do body += entry_h(m, s.actions[e], 1, true)
@@ -1423,7 +1431,7 @@ compact_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> bool
 	s := &m.sections[m.open]
 	if ctrl && k == .Enter { to_launcher(a); return true }
 	if ctrl && (ch == 'c' || ch == 'g') { a.exit = 1; a.done = true; return true }
-	if s.cal do return cal_key(a, k, text)
+	if s.cal do return cal_key(a, k, ctrl, ch, text)
 	switch {
 	case k == .Escape:
 		if at_entry(m) { a.exit = 1; a.done = true } else do menu_back(a)
@@ -1479,7 +1487,6 @@ menu_draw_compact :: proc(a: ^App, cv: ^Canvas, S: int) {
 		fill_rect(cv, caret, y + (hh - int(m.f_bold13.line_h)) / 2, max(S, 2), int(m.f_bold13.line_h), argb(acc, 0xff))
 	} else {
 		title := s.desc
-		if s.cal do title = cal_title()
 		text_in(cv, m.f_bold13, ellipsize(m.f_bold13, title, tclip - tx), tx, y, hh, argb(fgb, 0xff))
 	}
 	y += hh
@@ -1509,7 +1516,6 @@ menu_draw_compact :: proc(a: ^App, cv: ^Canvas, S: int) {
 	switch {
 	case m.focus == .Confirm: draw_confirm(a, cv, S, body)
 	case m.focus == .Input: draw_input(a, cv, S, body)
-	case s.cal: draw_cal(a, cv, S, body)
 	case: draw_actions(a, cv, S, s, x0, body[1], x1, body[1] + body[3], false, true)
 	}
 }
@@ -1551,9 +1557,15 @@ days_in_month :: proc(y, m: int) -> int {
 	ny, nm := m == 12 ? y + 1 : y, m == 12 ? 1 : m + 1
 	return days_from_civil(ny, nm, 1) - days_from_civil(y, m, 1)
 }
+libc_now_minutes :: proc() -> int {
+	t := libc.time(nil)
+	tm := libc.localtime(&t)
+	return int(tm.tm_hour) * 60 + int(tm.tm_min)
+}
+
 today :: proc() -> (y, m, d: int) {
-	if v := os.get_env("K4_TODAY", context.temp_allocator); len(v) == 10 { // tests: YYYY-MM-DD
-		y, _ = strconv.parse_int(v[:4]); m, _ = strconv.parse_int(v[5:7]); d, _ = strconv.parse_int(v[8:])
+	if v := os.get_env("K4_NOW", context.temp_allocator); len(v) >= 10 { // tests: YYYY-MM-DD[THH:MM]
+		y, _ = strconv.parse_int(v[:4]); m, _ = strconv.parse_int(v[5:7]); d, _ = strconv.parse_int(v[8:10])
 		return
 	}
 	t := libc.time(nil)
@@ -1562,104 +1574,6 @@ today :: proc() -> (y, m, d: int) {
 }
 MONTHS := [12]string{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
 DAYS := [7]string{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
-@(private)
-cal_title :: proc() -> string {
-	y, mo, d := today()
-	return fmt.tprintf("%s %d %s", DAYS[weekday(days_from_civil(y, mo, d))], d, MONTHS[mo - 1])
-}
-// The weeks shown: from the Monday on or before the 1st, while a week starts in the month (at
-// least four).
-@(private)
-cal_weeks :: proc(y, mo: int) -> (first, n: int) {
-	d1 := days_from_civil(y, mo, 1)
-	first = d1 - weekday(d1)
-	n = 4
-	for n < 6 {
-		_, m2, _ := civil_from_days(first + n * 7)
-		if m2 != mo do break
-		n += 1
-	}
-	return
-}
-// O cal comes with the page's lines, after it opened: the cursor starts at today on first use.
-@(private)
-cal_ready :: proc(m: ^Menu) { if m.cal_m < 1 || m.cal_m > 12 do m.cal_y, m.cal_m, m.cal_d = today() }
-
-@(private)
-cal_h :: proc(m: ^Menu) -> int {
-	cal_ready(m)
-	_, n := cal_weeks(m.cal_y, m.cal_m)
-	return 6 + 26 + 4 + 22 + n * (4 + 30) + 10
-}
-@(private)
-cal_key :: proc(a: ^App, k: Key, text: string) -> bool {
-	m := a.menu
-	cal_ready(m)
-	cur := days_from_civil(m.cal_y, m.cal_m, m.cal_d)
-	switch {
-	case k == .Escape:
-		if at_entry(m) { a.exit = 1; a.done = true } else do menu_back(a)
-		return true
-	case k == .Left || k == .Right:
-		y, mo := m.cal_y, m.cal_m + (k == .Left ? -1 : 1)
-		if mo < 1 { mo = 12; y -= 1 }
-		if mo > 12 { mo = 1; y += 1 }
-		m.cal_y, m.cal_m, m.cal_d = y, mo, min(m.cal_d, days_in_month(y, mo))
-		return true
-	case k == .Up || k == .Down:
-		m.cal_y, m.cal_m, m.cal_d = civil_from_days(cur + (k == .Up ? -7 : 7))
-		return true
-	case text == "t":
-		m.cal_y, m.cal_m, m.cal_d = today()
-		return true
-	case k == .Backspace:
-		if !at_entry(m) do menu_back(a)
-		return true
-	}
-	return true
-}
-draw_cal :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
-	m := a.menu
-	t := a.theme
-	cal_ready(m)
-	x0 := body[0] + 14 * S
-	x1 := body[0] + body[2] - 14 * S
-	y := body[1]
-	// month row: ‹ October 2026 ›
-	text_in(cv, m.f_body, "‹", x0, y, 26 * S, argb(t.fg_dim, 0xff))
-	text_in(cv, m.f_body, "›", x1 - tw(m.f_body, "›"), y, 26 * S, argb(t.fg_dim, 0xff))
-	title := fmt.tprintf("%s %d", MONTHS[m.cal_m - 1], m.cal_y)
-	text_in(cv, m.f_bold13, title, x0 + (x1 - x0 - tw(m.f_bold13, title)) / 2, y, 26 * S, argb(t.fg_bright, 0xff))
-	y += 26 * S + 4 * S
-	colw := (x1 - x0) / 8
-	heads := [8]string{"wk", "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"}
-	for h, i in heads do text_in(cv, m.f_tiny, h, x0 + i * colw + (colw - tw(m.f_tiny, h)) / 2, y, 22 * S, argb(t.fg_dim, 0xff))
-	y += 22 * S
-	ty, tm, td := today()
-	tday := days_from_civil(ty, tm, td)
-	cur := days_from_civil(m.cal_y, m.cal_m, m.cal_d)
-	first, n := cal_weeks(m.cal_y, m.cal_m)
-	for w in 0 ..< n {
-		y += 4 * S
-		d0 := first + w * 7
-		wk := fmt.tprintf("%d", iso_week(d0))
-		text_in(cv, m.f_tiny, wk, x0 + (colw - tw(m.f_tiny, wk)) / 2, y, 30 * S, argb(t.fg_dim, 0xff))
-		fill_rect(cv, x0 + colw - S, y, S, 30 * S, argb(t.selection, 0xff))
-		for i in 0 ..< 7 {
-			day := d0 + i
-			_, mo, d := civil_from_days(day)
-			cx := x0 + (i + 1) * colw
-			lbl := fmt.tprintf("%d", d)
-			c := mo == m.cal_m ? t.fg : t.fg_dim
-			f := m.f_small
-			if day == tday { fill_rect(cv, cx, y, colw, 30 * S, argb(t.accent, 0xff)); c, f = t.bg, m.f_bold12 }
-			if day == cur && mo == m.cal_m do rounded_rect(cv, cx, y, colw, 30 * S, 0, 0, f32(S), argb(t.accent, 0xff))
-			text_in(cv, f, lbl, cx + (colw - tw(f, lbl)) / 2, y, 30 * S, argb(c, 0xff))
-		}
-		y += 30 * S
-	}
-}
-
 // The header's crumb, placeholder and count for the current state (drawn, and --dump).
 menu_header :: proc(a: ^App, sc: bool) -> (crumb, ph, count: string) {
 	m := a.menu
@@ -1726,7 +1640,7 @@ menu_hints :: proc(a: ^App, sc: bool) -> (hints: [][2]string) {
 	case sc && m.focus == .Menu: hints = {{"a–z", "Open"}, {"j k", "Move"}, {"/", "Search"}, {"Esc", "Close"}}
 	case sc: hints = {{"1–9", "Run"}, {"j k", "Move"}, {"⌫", "Back"}, {"/", "Search"}}
 	case m.focus == .Confirm: hints = {{"y", "Yes"}, {"n Esc", "No"}, {"← →", "Choose"}}
-	case m.focus == .Sub && !sc && m.sections[m.open].cal: hints = {{"← →", "Month"}, {"↑↓", "Week"}, {"t", "Today"}, {"⌫", "Back"}}
+	case m.focus == .Sub && !sc && m.sections[m.open].cal: hints = cal_hints(m, &m.sections[m.open].cd)
 	case m.focus == .Input: hints = {{"↵", "Submit"}, {"Esc", "Cancel"}}
 	case m.focus == .Sub && !sc && is_page(m, m.open) && m.sections[m.open].kind == .Font: hints = {{"↑↓", "Preview"}, {"↵", "Apply font"}, {"⌫", "Back"}}
 	case m.focus == .Sub && !sc && len(m.sections[m.open].hints) > 0: hints = m.sections[m.open].hints[:]
@@ -2620,7 +2534,11 @@ menu_dump :: proc(a: ^App) -> string {
 	if compact_now(a) {
 		w, h := menu_size(a)
 		fmt.sbprintfln(&b, "popup %dx%d", w, h)
-		if m.sections[m.open].cal && m.focus == .Sub { cal_ready(m); fmt.sbprintfln(&b, "cal %d-%02d cursor %d", m.cal_y, m.cal_m, m.cal_d) }
+	}
+	if m.focus == .Sub && m.sections[m.open].cal { // the calendar: its own state, then the footer's message
+		cal_dump(a, &b)
+		if m.toast != "" do fmt.sbprintfln(&b, "toast %s", m.toast)
+		return strings.to_string(b)
 	}
 	fmt.sbprintfln(&b, "crumb %s", crumb)
 	fmt.sbprintfln(&b, "query %s", q != "" ? q : fmt.tprintf("(%s)", ph))
@@ -3111,7 +3029,7 @@ draw_weather_pane :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, x, y_, xr, 
 // under it, a left click runs it (on a slider's track: sets the level there), a right click
 // goes back, the wheel moves the selection.
 
-Hit_Kind :: enum { Section, Action, Slider, Result, Item, Web, Confirm, Row }
+Hit_Kind :: enum { Section, Action, Slider, Result, Item, Web, Confirm, Row, Cal }
 Hit :: struct { x, y, w, h: int, kind: Hit_Kind, a, b: int, tx, tw: int }
 
 hit_add :: proc(a: ^App, x, y, w, h: int, kind: Hit_Kind, i, j: int, tx := 0, tw := 0) {
@@ -3139,7 +3057,7 @@ sel_pos :: proc(m: ^Menu, act: int) -> int {
 menu_pointer_move :: proc(a: ^App, x, y: int) -> bool {
 	m := a.menu
 	h := hit_at(a, x, y) or_return
-	switch h.kind {
+	#partial switch h.kind {
 	case .Section:
 		if m.focus != .Menu || searching(m, a) || m.cur == h.a do return false
 		m.cur = h.a
@@ -3173,7 +3091,8 @@ menu_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 	if button != 1 do return false
 	h := hit_at(a, x, y) or_return
 	m.toast = ""
-	switch h.kind {
+	if h.kind == .Cal { cal_click(a, h); return true }
+	#partial switch h.kind {
 	case .Section:
 		menu_enter(a, h.a)
 	case .Slider:

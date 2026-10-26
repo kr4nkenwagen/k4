@@ -1,0 +1,3 @@
+exit 1
+log: load apps
+log: cal sync

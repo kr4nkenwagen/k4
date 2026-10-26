@@ -18,7 +18,7 @@ while IFS='	' read -r name open keys env; do
   log="$tmp/$name.log"; : > "$log"
   popup=""; case "|${env:-}|" in *"|COMPACT=1|"*) popup="--compact --popup 600,80,1280,center" ;; esac   # a bar popup
   # shellcheck disable=SC2086
-  out=$(env K4_TEST_LOG="$log" $(printf '%s' "${env:-}" | tr '|' ' ') "$K4" --menu --dump --theme /dev/null \
+  out=$(env K4_TEST_LOG="$log" K4_TEST_DIR="$DIR" K4_NOW=2026-10-26T10:09 $(printf '%s' "${env:-}" | tr '|' ' ') "$K4" --menu --dump --theme /dev/null \
         ${open:+--open "$open"} ${keys:+--keys "$keys"} $popup < "$tmp/tree.tsv" 2>&1; echo "exit $?")
   got=$(printf '%s\n' "$out"; sed 's/^/log: /' "$log")
   if [ -n "${UPDATE:-}" ]; then printf '%s\n' "$got" > "expected/$name.txt"; pass=$((pass + 1)); continue; fi

@@ -55,7 +55,8 @@ the bottom, opaque or transparent. Modules come from stdin (format at the top of
 workspaces (live from sway's IPC or Hyprland's sockets; 1–5 always there on a single output,
 focused an accent block, visible elsewhere outlined, urgent red), the focused window's title
 (dim, cut at 420 px, the first to give way), a clock (time bold, date dim; right click switches
-format, middle click shows UTC), and commands that print plain text or Waybar's JSON plus k4's
+format, middle click shows UTC; with `next=FILE` a meeting replaces the date 10 minutes before
+and while it runs), and commands that print plain text or Waybar's JSON plus k4's
 `icon`, `text2`, tones, a `level` bar and a `battery` glyph. Hover fills the module and shows its
 tooltip after 500 ms; a left click's command is watched, so the module stays an accent block
 while its popup is up. Clicks and the wheel get `K4_BAR_X`, `K4_BAR_MX`, `K4_BAR_MW`,
@@ -65,8 +66,13 @@ while its popup is up. Clicks and the wheel get `K4_BAR_X`, `K4_BAR_MX`, `K4_BAR
 page alone in the design's 420 px frame (crumb, title, rows, key hints), fitted to its rows and
 placed by the module's group, 4 px off the bar and 8 px from the screen edges. Esc closes it;
 ⌃↵ prints `launcher:PAGE` so the caller opens the same page in the full launcher. Pages can
-ask for the month grid (`O cal`: ISO weeks, ← → months, ↑↓ weeks, t today), a width
-(`O width=N`) and a large charge row (`X percent line [charging]`).
+ask for a width (`O width=N`), a large charge row (`X percent line [charging]`) and the calendar
+(`O cal`, `src/cal.odin`): the design's 644 px clock popup with a Monday-first month grid (ISO
+weeks, a dot per calendar), the day's events with a now line and the next meeting, an agenda,
+event details (reply, join, open, copy, delete), quick add from plain text and the calendars,
+over CS/CX/CC/CE/CG/CN lines a script prints (the dotfiles' `k4-cal`: Google Calendar).
+A click outside any k4 menu closes it: a transparent surface under it catches the click, clear
+of the bar.
 
 `k4 --osd 'ICON|PERCENT|MAX|VALUE|…'` is the on-screen display: 300×48 above the bottom of the
 focused output for 1.2 s; another call while it shows updates it in place.

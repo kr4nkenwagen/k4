@@ -1,0 +1,15 @@
+focus Sub
+popup 644x474
+calendar Detail (events) · 2026-10-26 · ok · synced 09:05
+hints ↑↓ Move · ← → Reply · ↵ Run · j Join · o Google · Esc Back
+event Design review: k4 bar
+* Rsvp Maybe
+  Join
+  Open
+  Copy
+  Delete
+toast Ran  rsvp
+exit 1
+log: load apps
+log: cal sync
+log: cal rsvp work|e6 maybe Anna Berg

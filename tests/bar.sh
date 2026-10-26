@@ -28,5 +28,12 @@ check "clock: time and date" "center: [T1 · D1]" "$(printf '%s\n' "$out" | sed 
 check "icon, level, text2, battery glyph, an icon module" "right: [I lvl:40 62% · x] [bat:9 9% (critical)] [G]" "$(printf '%s\n' "$out" | sed -n 3p)"
 check "middle click: UTC for a moment" "center: [T1 · UTC]" "$(run2 --keys "<mclick:500,13>" | sed -n 2p)"
 check "a left click's command keeps the module open (bottom bar)" "right: [I lvl:40 62% · x open] [bat:9 9% (critical)] [G]" "$(run2 --keys "<click:880,13>" | sed -n 3p)"
+# the clock: a meeting from the calendar replaces the date (10 min before, and while it runs)
+now=$(date +%s)
+printf '%d\t%d\tReview\tmeet.google.com/x\n' $((now + 300)) $((now + 3600)) > "$tmp/soon.tsv"
+printf '%d\t%d\tStandup\t\n' $((now - 60)) $((now + 600)) > "$tmp/now.tsv"
+clock() { printf 'M\tclk\tcenter\tclock\tT1;D1\t0\t-\t-\t-\t-\t-\t-\tnext=%s\n' "$1" | "$K4" --bar --dump -w 1000 2>&1 | sed -n 2p; }
+check "clock: a meeting within 10 min" "center: [T1 · Review in 5 min]" "$(clock "$tmp/soon.tsv")"
+check "clock: a meeting now" "center: [T1 · Standup · now]" "$(clock "$tmp/now.tsv")"
 echo "bar tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
