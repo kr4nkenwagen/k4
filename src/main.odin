@@ -259,7 +259,11 @@ main :: proc() {
 		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil do app_move(a, opts.select)
 		if a.menu != nil do a.width, a.height = menu_size(a)
 		if a.osd != nil do osd_listen(a.osd)
-		if !run_wayland(a) do os.exit(2)
+		menu_like := a.bar == nil && a.osd == nil
+		if menu_like do single_take()
+		ok := run_wayland(a)
+		if menu_like do single_drop()
+		if !ok do os.exit(2)
 		if a.osd != nil { osd_close(a.osd); os.exit(0) }
 	}
 	if a.exit == 0 do fmt.println(a.result)
