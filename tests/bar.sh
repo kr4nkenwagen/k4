@@ -75,5 +75,15 @@ check "clip: ctrl-enter on text pastes plain, on a block opens it" "plain	3|extr
 check "clip: alt-2 pastes the second unpinned one" "paste	5" "$(cl --keys "<alt-2>")"
 check "clip: ctrl-p pins in place" "toast (pin 1)" "$(cl --keys "<ctrl-p>" | grep '^toast')"
 check "clip: Esc clears the search, then closes" "exit 1" "$(cl --keys "x<esc><esc>"; echo "exit $?")"
+# the tray popup: apps from a file, a menu from K4_TRAY_MENU, no runner (actions say what they would run)
+tr() { "$K4" --tray --dump "$@" < ../tray/apps.txt 2>&1; }
+check "tray: needs you, on the bar, in the tray" "tray 12 apps|* Discord · needs you|  Steam · needs you|  Nextcloud · on the bar" "$(tr | head -4 | paste -sd'|')"
+check "tray: arrows move by line, four tiles a line" "* Tailscale · in the tray" "$(tr --keys "<down><down><down>" | grep '^\*')"
+check "tray: typing filters names and status" "tray 12 apps|* Nextcloud · on the bar|  Syncthing · in the tray" "$(tr --keys "sync" | paste -sd'|')"
+check "tray: space opens the app" "toast (open discord)" "$(tr --keys " " | grep '^toast')"
+check "tray: ctrl-p pins" "* Tailscale · on the bar|toast (pin tailscale)" "$(tr --keys "<down><down><down><ctrl-p>" | grep '^\*\|^toast' | paste -sd'|')"
+check "tray: enter opens the app's menu, k4's rows last" "tray menu Nextcloud|* Open Nextcloud folder|  [IN K4]|  Show on the bar (switch on)" "$(K4_TRAY_MENU="$(cat ../tray/menu.txt)" tr --keys "<down><down><enter>" | grep 'menu\|^\*\|IN K4\|Show on' | paste -sd'|')"
+check "tray: a submenu and back" "tray menu Nextcloud · Recent activity" "$(K4_TRAY_MENU="$(cat ../tray/menu.txt)" tr --keys "<down><down><enter><down><down><down><enter>" | head -1 | sed 's/ › / · /')"
+check "tray: a menu row runs" "toast (event nextcloud 2)" "$(K4_TRAY_MENU="$(cat ../tray/menu.txt)" tr --keys "<down><down><enter><down><enter>" | grep '^toast')"
 echo "bar tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

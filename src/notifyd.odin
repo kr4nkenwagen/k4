@@ -52,6 +52,8 @@ Nd :: struct {
 	more: int,
 	f9, f9b, f10, f10b, f11b, f12, f13, f13b: ^Font,
 	want_w, want_h: int,
+	watcher: bool, // also the tray's StatusNotifierWatcher (no one else was)
+	sni: [dynamic]string, // its registered items: "<bus name>/<path>"
 }
 
 Nd_Card :: struct { id: u32, count: int }
@@ -84,6 +86,12 @@ nd_setup :: proc(a: ^App) -> bool {
 		fmt.eprintln("k4: another notification service owns org.freedesktop.Notifications")
 		return false
 	}
+	// the tray's registry, when no one else keeps one (Sway without Waybar; Omarchy's shell does)
+	if dbus_bus_request_name(n.conn, "org.kde.StatusNotifierWatcher", DBUS_NAME_FLAG_DO_NOT_QUEUE, &err) == DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER {
+		n.watcher = true
+		dbus_bus_add_match(n.conn, "type='signal',sender='org.freedesktop.DBus',interface='org.freedesktop.DBus',member='NameOwnerChanged'", &err)
+	}
+	if dbus_error_is_set(&err) do dbus_error_free(&err)
 	fd: c.int
 	if dbus_connection_get_unix_fd(n.conn, &fd) do n.bus_fd = linux.Fd(fd)
 	nd_listen(n)
@@ -238,8 +246,12 @@ nd_on_bus :: proc(a: ^App) -> bool {
 	for {
 		msg := dbus_connection_pop_message(n.conn)
 		if msg == nil do break
-		if dbus_message_get_type(msg) == DBUS_MESSAGE_TYPE_METHOD_CALL {
-			if nd_call(a, msg) do changed = true
+		switch dbus_message_get_type(msg) {
+		case DBUS_MESSAGE_TYPE_METHOD_CALL:
+			if n.watcher && string(dbus_message_get_path(msg)) == "/StatusNotifierWatcher" do sni_call(n, msg)
+			else if nd_call(a, msg) do changed = true
+		case DBUS_MESSAGE_TYPE_SIGNAL:
+			if n.watcher && string(dbus_message_get_member(msg)) == "NameOwnerChanged" do sni_gone(n, msg)
 		}
 		dbus_message_unref(msg)
 	}
@@ -343,6 +355,103 @@ nd_run_headless :: proc(a: ^App) {
 			else do nd_on_sock(a)
 		}
 		free_all(context.temp_allocator)
+	}
+}
+
+// ---------- the tray's registry (org.kde.StatusNotifierWatcher) ----------
+
+SNI_INTROSPECT :: `<!DOCTYPE node PUBLIC "-//freedesktop//DTD D-BUS Object Introspection 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/introspect.dtd">
+<node><interface name="org.kde.StatusNotifierWatcher">
+<method name="RegisterStatusNotifierItem"><arg type="s" direction="in"/></method>
+<method name="RegisterStatusNotifierHost"><arg type="s" direction="in"/></method>
+<property name="RegisteredStatusNotifierItems" type="as" access="read"/>
+<property name="IsStatusNotifierHostRegistered" type="b" access="read"/>
+<property name="ProtocolVersion" type="i" access="read"/>
+<signal name="StatusNotifierItemRegistered"><arg type="s"/></signal>
+<signal name="StatusNotifierItemUnregistered"><arg type="s"/></signal>
+<signal name="StatusNotifierHostRegistered"/>
+</interface></node>`
+
+@(private = "file")
+sni_signal :: proc(n: ^Nd, name, item: string) {
+	msg := dbus_message_new_signal("/StatusNotifierWatcher", "org.kde.StatusNotifierWatcher", strings.clone_to_cstring(name, context.temp_allocator))
+	if item != "" { it: DBus_Iter; dbus_message_iter_init_append(msg, &it); dbus_put_str(&it, item) }
+	dbus_connection_send(n.conn, msg, nil)
+	dbus_message_unref(msg)
+}
+
+@(private = "file")
+sni_prop :: proc(n: ^Nd, it: ^DBus_Iter, name: string) {
+	v: DBus_Iter
+	switch name {
+	case "RegisteredStatusNotifierItems":
+		dbus_message_iter_open_container(it, DT_VARIANT, "as", &v)
+		arr: DBus_Iter
+		dbus_message_iter_open_container(&v, DT_ARRAY, "s", &arr)
+		for s in n.sni do dbus_put_str(&arr, s)
+		dbus_message_iter_close_container(&v, &arr)
+	case "IsStatusNotifierHostRegistered":
+		dbus_message_iter_open_container(it, DT_VARIANT, "b", &v)
+		dbus_put_bool(&v, true)
+	case:
+		dbus_message_iter_open_container(it, DT_VARIANT, "i", &v)
+		dbus_put_i32(&v, 0)
+	}
+	dbus_message_iter_close_container(it, &v)
+}
+
+// A call on /StatusNotifierWatcher: an app registering, or a host asking what there is.
+@(private = "file")
+sni_call :: proc(n: ^Nd, msg: ^DBus_Msg) {
+	member := string(dbus_message_get_member(msg))
+	reply := dbus_message_new_method_return(msg)
+	out: DBus_Iter
+	dbus_message_iter_init_append(reply, &out)
+	in_: DBus_Iter
+	has_args := dbus_message_iter_init(msg, &in_)
+	switch member {
+	case "Introspect": dbus_put_str(&out, SNI_INTROSPECT)
+	case "RegisterStatusNotifierItem":
+		arg := has_args ? dbus_str(&in_) : ""
+		sender := string(dbus_message_get_sender(msg))
+		// an object path from the app's own connection, or a bus name (its default path)
+		item := strings.has_prefix(arg, "/") ? strings.concatenate({sender, arg}) : strings.clone(arg != "" ? arg : sender)
+		have := false
+		for s in n.sni do if s == item do have = true
+		if !have { append(&n.sni, item); sni_signal(n, "StatusNotifierItemRegistered", item) }
+	case "RegisterStatusNotifierHost": sni_signal(n, "StatusNotifierHostRegistered", "")
+	case "Get":
+		if has_args { dbus_message_iter_next(&in_); sni_prop(n, &out, dbus_str(&in_)) }
+	case "GetAll":
+		arr: DBus_Iter
+		dbus_message_iter_open_container(&out, DT_ARRAY, "{sv}", &arr)
+		for p in ([]string{"RegisteredStatusNotifierItems", "IsStatusNotifierHostRegistered", "ProtocolVersion"}) {
+			ent: DBus_Iter
+			dbus_message_iter_open_container(&arr, DT_DICT_ENTRY, nil, &ent)
+			dbus_put_str(&ent, p)
+			sni_prop(n, &ent, p)
+			dbus_message_iter_close_container(&arr, &ent)
+		}
+		dbus_message_iter_close_container(&out, &arr)
+	}
+	dbus_connection_send(n.conn, reply, nil)
+	dbus_message_unref(reply)
+}
+
+// A name left the bus: its items go.
+@(private = "file")
+sni_gone :: proc(n: ^Nd, msg: ^DBus_Msg) {
+	it: DBus_Iter
+	if !dbus_message_iter_init(msg, &it) do return
+	name := dbus_str(&it)
+	dbus_message_iter_next(&it); dbus_message_iter_next(&it)
+	if dbus_str(&it) != "" do return // it changed owner, not left
+	for i := len(n.sni) - 1; i >= 0; i -= 1 {
+		s := n.sni[i]
+		if s == name || strings.has_prefix(s, strings.concatenate({name, "/"}, context.temp_allocator)) {
+			sni_signal(n, "StatusNotifierItemUnregistered", s)
+			ordered_remove(&n.sni, i)
+		}
 	}
 }
 

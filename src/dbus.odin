@@ -24,6 +24,7 @@ DBUS_NAME_FLAG_DO_NOT_QUEUE :: 4
 DBUS_REQUEST_NAME_REPLY_PRIMARY_OWNER :: 1
 DBUS_REQUEST_NAME_REPLY_ALREADY_OWNER :: 4
 DBUS_MESSAGE_TYPE_METHOD_CALL :: 1
+DBUS_MESSAGE_TYPE_SIGNAL :: 4
 
 DT_INVALID :: c.int(0)
 DT_BYTE :: c.int('y')
@@ -54,6 +55,8 @@ foreign dbus_lib {
 	dbus_message_get_interface :: proc(msg: ^DBus_Msg) -> cstring ---
 	dbus_message_get_member :: proc(msg: ^DBus_Msg) -> cstring ---
 	dbus_message_get_sender :: proc(msg: ^DBus_Msg) -> cstring ---
+	dbus_message_get_path :: proc(msg: ^DBus_Msg) -> cstring ---
+	dbus_bus_add_match :: proc(conn: ^DBus_Conn, rule: cstring, e: ^DBus_Error) ---
 	dbus_message_new_method_return :: proc(msg: ^DBus_Msg) -> ^DBus_Msg ---
 	dbus_message_new_error :: proc(msg: ^DBus_Msg, name, text: cstring) -> ^DBus_Msg ---
 	dbus_message_new_signal :: proc(path, iface, name: cstring) -> ^DBus_Msg ---
@@ -101,6 +104,16 @@ dbus_i32 :: proc(it: ^DBus_Iter) -> i32 {
 dbus_put_str :: proc(it: ^DBus_Iter, s: string) {
 	cs := strings.clone_to_cstring(s, context.temp_allocator)
 	dbus_message_iter_append_basic(it, DT_STRING, &cs)
+}
+
+dbus_put_bool :: proc(it: ^DBus_Iter, v: bool) {
+	x: u32 = v ? 1 : 0
+	dbus_message_iter_append_basic(it, DT_BOOLEAN, &x)
+}
+
+dbus_put_i32 :: proc(it: ^DBus_Iter, v: i32) {
+	x := v
+	dbus_message_iter_append_basic(it, DT_INT32, &x)
 }
 
 dbus_put_u32 :: proc(it: ^DBus_Iter, v: u32) {

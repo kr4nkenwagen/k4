@@ -1,0 +1,13 @@
+S	12
+A	:1.0/StatusNotifierItem	discord	Discord	NeedsAttention	Dc	󰀻	0	3 mentions in #k4-dev
+A	:1.1/StatusNotifierItem	steam	Steam	NeedsAttention	St	󰀻	0	Update ready · restart to install
+A	:1.2/StatusNotifierItem	nextcloud	Nextcloud	Active	Nc	󰀻	1	Syncing · 62%
+A	:1.3/StatusNotifierItem	keepassxc	KeePassXC	Passive	Kp	󰀻	1	Locked
+A	:1.4/StatusNotifierItem	tailscale	Tailscale	Active	Ts	󰀻	0	Connected · 100.101.4.2
+A	:1.5/StatusNotifierItem	obs	OBS	Active	Ob	󰀻	0	Recording · 12:31
+A	:1.6/StatusNotifierItem	syncthing	Syncthing	Active	Sy	󰀻	0	Up to date · 3 folders
+A	:1.7/StatusNotifierItem	spotify	Spotify	Active	Sp	󰀻	0	Teardrop · Massive Attack
+A	:1.8/StatusNotifierItem	solaar	Solaar	Active	So	󰀻	0	MX Master 3S · 40%
+A	:1.9/StatusNotifierItem	docker	Docker	Active	Dk	󰀻	0	3 containers running
+A	:1.10/StatusNotifierItem	flameshot	Flameshot	Passive	Fs	󰀻	0	Ready
+A	:1.11/StatusNotifierItem	signal	Signal	Passive	Si	󰀻	0	No new messages
