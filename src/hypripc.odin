@@ -82,6 +82,7 @@ hypr_title :: proc() -> string {
 // Omarchy's Hyprland takes Lua dispatches; a classic config the old syntax.
 hypr_focus_workspace :: proc(name: string) {
 	lua := os.exists(strings.concatenate({os.get_env("HOME", context.temp_allocator), "/.config/hypr/hyprland.lua"}, context.temp_allocator))
-	if lua do hypr_request(fmt.tprintf("dispatch hl.dsp.focus({ workspace = \"%s\" })", name))
+	// (not fmt: it reads { } as its own syntax)
+	if lua do hypr_request(strings.concatenate({"dispatch hl.dsp.focus({ workspace = \"", name, "\" })"}, context.temp_allocator))
 	else do hypr_request(fmt.tprintf("dispatch workspace %s", name))
 }

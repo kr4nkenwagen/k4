@@ -255,6 +255,13 @@ ptr_button :: proc "c" (data: rawptr, p: ^wl.pointer, serial, t, button: uint, s
 	context = W.ctx
 	if state != .pressed do return
 	if W.ptr_surf == W.catcher && W.catcher != nil { W.app.exit = 1; W.app.done = true; return } // a click outside closes
+	// Hyprland hands the pointer to a keyboard-exclusive layer even off it (negative or past
+	// its size): that is a click outside too
+	if W.app.bar == nil && W.app.osd == nil && (W.ptr_x < 0 || W.ptr_y < 0 || W.ptr_x >= W.width * W.scale || W.ptr_y >= W.height * W.scale) {
+		W.app.exit = 1
+		W.app.done = true
+		return
+	}
 	b := 0
 	switch u(button) { case 0x110: b = 1; case 0x111: b = 3; case 0x112: b = 2 } // BTN_LEFT, RIGHT, MIDDLE
 	if b != 0 && app_pointer_click(W.app, W.ptr_x, W.ptr_y, b) do W.dirty = true
