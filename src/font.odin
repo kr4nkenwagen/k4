@@ -32,12 +32,12 @@ Font :: struct {
 
 Glyph_Key :: struct { face: u8, id: u16, sub: u8 }
 
-Face :: struct { data: []u8, info: rawptr, path: string }
+Face :: struct { data: []u8, info: rawptr, path: string, color: bool, shaper: ^kbts.shape_context, alloc: ^runtime.Allocator } // color: CBDT bitmaps, no outlines; shaper: its ligatures (flags, skin tones, families)
 Fallbacks :: struct {
 	faces:  [dynamic]Face,
 	misses: map[rune]bool, // characters no installed font has
 }
-Glyph :: struct { w, h, xoff, yoff: i32, alpha: []u8 }
+Glyph :: struct { w, h, xoff, yoff: i32, alpha: []u8, color: []u32 } // color: an emoji (premultiplied ARGB)
 
 Shaped_Glyph :: struct {
 	face:     u8, // 0 the font itself, n = fallback face n-1
@@ -141,7 +141,9 @@ fallback_glyph :: proc(f: ^Font, cp: rune) -> (face: u8, id: u16, adv: f32, ok: 
 		if !known {
 			if data, err := os.read_entire_file(path, context.allocator); err == nil {
 				if info := k4_font_new(raw_data(data), c.int(index)); info != nil {
-					append(&fb.faces, Face{data, info, strings.clone(path)})
+					append(&fb.faces, Face{data = data, info = info, path = strings.clone(path)})
+				} else if info := k4_font_new_color(raw_data(data), c.int(index)); info != nil {
+					append(&fb.faces, Face{data = data, info = info, path = strings.clone(path), color = true}) // Noto Color Emoji
 				}
 			}
 		}
@@ -158,22 +160,47 @@ shape :: proc(f: ^Font, text: string) -> Shaped {
 	out := make([dynamic]Shaped_Glyph, 0, ncp)
 	x: f32
 	if f.shaper != nil && len(text) > 0 {
-		kbts.ShapeBegin(f.shaper, .DONT_KNOW, .DONT_KNOW)
-		kbts.ShapeUtf8(f.shaper, text, .CODEPOINT_INDEX)
-		kbts.ShapeEnd(f.shaper)
-		for run in kbts.ShapeRun(f.shaper) {
-			run := run
-			for g in kbts.GlyphIteratorNext(&run.Glyphs) {
-				if g.Id == 0 {
-					if face, id, adv, ok := fallback_glyph(f, g.Codepoint); ok {
-						append(&out, Shaped_Glyph{face, id, x, i32(g.UserIdOrCodepointIndex)})
-						x += adv
-						continue
+		// emoji sequences go to the colour emoji font's own shaper (its ligatures make flags,
+		// skin tones and families); the rest to this font, missing characters to fallbacks
+		cp_base: i32
+		for seg in emoji_segments(text) {
+			part := text[seg.start:seg.end]
+			if seg.emoji {
+				if face, fc, ok := color_face(f, part); ok {
+					sc := k4_font_scale_em(fc.info, f.px)
+					kbts.ShapeBegin(fc.shaper, .DONT_KNOW, .DONT_KNOW)
+					kbts.ShapeUtf8(fc.shaper, part, .CODEPOINT_INDEX)
+					kbts.ShapeEnd(fc.shaper)
+					for run in kbts.ShapeRun(fc.shaper) {
+						run := run
+						for g in kbts.GlyphIteratorNext(&run.Glyphs) {
+							if g.AdvanceX == 0 && g.Id == 0 do continue
+							append(&out, Shaped_Glyph{face, g.Id, x, cp_base + i32(g.UserIdOrCodepointIndex)})
+							x += f32(g.AdvanceX) * sc
+						}
 					}
+					cp_base += i32(utf8.rune_count_in_string(part))
+					continue
 				}
-				append(&out, Shaped_Glyph{0, g.Id, x + f32(g.OffsetX) * f.scale, i32(g.UserIdOrCodepointIndex)})
-				x += f32(g.AdvanceX) * f.scale
 			}
+			kbts.ShapeBegin(f.shaper, .DONT_KNOW, .DONT_KNOW)
+			kbts.ShapeUtf8(f.shaper, part, .CODEPOINT_INDEX)
+			kbts.ShapeEnd(f.shaper)
+			for run in kbts.ShapeRun(f.shaper) {
+				run := run
+				for g in kbts.GlyphIteratorNext(&run.Glyphs) {
+					if g.Id == 0 {
+						if face, id, adv, ok := fallback_glyph(f, g.Codepoint); ok {
+							append(&out, Shaped_Glyph{face, id, x, cp_base + i32(g.UserIdOrCodepointIndex)})
+							x += adv
+							continue
+						}
+					}
+					append(&out, Shaped_Glyph{0, g.Id, x + f32(g.OffsetX) * f.scale, cp_base + i32(g.UserIdOrCodepointIndex)})
+					x += f32(g.AdvanceX) * f.scale
+				}
+			}
+			cp_base += i32(utf8.rune_count_in_string(part))
 		}
 	} else {
 		i: i32
@@ -209,6 +236,60 @@ shape :: proc(f: ^Font, text: string) -> Shaped {
 	return s
 }
 
+Emoji_Segment :: struct { start, end: int, emoji: bool }
+
+// Splits text into emoji sequences and the rest. An emoji is a pictograph (U+1F000…),
+// a flag (regional indicators), or a BMP symbol followed by U+FE0F; joiners, skin tones,
+// tags and U+FE0F glue it to its neighbours. BMP symbols without U+FE0F (❯, ☰) stay text.
+emoji_segments :: proc(text: string) -> []Emoji_Segment {
+	glue :: proc(r: rune) -> bool {
+		switch r {
+		case 0x200D, 0xFE0F, 0x20E3, 0x1F3FB ..= 0x1F3FF, 0xE0020 ..= 0xE007F: return true
+		}
+		return false
+	}
+	pict :: proc(r: rune) -> bool { return r >= 0x1F000 && r <= 0x1FAFF || r >= 0x1F1E6 && r <= 0x1F1FF }
+	out := make([dynamic]Emoji_Segment, 0, 4, context.temp_allocator)
+	runes := make([dynamic]struct { r: rune, at: int }, 0, len(text), context.temp_allocator)
+	for r, i in text do append(&runes, struct { r: rune, at: int }{r, i})
+	is := make([]bool, len(runes), context.temp_allocator)
+	for e, i in runes {
+		next: rune = i + 1 < len(runes) ? runes[i + 1].r : 0
+		is[i] = pict(e.r) || (e.r >= 0x2000 && e.r < 0x3300 && next == 0xFE0F) || e.r == 0xA9 && next == 0xFE0F || e.r == 0xAE && next == 0xFE0F
+	}
+	for i in 0 ..< len(runes) do if glue(runes[i].r) && i > 0 && is[i - 1] do is[i] = true
+	for i := len(runes) - 2; i >= 0; i -= 1 do if runes[i].r == 0x200D && is[i + 1] do is[i] = true
+	start := 0
+	for i in 1 ..= len(runes) {
+		if i == len(runes) || is[i] != is[start] {
+			end := i < len(runes) ? runes[i].at : len(text)
+			append(&out, Emoji_Segment{runes[start].at, end, len(runes) > 0 && is[start]})
+			start = i
+		}
+	}
+	return out[:]
+}
+
+// The colour emoji face for this run (found through the fallback search of its first
+// character), with a shaper of its own.
+@(private)
+color_face :: proc(f: ^Font, part: string) -> (face: u8, fc: ^Face, ok: bool) {
+	r, _ := utf8.decode_rune_in_string(part)
+	fface, _, _, found := fallback_glyph(f, r)
+	if !found || f.fallback == nil || int(fface) > len(f.fallback.faces) do return
+	fc = &f.fallback.faces[fface - 1]
+	if !fc.color do return
+	if fc.shaper == nil {
+		fc.alloc = new(runtime.Allocator)
+		fc.alloc^ = context.allocator
+		fn, data_ptr := kbts.AllocatorFromOdinAllocator(fc.alloc)
+		fc.shaper = kbts.CreateShapeContext(fn, data_ptr)
+		if fc.shaper == nil do return
+		kbts.ShapePushFontFromMemory(fc.shaper, fc.data, 0)
+	}
+	return fface, fc, true
+}
+
 glyph_bitmap :: proc(f: ^Font, face: u8, id: u16, x: f32) -> (Glyph, f32) {
 	frac := x - math.floor(x)
 	sub := u8(frac * 4) & 3
@@ -218,6 +299,11 @@ glyph_bitmap :: proc(f: ^Font, face: u8, id: u16, x: f32) -> (Glyph, f32) {
 	if face > 0 && f.fallback != nil && int(face) <= len(f.fallback.faces) {
 		fc := f.fallback.faces[face - 1]
 		info, scale = fc.info, k4_font_scale_em(fc.info, f.px)
+		if fc.color {
+			g := color_glyph(f, info, id)
+			f.glyphs[key] = g
+			return g, math.floor(x)
+		}
 	}
 	w, h, xo, yo: c.int
 	bm := k4_font_glyph_bitmap(info, scale, f32(sub) / 4, c.int(id), &w, &h, &xo, &yo)
@@ -231,6 +317,35 @@ glyph_bitmap :: proc(f: ^Font, face: u8, id: u16, x: f32) -> (Glyph, f32) {
 	return g, math.floor(x)
 }
 
+// A colour glyph (emoji): the strike's PNG scaled from its ppem to this size.
+@(private)
+color_glyph :: proc(f: ^Font, info: rawptr, id: u16) -> (g: Glyph) {
+	w, h, bx, by, adv, ppem: c.int
+	data := k4_font_color_glyph(info, c.int(id), &w, &h, &bx, &by, &adv, &ppem)
+	if data == nil || ppem <= 0 do return
+	defer k4_free(data)
+	s := f.px / f32(ppem)
+	ow, oh := max(int(f32(w) * s + 0.5), 1), max(int(f32(h) * s + 0.5), 1)
+	px := make([]u32, ow * oh)
+	for oy in 0 ..< oh {
+		sy0, sy1 := oy * int(h) / oh, max((oy + 1) * int(h) / oh, oy * int(h) / oh + 1)
+		for ox in 0 ..< ow {
+			sx0, sx1 := ox * int(w) / ow, max((ox + 1) * int(w) / ow, ox * int(w) / ow + 1)
+			r, gg, b, al, n: u32
+			for sy in sy0 ..< min(sy1, int(h)) do for sx in sx0 ..< min(sx1, int(w)) {
+				i := (sy * int(w) + sx) * 4
+				pa := u32(data[i + 3])
+				r += u32(data[i]) * pa / 255; gg += u32(data[i + 1]) * pa / 255; b += u32(data[i + 2]) * pa / 255
+				al += pa; n += 1
+			}
+			if n == 0 do n = 1
+			px[oy * ow + ox] = (al / n) << 24 | (r / n) << 16 | (gg / n) << 8 | (b / n)
+		}
+	}
+	g = Glyph{w = i32(ow), h = i32(oh), xoff = i32(f32(bx) * s), yoff = i32(-f32(by) * s), color = px}
+	return
+}
+
 // Layout is in logical pixels, drawing in buffer pixels: on a scale-2 output the font is
 // re-rasterised at twice the size. Shaped runs and glyphs are cached per size, so drop them.
 font_resize :: proc(f: ^Font, px: f32) {
@@ -242,7 +357,7 @@ font_resize :: proc(f: ^Font, px: f32) {
 	f.ascent = math.round(f32(asc) * f.scale)
 	f.descent = math.round(f32(-desc) * f.scale)
 	f.line_h = f.ascent + f.descent + math.round(f32(gap) * f.scale)
-	for _, g in f.glyphs do delete(g.alpha)
+	for _, g in f.glyphs { delete(g.alpha); delete(g.color) }
 	clear(&f.glyphs)
 	for k, sh in f.shaped { delete(k); delete(sh.glyphs); delete(sh.cp_x) }
 	clear(&f.shaped)

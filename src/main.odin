@@ -208,13 +208,15 @@ app_load_style :: proc(a: ^App, first: bool) -> bool {
 	if family == "" do family = "monospace"
 	if !first do gpu_check_shaders() // the starfield toggle rewrites Ghostty's shader list
 	if !first && family == a.family do return true
-	f: Font
-	if !font_load(&f, family, a.font_px, true) {
+	// on the heap and kept: kb_text_shape holds a pointer to the font's allocator, so the
+	// Font must not live in this frame (a stack copy left dmenu mode without text)
+	f := new(Font)
+	if !font_load(f, family, a.font_px, true) {
 		if first do a.family = family
 		return false
 	}
 	f.fallback = first ? new(Fallbacks) : a.font.fallback // filled per missing character
-	a.font = f
+	a.font = f^
 	a.family = strings.clone(family)
 	if a.scale > 1 do font_resize(&a.font, a.font_px * f32(a.scale))
 	if a.menu != nil do menu_fonts(a)

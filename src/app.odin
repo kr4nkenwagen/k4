@@ -154,6 +154,11 @@ draw_text_f :: proc(cv: ^Canvas, f: ^Font, text: string, x, y_top: int, color: u
 			for p in hl do if i32(p) >= g.cp_index && i32(p) < end { col = hl_color; break }
 		}
 		gb, gx := glyph_bitmap(f, g.face, g.id, f32(x) + g.x)
+		if len(gb.color) > 0 {
+			gx0 := int(gx) + int(gb.xoff)
+			if gx0 + int(gb.w) <= clip_x1 do blit_image(cv, gb.color, int(gb.w), int(gb.h), gx0, baseline + int(gb.yoff))
+			continue
+		}
 		if len(gb.alpha) == 0 do continue
 		blit_mask(cv, gb.alpha, int(gb.w), int(gb.h), int(gx) + int(gb.xoff), baseline + int(gb.yoff), col, 0, clip_x1)
 	}
