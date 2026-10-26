@@ -824,7 +824,7 @@ draw_switch :: proc(a: ^App, cv: ^Canvas, S, x_right, y, h: int, on, sel: bool) 
 	case on && sel: track, border, knob = t.bg, t.bg, t.accent
 	case on: track, border, knob = t.accent, t.accent, t.bg
 	case sel: has_track, border, knob = false, t.bg, t.bg
-	case: track, border, knob = mix(t.bg, t.fg, 0.18), mix(t.bg, t.fg, 0.18), t.fg_dim
+	case: track, border, knob = mix(t.bg, t.accent, 0.25), mix(t.bg, t.accent, 0.25), t.fg_dim
 	}
 	rounded_rect(cv, x, sy, w, sh, 0, has_track ? argb(track, 0xff) : 0, f32(S), argb(border, 0xff))
 	kx := on ? x + w - 2 * S - k : x + 2 * S
@@ -1342,7 +1342,7 @@ kbd :: proc(cv: ^Canvas, a: ^App, label: string, x, cy, S: int) -> int {
 	t := a.theme
 	w := tw(m.f_tiny, label) + 12 * S
 	h := 18 * S
-	rounded_rect(cv, x, cy - h / 2, w, h, 0, argb(mix(t.bg, t.fg, 0.07), 0xff), f32(S), argb(mix(t.bg, t.fg, 0.18), 0xff))
+	rounded_rect(cv, x, cy - h / 2, w, h, 0, argb(mix(t.bg, t.accent, 0.06), 0xff), f32(S), argb(mix(t.bg, t.accent, 0.25), 0xff))
 	text_in(cv, m.f_tiny, label, x + 6 * S, cy - h / 2, h, argb(t.fg, 0xff))
 	return w
 }
@@ -1365,10 +1365,11 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	m := a.menu
 	t := a.theme
 	bg, fg, fgb, dim, acc := t.bg, t.fg, t.fg_bright, t.fg_dim, t.accent
-	sep := argb(mix(bg, fg, 0.12), 0xff)
+	sep := argb(mix(bg, t.accent, 0.17), 0xff)
 	B := 2 * S
 	canvas_clear(cv)
-	rounded_rect(cv, 0, 0, cv.w, cv.h, 0, argb(bg, 0xf2), f32(B), argb(acc, 0xff))
+	fill_rect(cv, 0, 0, cv.w, cv.h, argb(bg, 0xf2))
+	frame(cv, 0, 0, cv.w, cv.h, S, argb(mix(bg, acc, 0.17), 0xff), argb(acc, 0xff))
 	x0, x1 := B, cv.w - B
 	y := B
 	sc := m.shortcut && (m.focus == .Menu || m.focus == .Sub)
@@ -1545,7 +1546,7 @@ menu_draw_compact :: proc(a: ^App, cv: ^Canvas, S: int) {
 	B := 2 * S
 	canvas_clear(cv)
 	fill_rect(cv, 0, 0, cv.w, cv.h, argb(bg, 0xff))
-	rounded_rect(cv, 0, 0, cv.w, cv.h, 0, 0, f32(B), argb(acc, 0xff))
+	frame(cv, 0, 0, cv.w, cv.h, S, argb(mix(bg, acc, 0.17), 0xff), argb(acc, 0xff))
 	x0, x1 := B, cv.w - B
 	y := B
 	// header: crumb chip · title (the query while typing into an input step) · ⌃↵ launcher
@@ -1842,7 +1843,7 @@ draw_panes :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
 	x0, by, bw, bh := body[0], body[1], body[2], body[3]
 	x1, fy := x0 + bw, by + bh
 	lw := 250 * S
-	fill_rect(cv, x0 + lw, by, S, bh, argb(mix(bg, fg, 0.12), 0xff))
+	fill_rect(cv, x0 + lw, by, S, bh, argb(mix(bg, t.accent, 0.17), 0xff))
 
 	// left: sections (a group= flag starts a heading: "Not installed")
 	ry, rh := by + 6 * S, 28 * S
@@ -2108,7 +2109,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			tc := tone_color(t, act.tone, acc)
 			nx, ny, nw := mx, py + 8 * S, x1 - 20 * S - mx
 			nh := h - 16 * S
-			rounded_rect(cv, nx, ny, nw, nh, 0, argb(mix(bg, fg, 0.05), 0xff), f32(S), argb(tc, 0xff))
+			rounded_rect(cv, nx, ny, nw, nh, 0, argb(mix(bg, t.accent, 0.04), 0xff), f32(S), argb(tc, 0xff))
 			ty := ny + 12 * S
 			draw_text_f(cv, m.f_bold13, "!", nx + 14 * S, ty, argb(tc, 0xff))
 			draw_text_f(cv, m.f_bold13, ellipsize(m.f_bold13, act.label, nw - 46 * S), nx + 32 * S, ty, argb(fgb, 0xff))
@@ -2119,14 +2120,14 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			widths := [3]int{62, 44, 70}
 			for i in 0 ..< act.bars {
 				y := py + i * ah + (ah - 10 * S) / 2
-				fill_rect(cv, mx + 2 * S, y, 14 * S, 10 * S, argb(mix(bg, fg, 0.08), 0xff))
-				fill_rect(cv, mx + 28 * S, y, inner * widths[i % 3] / 100, 10 * S, argb(mix(bg, fg, 0.08), 0xff))
-				fill_rect(cv, x1 - 20 * S - 90 * S, y, 90 * S, 10 * S, argb(mix(bg, fg, 0.05), 0xff))
+				fill_rect(cv, mx + 2 * S, y, 14 * S, 10 * S, argb(mix(bg, t.accent, 0.08), 0xff))
+				fill_rect(cv, mx + 28 * S, y, inner * widths[i % 3] / 100, 10 * S, argb(mix(bg, t.accent, 0.08), 0xff))
+				fill_rect(cv, x1 - 20 * S - 90 * S, y, 90 * S, 10 * S, argb(mix(bg, t.accent, 0.04), 0xff))
 			}
 		case .Card:
 			cx, cy, cw := mx, py + 6 * S, x1 - 20 * S - mx
 			ch := h - 14 * S
-			rounded_rect(cv, cx, cy, cw, ch, 0, argb(mix(bg, fg, 0.05), 0xff), f32(S), argb(mix(bg, fg, 0.18), 0xff))
+			rounded_rect(cv, cx, cy, cw, ch, 0, argb(mix(bg, t.accent, 0.04), 0xff), f32(S), argb(mix(bg, t.accent, 0.25), 0xff))
 			g := 64 * S
 			gx, gy := cx + 14 * S, cy + (ch - g) / 2
 			fill_rect(cv, gx, gy, g, g, argb(act.active ? mix(bg, acc, 0.15) : t.selection, 0xff))
@@ -2152,7 +2153,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			text_in(cv, m.f_body, ellipsize(m.f_body, act.label, x1 - 20 * S - mw - 12 * S - (mx + 26 * S)), mx + 26 * S, ty, lh, argb(fgb, 0xff))
 			bx, by := mx + 26 * S, ty + lh + 7 * S
 			bw := x1 - 20 * S - bx
-			fill_rect(cv, bx, by, bw, 4 * S, argb(mix(bg, fg, 0.18), 0xff))
+			fill_rect(cv, bx, by, bw, 4 * S, argb(mix(bg, t.accent, 0.25), 0xff))
 			if act.pct > 0 do fill_rect(cv, bx, by, max(bw * act.pct / 100, S), 4 * S, argb(acc, 0xff))
 		case .Row:
 			j := row - 1
@@ -2296,7 +2297,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			if act.thumb != "" {
 				ts := 22 * S
 				ty := py + (ah - ts) / 2
-				fill_rect(cv, lx, ty, ts, ts, argb(mix(bg, fg, 0.08), 0xff))
+				fill_rect(cv, lx, ty, ts, ts, argb(mix(bg, t.accent, 0.08), 0xff))
 				img := image_cover(a, act.thumb, ts, ts)
 				if img.ok do blit_image(cv, img.px, img.w, img.h, lx, ty)
 				rounded_rect(cv, lx, ty, ts, ts, 0, 0, f32(S), argb(on ? mix(acc, bg, 0.5) : mix(bg, fg, 0.25), 0xff))
@@ -2324,7 +2325,7 @@ draw_slider :: proc(a: ^App, cv: ^Canvas, S, value, x_right, y, h: int, on: bool
 	w := tw_ + 10 * S + vw
 	x := x_right - w
 	cy := y + (h - th) / 2
-	track, fill, txt := argb(mix(t.bg, t.fg, 0.18), 0xff), argb(t.accent, 0xff), argb(t.fg, 0xff)
+	track, fill, txt := argb(mix(t.bg, t.accent, 0.25), 0xff), argb(t.accent, 0xff), argb(t.fg, 0xff)
 	if dim do fill, txt = argb(mix(t.bg, t.fg, 0.35), 0xff), argb(t.fg_dim, 0xff) // muted
 	if on do track, fill, txt = argb(mix(t.accent, t.bg, 0.45), 0xff), argb(t.bg, 0xff), argb(t.bg, 0xff)
 	rounded_rect(cv, x, cy, tw_, th, f32(2 * S), track)
@@ -2399,7 +2400,8 @@ draw_confirm :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	h := 2 * pad_y + int(title_f.line_h) + gap + int(m.f_body.line_h) + gap + bh_
 	x := body[0] + (body[2] - w) / 2
 	y := body[1] + (body[3] - h) / 2
-	rounded_rect(cv, x, y, w, h, 0, argb(mix(bg, fg, 0.05), 0xff), f32(2 * S), argb(acc, 0xff))
+	fill_rect(cv, x, y, w, h, argb(mix(bg, t.accent, 0.04), 0xff))
+	frame(cv, x, y, w, h, S, argb(mix(bg, acc, 0.17), 0xff), argb(acc, 0xff))
 	yy := y + pad_y
 	draw_text_f(cv, title_f, act.confirm_title, x + pad_x, yy, argb(fgb, 0xff), nil, 0, x + w - pad_x)
 	yy += int(title_f.line_h) + gap
@@ -2458,7 +2460,7 @@ draw_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 			on := j == m.si
 			hit_add(a, tx - 4 * S, ty - 4 * S, tile_w + 8 * S, cell_h - 4 * S, .Item, j, 0)
 			if on { rounded_rect(cv, tx - 4 * S, ty - 4 * S, tile_w + 8 * S, tile_h + 8 * S, 0, 0, f32(2 * S), argb(acc, 0xff)); mark_sel(a, tx - 4 * S, ty - 4 * S, tile_w + 8 * S, tile_h + 8 * S) }
-			fill_rect(cv, tx, ty, tile_w, tile_h, argb(mix(bg, fg, 0.08), 0xff))
+			fill_rect(cv, tx, ty, tile_w, tile_h, argb(mix(bg, t.accent, 0.08), 0xff))
 			if it.image != "" {
 				img := image_cover(a, it.image, tile_w, tile_h)
 				if img.ok do blit_image(cv, img.px, img.w, img.h, tx, ty)
@@ -2562,7 +2564,8 @@ draw_input :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	h := 2 * pad_y + int(m.f_confirm.line_h) + gap + int(m.f_body.line_h)
 	x := body[0] + (body[2] - w) / 2
 	y := body[1] + (body[3] - h) / 2
-	rounded_rect(cv, x, y, w, h, 0, argb(mix(t.bg, t.fg, 0.05), 0xff), f32(2 * S), argb(t.accent, 0xff))
+	fill_rect(cv, x, y, w, h, argb(mix(t.bg, t.accent, 0.04), 0xff))
+	frame(cv, x, y, w, h, S, argb(mix(t.bg, t.accent, 0.17), 0xff), argb(t.accent, 0xff))
 	yy := y + pad_y
 	draw_text_f(cv, m.f_confirm, m.input_prompt, x + pad_x, yy, argb(t.fg_bright, 0xff), nil, 0, x + w - pad_x)
 	yy += int(m.f_confirm.line_h) + gap
@@ -2608,7 +2611,7 @@ draw_calc :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	out, ok := logic.calc_eval(q)
 	if !ok do out = q != "" ? "…" : "0"
 	box_h := 22 * S * 2 + int(m.f_small.line_h) + 8 * S + int(m.f_huge.line_h)
-	rounded_rect(cv, x, y, w, box_h, 0, argb(mix(bg, fg, 0.05), 0xff), f32(S), argb(mix(bg, fg, 0.18), 0xff))
+	rounded_rect(cv, x, y, w, box_h, 0, argb(mix(bg, t.accent, 0.04), 0xff), f32(S), argb(mix(bg, t.accent, 0.25), 0xff))
 	draw_text_f(cv, m.f_small, q != "" ? q : "Type an expression", x + 24 * S, y + 22 * S, argb(dim, 0xff), nil, 0, x + w - 24 * S)
 	draw_text_f(cv, m.f_huge, out, x + 24 * S, y + 22 * S + int(m.f_small.line_h) + 8 * S, argb(ok ? acc : mix(bg, fg, 0.3), 0xff), nil, 0, x + w - 24 * S)
 	y += box_h + 14 * S + 6 * S
@@ -2683,7 +2686,7 @@ draw_font :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	x1, fy := x0 + bw, by + bh
 	pg := &m.sections[m.open]
 	lw := 330 * S
-	fill_rect(cv, x0 + lw, by, S, bh, argb(mix(bg, fg, 0.12), 0xff))
+	fill_rect(cv, x0 + lw, by, S, bh, argb(mix(bg, t.accent, 0.17), 0xff))
 	pad := 20 * S
 	if pg.load.state == .Failed || len(m.sel_actions) == 0 {
 		msg := pg.load.state == .Failed ? "Could not list the fonts" : (pg.load.state != .Ready ? "Loading…" : (len(pg.actions) == 0 ? "No fonts installed" : "No font matches"))
@@ -2743,7 +2746,7 @@ draw_font :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	cl := int(code.line_h * 1.45)
 	box_h := 4 * cl + 28 * S
 	if y + box_h > fy - 8 * S do return
-	rounded_rect(cv, px, y, right - px, box_h, 0, argb(mix(bg, fg, 0.05), 0xff), f32(S), argb(mix(bg, fg, 0.18), 0xff))
+	rounded_rect(cv, px, y, right - px, box_h, 0, argb(mix(bg, t.accent, 0.04), 0xff), f32(S), argb(mix(bg, t.accent, 0.25), 0xff))
 	cx, cy := px + 16 * S, y + 14 * S
 	draw_text_f(cv, code, "# ~/.config/sway/config", cx, cy, argb(dim, 0xff), nil, 0, right - 16 * S)
 	cy += cl
@@ -2975,7 +2978,7 @@ draw_weather :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		return
 	}
 	lw := 360 * S
-	fill_rect(cv, x0 + lw, by, S, bh, argb(mix(bg, fg, 0.12), 0xff))
+	fill_rect(cv, x0 + lw, by, S, bh, argb(mix(bg, t.accent, 0.17), 0xff))
 	sel_act := m.si < len(m.sel_actions) ? m.sel_actions[m.si] : -1
 
 	// ---- left
@@ -3007,7 +3010,7 @@ draw_weather :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		draw_text_f(cv, m.f_small, d[1], cx + colw - tw(m.f_small, d[1]), ry, argb(fg, 0xff))
 	}
 	y += ((len(s.wx_details) + 1) / 2) * (int(m.f_small.line_h) + 6 * S) + 6 * S
-	fill_rect(cv, lx, y, rx - lx, S, argb(mix(bg, fg, 0.08), 0xff))
+	fill_rect(cv, lx, y, rx - lx, S, argb(mix(bg, t.accent, 0.08), 0xff))
 	y += 12 * S
 	// the hourly strip of the selected day (today unless a day row is selected)
 	day := 0
@@ -3039,7 +3042,7 @@ draw_weather :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		center(cv, b13, h.temp, cx, yy, argb(fgb, 0xff))
 		yy += int(b13.line_h) + 5 * S
 		bh_ := 30 * S
-		fill_rect(cv, cx - 5 * S, yy, 10 * S, bh_, argb(mix(bg, fg, 0.08), 0xff))
+		fill_rect(cv, cx - 5 * S, yy, 10 * S, bh_, argb(mix(bg, t.accent, 0.08), 0xff))
 		fh := bh_ * clamp(h.rain, 0, 100) / 100
 		if fh > 0 do fill_rect(cv, cx - 5 * S, yy + bh_ - fh, 10 * S, fh, argb(t.blue, 0xff))
 		yy += bh_ + 5 * S
@@ -3079,7 +3082,7 @@ draw_weather :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 			x += 30 * S + 10 * S
 			hi_w := 30 * S
 			bar_w := pr - hi_w - 10 * S - x
-			fill_rect(cv, x, y + (ah - 4 * S) / 2, bar_w, 4 * S, on ? argb(mix(acc, bg, 0.25), 0xff) : argb(mix(bg, fg, 0.18), 0xff))
+			fill_rect(cv, x, y + (ah - 4 * S) / 2, bar_w, 4 * S, on ? argb(mix(acc, bg, 0.25), 0xff) : argb(mix(bg, t.accent, 0.25), 0xff))
 			off := bar_w * (act.wlo - wk_lo) / span
 			w := max(bar_w * (act.whi - act.wlo) / span, 2 * S)
 			fill_rect(cv, x + off, y + (ah - 4 * S) / 2, w, 4 * S, argb(on ? bg : acc, 0xff))
@@ -3139,7 +3142,7 @@ draw_theme_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	x1, fy := x0 + bw, by + bh
 	v := &m.views[m.view]
 	lw := 300 * S
-	fill_rect(cv, x0 + lw, by, S, bh, argb(mix(bg, fg, 0.12), 0xff))
+	fill_rect(cv, x0 + lw, by, S, bh, argb(mix(bg, t.accent, 0.17), 0xff))
 	y := by + 16 * S
 	draw_text_f(cv, m.f_title, v.title, x0 + 20 * S, y, argb(acc, 0xff))
 	{
@@ -3194,7 +3197,7 @@ draw_theme_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	room := fy - 12 * S - y - (8 * S * 2 + 18 * S * 2 + 4 * S) - 10 * S
 	lines := len(THEME_CODE)
 	if code_h > room { lines = max((room - 20 * S) / lh, 0); code_h = 20 * S + lines * lh }
-	rounded_rect(cv, px, y, pr - px, code_h, 0, argb(P[0], 0xff), f32(S), argb(mix(bg, fg, 0.18), 0xff))
+	rounded_rect(cv, px, y, pr - px, code_h, 0, argb(P[0], 0xff), f32(S), argb(mix(bg, t.accent, 0.25), 0xff))
 	tok_color :: proc(k: u8, P: [8]u32) -> u32 {
 		switch k {
 		case 'k': return P[6]
@@ -3223,7 +3226,7 @@ draw_theme_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	y += code_h + 10 * S
 	// a shell prompt and the six ANSI colours
 	term_h := 8 * S * 2 + lh + 4 * S + 10 * S
-	rounded_rect(cv, px, y, pr - px, term_h, 0, argb(P[0], 0xff), f32(S), argb(mix(bg, fg, 0.18), 0xff))
+	rounded_rect(cv, px, y, pr - px, term_h, 0, argb(P[0], 0xff), f32(S), argb(mix(bg, t.accent, 0.25), 0xff))
 	x := px + 12 * S
 	ty := y + 8 * S
 	user := os.get_env("USER", context.temp_allocator)
@@ -3293,7 +3296,7 @@ draw_weather_pane :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, x, y_, xr, 
 		center(cv, b12, h.temp, cx, yy, argb(fgb, 0xff))
 		yy += int(b12.line_h) + 4 * S
 		bh := 20 * S
-		fill_rect(cv, cx - 4 * S, yy, 8 * S, bh, argb(mix(bg, fg, 0.08), 0xff))
+		fill_rect(cv, cx - 4 * S, yy, 8 * S, bh, argb(mix(bg, t.accent, 0.08), 0xff))
 		fh := bh * clamp(h.rain, 0, 100) / 100
 		if fh > 0 do fill_rect(cv, cx - 4 * S, yy + bh - fh, 8 * S, fh, argb(t.blue, 0xff))
 	}
@@ -3319,7 +3322,7 @@ draw_weather_pane :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, x, y_, xr, 
 		text_in(cv, m.f_body, act.meta, xx + 30 * S - tw(m.f_body, act.meta), y, rh, argb(dim, 0xff))
 		xx += 30 * S + 10 * S
 		bar_w := xr - 30 * S - 10 * S - xx
-		fill_rect(cv, xx, y + (rh - 4 * S) / 2, bar_w, 4 * S, argb(mix(bg, fg, 0.18), 0xff))
+		fill_rect(cv, xx, y + (rh - 4 * S) / 2, bar_w, 4 * S, argb(mix(bg, t.accent, 0.25), 0xff))
 		fill_rect(cv, xx + bar_w * (act.wlo - wk_lo) / span, y + (rh - 4 * S) / 2, max(bar_w * (act.whi - act.wlo) / span, 2 * S), 4 * S, argb(acc, 0xff))
 		text_in(cv, m.f_body, act.line2, xr - 30 * S, y, rh, argb(fgb, 0xff))
 		y += rh

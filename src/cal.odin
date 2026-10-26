@@ -535,7 +535,7 @@ draw_calendar :: proc(a: ^App, cv: ^Canvas, S: int) {
 	B := 2 * S
 	canvas_clear(cv)
 	fill_rect(cv, 0, 0, cv.w, cv.h, argb(bg, 0xff))
-	rounded_rect(cv, 0, 0, cv.w, cv.h, 0, 0, f32(B), argb(acc, 0xff))
+	frame(cv, 0, 0, cv.w, cv.h, S, argb(mix(t.bg, acc, 0.17), 0xff), argb(acc, 0xff))
 	x0, x1 := B, cv.w - B
 	y := B
 	connected := d.conn != "none" && d.conn != ""

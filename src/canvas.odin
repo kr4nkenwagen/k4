@@ -110,3 +110,16 @@ canvas_rgba :: proc(cv: ^Canvas, allocator := context.allocator) -> []u8 {
 	}
 	return out
 }
+
+// The Kestrel frame: a 1px line round the box and an accent bracket on each corner, `arm` long
+// and 2px thick (scaled by S).
+frame :: proc(cv: ^Canvas, x, y, w, h, S: int, line, accent: u32, arm := 24) {
+	rounded_rect(cv, x, y, w, h, 0, 0, f32(S), line)
+	l, t := min(arm * S, w / 2), 2 * S
+	for c in ([4][2]int{{0, 0}, {1, 0}, {0, 1}, {1, 1}}) {
+		cx := c[0] == 0 ? x : x + w - l
+		cy := c[1] == 0 ? y : y + h - l
+		fill_rect(cv, cx, c[1] == 0 ? y : y + h - t, l, t, accent)
+		fill_rect(cv, c[0] == 0 ? x : x + w - t, cy, t, l, accent)
+	}
+}

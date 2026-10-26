@@ -108,7 +108,7 @@ osd_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	t := a.theme
 	canvas_clear(cv)
 	fill_rect(cv, 0, 0, cv.w, cv.h, argb(t.bg, 0xff))
-	rounded_rect(cv, 0, 0, cv.w, cv.h, 0, 0, f32(2 * S), argb(t.accent, 0xff))
+	frame(cv, 0, 0, cv.w, cv.h, S, argb(mix(t.bg, t.accent, 0.17), 0xff), argb(t.accent, 0xff))
 	tone :: proc(t: logic.Theme, name: string, def: u32) -> u32 { return token(t, name, def) }
 	f := a.osd_font
 	fb := a.osd_bold

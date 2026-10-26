@@ -312,7 +312,7 @@ mini_win :: proc(a: ^App, cv: ^Canvas, S, mx, my, MW, MH: int, wi: Prev_Win, on:
 	bh := max(int(wi.h * f32(MH)) - 2 * g, 8 * S)
 	bx, by = clamp(bx, mx, mx + MW - bw), clamp(by, my, my + MH - bh)
 	if wi.floating do fill_rect(cv, bx + 3 * S, by + 6 * S, bw, bh, argb(0, 0x70)) // the shadow
-	fill_rect(cv, bx, by, bw, bh, argb(mix(t.bg, t.fg, 0.04), 0xff))
+	fill_rect(cv, bx, by, bw, bh, argb(mix(t.bg, t.accent, 0.04), 0xff))
 	bc := on ? t.fg : (wi.urgent ? t.red : (wi.focused ? t.accent : t.selection))
 	bt := wi.focused || wi.urgent || on ? 2 * S : S
 	rounded_rect(cv, bx, by, bw, bh, 0, 0, f32(bt), argb(bc, 0xff))
