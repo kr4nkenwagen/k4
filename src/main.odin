@@ -29,7 +29,7 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --theme FILE            colors.toml (default: the current Omarchy-format theme)
   --no-icons              ignore icon fields
   --menu                  two-pane launcher (sections, actions, views); input format in menu.odin
-  --open ID               menu mode: start inside the section with this id
+  --open ID               menu mode: start inside the section with this id; Esc there closes k4
   --popup-x X, --popup-w W   open as a popup under a bar module: its centre x, the output width
   --bar                   the status bar (modules on stdin; format in bar.odin)
   --output NAME           the bar's output (default: the compositor's choice)
@@ -151,7 +151,7 @@ main :: proc() {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		menu_setup(a, string(data))
 		if v, ok := strconv.parse_int(os.get_env("K4_SLOW_MS", context.temp_allocator)); ok do a.menu.slow_ms = max(v, 1)
-		if opts.open != "" do for s, i in a.menu.sections do if s.id == opts.open { menu_enter(a, i); break }
+		if opts.open != "" do for s, i in a.menu.sections do if s.id == opts.open { menu_enter(a, i); a.menu.entry = i; break }
 	} else if !prompt_only {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		a.rows = logic.parse_dmenu(string(data))

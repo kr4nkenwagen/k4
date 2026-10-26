@@ -2,7 +2,7 @@ focus Sub
 crumb KESTREL › GITHUB
 query (Search PRs…)
 count loading
-hints … Loading GitHub · ⌫ Back
+hints … Loading GitHub · ⌫ Back · Esc Close
 title GitHub · Fetching from GitHub…
 == REVIEW REQUESTS
 ~~ 2 loading bars

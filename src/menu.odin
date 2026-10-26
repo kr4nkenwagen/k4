@@ -168,6 +168,7 @@ Menu :: struct {
 	shortcut: bool,
 	cur:      int, // highlighted section (menu focus)
 	open:     int, // section whose actions are open
+	entry:    int, // section --open started in (-1: none): Esc there closes k4 instead of going back
 	view:     int, // open view
 	view_from: int, // action index that opened the view (Backspace returns to it)
 	si:       int, // selection in sub / view / web lists
@@ -817,6 +818,7 @@ menu_back :: proc(a: ^App) {
 			}
 		}
 		m.focus, m.cur, m.si = .Menu, root(m, m.open), 0
+		m.entry = -1 // back at the main menu: Esc works as usual from here on
 		clear_query(a)
 	case .Web, .Calc:
 		m.focus, m.si = .Menu, 0
@@ -1147,7 +1149,7 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 	if m.shortcut && (m.focus == .Menu || m.focus == .Sub) {
 		switch {
 		case k == .Escape:
-			if m.focus == .Sub do menu_back(a)
+			if m.focus == .Sub && !at_entry(m) do menu_back(a)
 			else { a.exit = 1; a.done = true }
 		case k == .Tab || text == "/":
 			m.shortcut = false; menu_refilter(a)
@@ -1211,6 +1213,7 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 	case .Enter: menu_run(a)
 	case .Escape:
 		if m.focus == .Menu { m.shortcut = true; clear_query(a); m.toast = ""; m.si = 0; menu_refilter(a) }
+		else if at_entry(m) { a.exit = 1; a.done = true } // opened here from outside (a bar popup, a key): Esc closes
 		else do menu_back(a)
 	case .Right:
 		if m.focus == .Menu && !searching(m, a) { menu_run(a); return true }
@@ -1408,6 +1411,9 @@ menu_header :: proc(a: ^App, sc: bool) -> (crumb, ph, count: string) {
 	return
 }
 
+// True on the section or page k4 was opened at with --open (until the main menu is shown).
+at_entry :: proc(m: ^Menu) -> bool { return m.entry >= 0 && m.focus == .Sub && m.open == m.entry }
+
 // The footer's key hints for the current state (drawn, and --dump).
 menu_hints :: proc(a: ^App, sc: bool) -> (hints: [][2]string) {
 	m := a.menu
@@ -1437,9 +1443,13 @@ menu_hints :: proc(a: ^App, sc: bool) -> (hints: [][2]string) {
 	case: hints = {{"↑↓", "Move"}, {"↵", "Open"}, {"⌫", "Back"}}
 	}
 	// the literals above live in this frame: hand out a copy
-	out := make([][2]string, len(hints), context.temp_allocator)
-	copy(out, hints)
-	return out
+	out := make([dynamic][2]string, 0, len(hints) + 1, context.temp_allocator)
+	append(&out, ..hints)
+	if at_entry(m) { // Esc closes here: say so, in place of the Vim hint
+		if n := len(out); n > 0 && out[n - 1][0] == "⌃J ⌃K" do out[n - 1] = {"Esc", "Close"}
+		else do append(&out, [2]string{"Esc", "Close"})
+	}
+	return out[:]
 }
 
 @(private)
@@ -2229,6 +2239,7 @@ menu_fonts :: proc(a: ^App) {
 
 menu_setup :: proc(a: ^App, data: string) {
 	m := new(Menu)
+	m.entry = -1
 	a.menu = m
 	menu_parse(m, data)
 	menu_fonts(a)

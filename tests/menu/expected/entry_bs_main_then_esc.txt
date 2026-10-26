@@ -1,0 +1,14 @@
+focus Menu shortcuts
+crumb SHORTCUTS
+query (Press a letter   / to search)
+count 
+hints a–z Open · j k Move · / Search · Esc Close
+* [N] Network
+  [A] Apps
+  [R] GitHub
+  [T] Toggle
+  [W] Weather
+== NOT INSTALLED
+  [X] Docker (dim)
+exit 1
+log: load apps

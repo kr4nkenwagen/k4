@@ -50,3 +50,7 @@ mouse_slider	net	<click:632,230>
 mouse_preview_click	-	<click:400,170>
 mouse_right_back	net	<rclick:400,300>
 mouse_wheel	net	<wheel:2>
+entry_esc_closes	net	<esc>
+entry_page_esc_back	net	<enter><esc>
+entry_bs_main_then_esc	net	<bs><esc>
+no_entry_esc_back	-	<right><esc>
