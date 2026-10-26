@@ -37,6 +37,7 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --bar                   the status bar (modules on stdin; format in bar.odin)
   --osd SPEC              the on-screen display for 1.2 s; a second call updates it (osd.odin)
   --overview              every workspace and its windows at once (Super+Tab; overview.odin)
+  --power                 the system menu: lock, suspend, … shut down (Super+Esc; tiles on stdin, power.odin)
   --output NAME           the bar's output (default: the compositor's choice)
   --config FILE           accepted and ignored (fuzzel compatibility)
   --dry-run FILE.png      render one frame to a PNG without Wayland, then print the selection
@@ -121,6 +122,7 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 			}
 		case "--compact": o.compact = true
 		case "--overview": o.overview = true
+		case "--power": o.power = true
 		case "--osd": o.osd = value(args, &i, inline, has_inline)
 		case "--config": _ = value(args, &i, inline, has_inline)
 		case "--dry-run": o.dry_run = value(args, &i, inline, has_inline)
@@ -162,6 +164,10 @@ main :: proc() {
 	if opts.overview {
 		ov_setup(a)
 		a.width, a.height = a.opts.width_chars > 0 ? a.opts.width_chars : 1920, 1080 // dry runs; Wayland: the output
+	} else if opts.power {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		pw_setup(a, string(data))
+		a.width, a.height = a.opts.width_chars > 0 ? a.opts.width_chars : 1280, 720 // dry runs; Wayland: the output
 	} else if opts.osd != "" {
 		if opts.dry_run == "" && opts.dump == false && osd_send(opts.osd) do os.exit(0) // one already shows: it took the update
 		a.osd = new(Osd)
@@ -200,7 +206,7 @@ main :: proc() {
 			a.width = a.opts.width_chars > 0 ? a.opts.width_chars : 1280 // dry runs: a 1280 px strip unless -w
 			a.bar.width = a.width
 		} else if a.menu != nil { if wait || nowait == "keys" do menu_load_all(a) }
-		else if a.ov == nil do app_layout(a)
+		else if a.ov == nil && a.pw == nil do app_layout(a)
 		// shaders: where the selection was before the keys, so a cursor shader shows the move
 		pre: [4]int
 		if opts.dry_run != "" && os.get_env("K4_DRY_SHADERS", context.temp_allocator) != "" && opts.keys != "" {
@@ -214,7 +220,7 @@ main :: proc() {
 		press_keys(a, opts.keys)
 		if a.menu != nil && wait do menu_load_all(a) // a stay action started by the keys, and the reload after it
 		if a.menu != nil && !wait { time.sleep(time.Duration(clamp(a.menu.slow_ms, 0, 2000) + 50) * time.Millisecond); menu_on_tick(a) }
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil do app_move(a, opts.select)
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil do app_move(a, opts.select)
 		if a.menu != nil do a.width, a.height = menu_size(a)
 		if a.bar != nil { bar_tick(a); a.height = a.bar.want_h } // a tooltip or the preview grows it
 		s := opts.scale
@@ -249,14 +255,15 @@ main :: proc() {
 			}
 		}
 		if opts.dump && a.ov != nil && !a.done do fmt.print(ov_dump(a))
+		if opts.dump && a.pw != nil && !a.done do fmt.print(pw_dump(a))
 		if opts.dump && a.osd != nil do fmt.printfln("osd %s %d/%d %s %s", a.osd.icon, a.osd.pct, a.osd.vmax, a.osd.value, a.osd.label)
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && !a.done do app_accept(a)
-		if (a.menu != nil || a.bar != nil || a.ov != nil) && !a.done do a.exit = 1
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && !a.done do app_accept(a)
+		if (a.menu != nil || a.bar != nil || a.ov != nil || a.pw != nil) && !a.done do a.exit = 1
 		if a.osd != nil do a.exit = 0
 	} else {
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil do app_layout(a)
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil do app_layout(a)
 		press_keys(a, opts.keys)
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil do app_move(a, opts.select)
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil do app_move(a, opts.select)
 		if a.menu != nil do a.width, a.height = menu_size(a)
 		if a.osd != nil do osd_listen(a.osd)
 		menu_like := a.bar == nil && a.osd == nil

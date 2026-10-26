@@ -1,0 +1,7 @@
+H	jon@kestrel-x1	up 3 d 4 h · battery 64%
+T	lock	Lock	L		omarchy-system-lock	Blanks the screen behind the lock. Everything keeps running.
+T	suspend	Suspend	S	󰒲	systemctl suspend	Sleeps to RAM and locks first. Wakes in about a second; uses a little battery.
+T	hibernate	Hibernate	H	󰤁	systemctl hibernate	Writes memory to swap and powers off. Uses no battery; resumes where you left off.	off=no swap|No swap big enough for 16 GB of RAM. Set it up in Setup › Power.
+T	logout	Log out	E	󰍃	omarchy-system-logout	Ends the session and returns to the login screen.	ask=Log out?|Every window closes and the session ends.
+T	reboot	Reboot	R	󰜉	omarchy-system-reboot	Restarts the machine.	ask=Reboot now?|Unsaved work in open apps will be lost.	block
+T	poweroff	Shut down	P	󰐥	omarchy-system-shutdown	Turns the machine off.	ask=Shut down now?|Unsaved work in open apps will be lost.	block

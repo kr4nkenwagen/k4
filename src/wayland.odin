@@ -496,9 +496,10 @@ run_wayland :: proc(a: ^App) -> bool {
 	W.surface = wl.compositor_create_surface(W.compositor)
 	wl.surface_add_listener(W.surface, &surface_listener, nil)
 	TOP, BOTTOM, LEFT, RIGHT :: i32(1), i32(2), i32(4), i32(8)
-	if a.ov != nil {
-		// the overview: the focused output, every edge, clear of the bar; all of the keyboard
-		W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, nil, .overlay, "k4-overview")
+	if a.ov != nil || a.pw != nil {
+		// the overview and the system menu: the focused output, every edge, clear of the bar;
+		// all of the keyboard
+		W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, nil, .overlay, a.pw != nil ? "k4-power" : "k4-overview")
 		wlr.layer_surface_v1_add_listener(W.layer, &layer_listener, nil)
 		W.width, W.height = 0, 0
 		wlr.layer_surface_v1_set_size(W.layer, 0, 0)
@@ -607,7 +608,7 @@ run_wayland :: proc(a: ^App) -> bool {
 			W.repeat_at = time.tick_add(time.tick_now(), time.Second / time.Duration(max(W.repeat_rate, 1)))
 		}
 		if a.bar != nil && (a.bar.want_h != W.bar_h || a.bar.want_region != W.bar_region) && W.configured do bar_resize(a.bar)
-		if (a.bar != nil || a.ov != nil) && W.configured && !W.bar_gpu && W.width > 0 {
+		if (a.bar != nil || a.ov != nil || a.pw != nil) && W.configured && !W.bar_gpu && W.width > 0 {
 			// Ghostty's shaders on the bar and the overview too, once their size is known
 			W.bar_gpu = true
 			if gpu_init_window(W.display, W.surface, W.width * W.scale, W.height * W.scale) do W.dirty = true

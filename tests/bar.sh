@@ -46,5 +46,15 @@ check "overview: → picks the next card" "* 3 Workspace 3:" "$(ov --keys "<righ
 check "overview: Tab steps into the windows" "* 2 web: [ghostty] [>firefox] [discord]" "$(ov --keys "<tab><tab>" | grep '^\*')"
 check "overview: typing finds windows" "overview \"fire\" · 1 match|* 2 web: [ghostty] [firefox hit] [discord]" "$(ov --keys "fire" | grep '^overview\|^\*' | paste -sd'|')"
 check "overview: Esc clears the search, then closes" "exit 1" "$(ov --keys "fire<esc><esc>"; echo "exit $?")"
+# the system menu (Super+Esc): tiles from a file; k4 prints the picked id ("id!" forced)
+pw() { "$K4" --power --dump "$@" < ../power/tiles.txt 2>&1; }
+check "power: the tiles, Lock picked, Hibernate off" "* L Lock|  H Hibernate (off: no swap)" "$(pw | grep '^\* \|off:' | paste -sd'|')"
+check "power: a letter runs a tile" "suspend" "$(pw --keys "s")"
+check "power: reboot asks, No is picked" "ask Reboot now? · Yes · on no" "$(pw --keys "r" | grep '^ask')"
+check "power: y says yes" "reboot" "$(pw --keys "ry")"
+check "power: n cancels" "toast Cancelled" "$(pw --keys "rn" | grep '^toast')"
+check "power: an inhibitor makes it Force" "poweroff!" "$(printf 'I\tapt (upgrading)\n' | cat ../power/tiles.txt - | "$K4" --power --dump --keys "p<left><enter>" 2>&1)"
+check "power: an unavailable tile says why" "toast No swap big enough for 16 GB of RAM. Set it up in Setup › Power." "$(pw --keys "h" | grep '^toast')"
+check "power: Esc closes" "exit 1" "$(pw --keys "<esc>"; echo "exit $?")"
 echo "bar tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
