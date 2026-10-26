@@ -55,19 +55,3 @@ theme_from_colors :: proc(data: string) -> Theme {
 	return t
 }
 
-// The Kestrel design's palette from a theme: a dark background a step darker than the
-// terminal's (light themes keep theirs), and the selection tinted toward the accent; lines and
-// panels are drawn as the background mixed toward the accent.
-kestrel :: proc(t: Theme) -> Theme {
-	k := t
-	ch :: proc(c: u32, sh: u32) -> f32 { return f32(c >> sh & 0xff) }
-	mixc :: proc(a, b: u32, f: f32) -> u32 {
-		r: u32
-		for sh in ([3]u32{16, 8, 0}) do r |= u32(ch(a, sh) + (ch(b, sh) - ch(a, sh)) * f + 0.5) << sh
-		return r
-	}
-	lum := (0.299 * ch(t.bg, 16) + 0.587 * ch(t.bg, 8) + 0.114 * ch(t.bg, 0)) / 255
-	if lum < 0.5 do k.bg = mixc(t.bg, 0, 0.35)
-	k.selection = mixc(k.bg, t.accent, 0.1)
-	return k
-}

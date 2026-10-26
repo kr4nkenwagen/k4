@@ -247,7 +247,7 @@ ov_key :: proc(a: ^App, k: Key, ctrl, shift: bool, ch: rune, text: string) -> bo
 
 // ---------- drawing ----------
 
-// The overview's palette, taken from the theme (already darkened, see logic.kestrel): the
+// The overview's palette, all from the theme: its background and foreground, the
 // accent for everything lit, red for alarms, green for the link; lines and panels are the
 // background mixed toward the accent and the foreground. K4_OVERVIEW_ACCENT=#RRGGBB overrides
 // the accent.
@@ -258,9 +258,9 @@ hud :: proc(t: logic.Theme) -> HUD {
 		if n, ok := strconv.parse_u64_of_base(v[1:], 16); ok do acc = u32(n)
 	}
 	bg := t.bg
-	return {bg = bg, panel = mix(bg, t.fg, 0.04), screen = mix(t.bg, 0, 0.25), fg = t.fg_bright, dim = t.fg_dim,
+	return {bg = bg, panel = mix(bg, t.fg, 0.04), screen = t.bg, fg = t.fg_bright, dim = t.fg_dim,
 		faint = mix(bg, t.fg_dim, 0.45), line = mix(bg, acc, 0.16), acc = acc, hot = t.red, ok = t.green,
-		card = mix(bg, t.fg, 0.015), card_sel = mix(bg, acc, 0.07), win = mix(bg, t.fg, 0.05),
+		card = mix(bg, t.fg, 0.03), card_sel = mix(bg, acc, 0.07), win = mix(bg, t.fg, 0.05),
 		hint = mix(t.fg_dim, bg, 0.35), meter = mix(bg, acc, 0.1)}
 }
 
@@ -359,7 +359,7 @@ ov_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	o := a.ov
 	H := hud(a.theme)
 	canvas_clear(cv)
-	fill_rect(cv, 0, 0, cv.w, cv.h, argb(0x02060A, 0xb8)) // the dimmed desktop
+	fill_rect(cv, 0, 0, cv.w, cv.h, argb(H.bg, 0xb8)) // the dimmed desktop
 	w := min(OV_W * S, cv.w - 40 * S)
 	h := min(OV_H * S, cv.h - 40 * S)
 	x, y := (cv.w - w) / 2, (cv.h - h) / 2

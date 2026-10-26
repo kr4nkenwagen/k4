@@ -274,7 +274,6 @@ app_load_style :: proc(a: ^App, first: bool) -> bool {
 	if data, err := os.read_entire_file(theme_path, context.temp_allocator); err == nil {
 		a.theme = logic.theme_from_colors(string(data))
 	}
-	a.theme = logic.kestrel(a.theme)
 	family := a.opts.font
 	if family == "" {
 		if data, err := os.read_entire_file(state_file("font.name"), context.temp_allocator); err == nil {
