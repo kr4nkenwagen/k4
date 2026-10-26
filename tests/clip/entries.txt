@@ -1,0 +1,11 @@
+S	1
+E	1	1792760800	1	text	jon.felix@kestrel.dev	1	21		jon.felix@kestrel.dev
+E	2	1792415200	1	block	Host kestrel-build	6	126		Host kestrel-build  HostName 10.0.4.21  User jon  IdentityFile ~/.ssh/id_ed25519  ForwardAgent yes  # build box in rack 2
+E	3	1793019880	0	text	git rebase -i HEAD~3	1	20		git rebase -i HEAD~3
+E	5	1793019280	0	block	{ "status": "ok", "build": 4812,	10	150		{  "status": "ok",  "build": 4812,  "branch": "main",  "artifacts": [    "k4-0.9.2-x86_64.tar.zst",    "k4-0.9.2.sig"  ],  "duration_s": 212}
+E	6	1793018920	0	text	https://wiki.archlinux.org/title/PipeWire	1	41		https://wiki.archlinux.org/title/PipeWire
+E	9	1793016400	0	block	def parse_quick(s: str) -> Event:	9	273		def parse_quick(s: str) -> Event:    # "Lunch fri 12-13 @Ramen"    m = QUICK.match(s.strip())    if not m:        raise ValueError(s)    day = weekday(m["day"])    return Event(m["title"], day,                 m["start"], m["end"],                 where=m["where"])
+E	10	1793016300	0	text	Room 3B, 09:30	1	14		Room 3B, 09:30
+E	11	1793012800	0	text	#3DF5FF	1	7		#3DF5FF
+E	14	1792930000	0	text	Ölandsgatan 42, 116 63 Stockholm	1	32		Ölandsgatan 42, 116 63 Stockholm
+E	15	1792847200	0	text	Thanks! I pushed the fix to the branch, CI is green now. Will merge after standup unless someone objects.	1	105		Thanks! I pushed the fix to the branch, CI is green now. Will merge after standup unless someone objects.

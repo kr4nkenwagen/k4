@@ -65,5 +65,15 @@ check "centre: space folds a group" "* [Slack 3 folded]|    Slack · Anna Berg �
 check "centre: enter runs the first action" "toast Hibernate · Battery critically low · 5%  (act 9 hibernate)" "$(nc --keys "<enter>" | grep '^toast')"
 check "centre: a button's letter runs it" "toast Power saver · Battery critically low · 5%  (act 9 saver)" "$(nc --keys "p" | grep '^toast')"
 check "centre: x dismisses, d do not disturb" "toast Dismissed  (dismiss 8)|toast Do not disturb on  (dnd toggle)" "$( (nc --keys "<down>x"; nc --keys "d") | grep '^toast' | paste -sd'|')"
+# the clipboard window: entries from a file, no runner (pin and delete only say what they would run)
+cl() { K4_CLIP_NOW=1793020000 "$K4" --clip --dump "$@" < ../clip/entries.txt 2>&1; }
+check "clip: pinned first, then newest" "clip All · 10 of 10|* ◆ jon.felix@kestrel.dev · text|  ◆ Host kestrel-build · block|  git rebase -i HEAD~3 · text" "$(cl | head -4 | paste -sd'|')"
+check "clip: typing searches labels and text" "clip All · 1 of 10|* def parse_quick(s: str) -> Event: · block" "$(cl --keys "QUICK.match" | head -2 | paste -sd'|')"
+check "clip: Tab filters by kind" "clip Blocks · 3 of 10" "$(cl --keys "<tab><tab>" | head -1)"
+check "clip: enter pastes, shift-enter copies" "paste	3|copy	3" "$( (cl --keys "<down><down><enter>"; cl --keys "<down><down><shift-enter>") | paste -sd'|')"
+check "clip: ctrl-enter on text pastes plain, on a block opens it" "plain	3|extra	2" "$( (cl --keys "<down><down><ctrl-enter>"; cl --keys "<down><ctrl-enter>") | paste -sd'|')"
+check "clip: alt-2 pastes the second unpinned one" "paste	5" "$(cl --keys "<alt-2>")"
+check "clip: ctrl-p pins in place" "toast (pin 1)" "$(cl --keys "<ctrl-p>" | grep '^toast')"
+check "clip: Esc clears the search, then closes" "exit 1" "$(cl --keys "x<esc><esc>"; echo "exit $?")"
 echo "bar tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
