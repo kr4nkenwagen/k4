@@ -85,7 +85,8 @@ of the bar.
 `k4 --overview` (Super+Tab) shows every workspace at once over the dimmed desktop: a card per
 workspace with its windows in miniature and listed; ←→↑↓ and 1–9 pick and go, Tab steps into a
 card's windows (↵ focuses, x closes), ⇧↵ moves the focused window there, typing finds windows
-across all of them (`src/overview.odin`).
+across all of them (`src/overview.odin`). It has its own HUD palette (a neon accent on near-black;
+`K4_OVERVIEW_ACCENT=#RRGGBB` picks another accent).
 
 The bar, popups and the overview run Ghostty's shaders as the launcher does.
 

@@ -1698,6 +1698,12 @@ days_in_month :: proc(y, m: int) -> int {
 	ny, nm := m == 12 ? y + 1 : y, m == 12 ? 1 : m + 1
 	return days_from_civil(ny, nm, 1) - days_from_civil(y, m, 1)
 }
+libc_now_hms :: proc() -> string {
+	t := libc.time(nil)
+	tm := libc.localtime(&t)
+	return fmt.tprintf("%02d:%02d:%02d", tm.tm_hour, tm.tm_min, tm.tm_sec)
+}
+
 libc_now_minutes :: proc() -> int {
 	t := libc.time(nil)
 	tm := libc.localtime(&t)

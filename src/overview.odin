@@ -1,7 +1,9 @@
 package k4
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:os"
+import "core:strconv"
 import "core:strings"
 import "core:sys/linux"
 import "core:unicode/utf8"
@@ -20,6 +22,7 @@ OV_W, OV_H :: 1360, 720
 Ov_Card :: struct {
 	ws: Ws,
 	name: string,
+	label: string, // a named workspace's name ("web"), else empty
 	wins: [dynamic]Prev_Win,
 }
 
@@ -30,7 +33,8 @@ Ov :: struct {
 	toast: string,
 	hypr: bool,
 	ipc: linux.Fd,
-	f7, f8, f9b, f10, f11, f12, f12b, f16: ^Font,
+	f7, f8, f8b, f9, f9b, f10, f10b, f11, f11b, f12, f12b, f14b, f15, f16, f16b, f24b: ^Font,
+	outputs_line: string, // "DP-1 3440×1440 · HDMI-A-1" for the header
 	x, y, w, h: int, // the window as drawn (buffer px)
 }
 
@@ -41,12 +45,15 @@ ov_setup :: proc(a: ^App) {
 	fixture := os.get_env("K4_BAR_WORKSPACES", context.temp_allocator) != "" // tests: never the real compositor
 	o.hypr = !fixture && hypr_dir() != ""
 	if !o.hypr && !fixture do if fd, ok := ipc_connect(); ok do o.ipc = fd
-	o.f7, o.f8, o.f10, o.f11 = font_sized(&a.font, 7), font_sized(&a.font, 8), font_sized(&a.font, 10), font_sized(&a.font, 11)
-	o.f16, o.f12 = font_sized(&a.font, 16), font_sized(&a.font, 12)
-	o.f9b, o.f12b = font_sized(&a.font, 9), font_sized(&a.font, 12)
-	if b, ok := bold_font(a, 9); ok do o.f9b = b
-	if b, ok := bold_font(a, 12); ok do o.f12b = b
-	append(&a.fonts, o.f7, o.f8, o.f9b, o.f10, o.f11, o.f12, o.f12b, o.f16)
+	reg :: proc(a: ^App, px: f32) -> ^Font { f := font_sized(&a.font, px); append(&a.fonts, f); return f }
+	bld :: proc(a: ^App, px: f32) -> ^Font {
+		f := font_sized(&a.font, px)
+		if b, ok := bold_font(a, px); ok do f = b
+		append(&a.fonts, f)
+		return f
+	}
+	o.f7, o.f8, o.f9, o.f10, o.f11, o.f12, o.f15, o.f16 = reg(a, 7), reg(a, 8), reg(a, 9), reg(a, 10), reg(a, 11), reg(a, 12), reg(a, 15), reg(a, 16)
+	o.f8b, o.f9b, o.f10b, o.f11b, o.f12b, o.f14b, o.f16b, o.f24b = bld(a, 8), bld(a, 9), bld(a, 10), bld(a, 11), bld(a, 12), bld(a, 14), bld(a, 16), bld(a, 24)
 	ov_load(a)
 	for c, i in o.cards do if c.ws.focused { o.cur = i; break }
 }
@@ -80,9 +87,26 @@ ov_load :: proc(a: ^App) {
 		else if o.ipc >= 0 do prev_load_sway(&p, w, i32(o.ipc))
 		label, named := ws_label(w)
 		name := named ? label[strings.index_byte(label, ' ') + 1:] : fmt.tprintf("Workspace %d", w.num)
-		append(&o.cards, Ov_Card{ws = w, name = strings.clone(name), wins = p.wins})
+		append(&o.cards, Ov_Card{ws = w, name = strings.clone(name), label = named ? strings.clone(name) : "", wins = p.wins})
 	}
 	o.cur = clamp(o.cur, 0, max(len(o.cards) - 1, 0))
+	o.outputs_line = ""
+	if o.hypr {
+		if mb, ok := hypr_request("j/monitors"); ok {
+			M :: struct { name: string, width, height: int }
+			ms: []M
+			if json.unmarshal(mb, &ms, allocator = context.temp_allocator) == nil {
+				parts := make([dynamic]string, 0, 4, context.temp_allocator)
+				for m, i in ms do append(&parts, i == 0 ? fmt.tprintf("%s %d×%d", m.name, m.width, m.height) : m.name)
+				o.outputs_line = strings.join(parts[:], " · ")
+			}
+		}
+	} else {
+		seen := make(map[string]bool, 4, context.temp_allocator)
+		parts := make([dynamic]string, 0, 4, context.temp_allocator)
+		for c in o.cards do if c.ws.output != "" && !seen[c.ws.output] { seen[c.ws.output] = true; append(&parts, c.ws.output) }
+		o.outputs_line = strings.join(parts[:], " · ")
+	}
 }
 
 @(private)
@@ -143,7 +167,7 @@ ov_kill :: proc(a: ^App) {
 		hypr_focus_window(w.addr)
 		hypr_dispatch_lua("hl.dsp.window.close()", "killactive")
 	} else if o.ipc >= 0 do ipc_query(o.ipc, IPC_RUN_COMMAND, fmt.tprintf("[con_id=%s] kill", w.addr), context.temp_allocator)
-	o.toast = fmt.aprintf("Closed  %s", w.app)
+	o.toast = fmt.aprintf("TERMINATED · %s", strings.to_upper(w.app, context.temp_allocator))
 	o.win = -1
 	ov_reload(a)
 }
@@ -154,16 +178,16 @@ ov_move :: proc(a: ^App) {
 	o := a.ov
 	from := -1
 	for c, i in o.cards do if c.ws.focused { from = i; break }
-	if from < 0 || from == o.cur { o.toast = "Pick another workspace to move the window to"; return }
+	if from < 0 || from == o.cur { o.toast = "SELECT ANOTHER SECTOR AS TARGET"; return }
 	src := -1
 	for w, i in o.cards[from].wins do if w.focused { src = i; break }
 	if src < 0 && len(o.cards[from].wins) > 0 do src = 0
-	if src < 0 { o.toast = "No window to move"; return }
+	if src < 0 { o.toast = "NO WINDOW TO TRANSFER"; return }
 	w := o.cards[from].wins[src]
 	dst := o.cards[o.cur].ws.name
 	if o.hypr do hypr_dispatch_lua(strings.concatenate({"hl.dsp.window.move({ workspace = \"", dst, "\", follow = false })"}, context.temp_allocator), strings.concatenate({"movetoworkspacesilent ", dst}, context.temp_allocator))
 	else if o.ipc >= 0 do ipc_query(o.ipc, IPC_RUN_COMMAND, fmt.tprintf("move container to workspace \"%s\"", dst), context.temp_allocator)
-	o.toast = fmt.aprintf("Moved  %s  to %s", w.app, dst)
+	o.toast = fmt.aprintf("TRANSFER COMPLETE · %s → %s", strings.to_upper(w.app, context.temp_allocator), ws_hud_label(o.cards[o.cur]))
 	ov_reload(a)
 }
 
@@ -222,161 +246,342 @@ ov_key :: proc(a: ^App, k: Key, ctrl, shift: bool, ch: rune, text: string) -> bo
 
 // ---------- drawing ----------
 
+// The overview's own palette (the HUD design): near-black, a neon accent, hot pink alarms.
+HUD :: struct { bg, panel, screen, fg, dim, faint, line, acc, hot, ok, card, card_sel, win: u32 }
+hud :: proc() -> HUD {
+	acc: u32 = 0x3DF5FF
+	if v := os.get_env("K4_OVERVIEW_ACCENT", context.temp_allocator); len(v) == 7 && v[0] == '#' {
+		if n, ok := strconv.parse_u64_of_base(v[1:], 16); ok do acc = u32(n)
+	}
+	return {bg = 0x04070C, panel = 0x07101A, screen = 0x030A11, fg = 0xD6F7FF, dim = 0x5E8A96, faint = 0x2A4650, line = 0x123039,
+		acc = acc, hot = 0xFF3D7F, ok = 0x3DFF9E, card = 0x050B12, card_sel = 0x06121B, win = 0x0A161F}
+}
+
+// Text with letter spacing (the HUD's tracked capitals), and its width.
+@(private)
+spaced_w :: proc(f: ^Font, s: string, sp: int) -> int {
+	w, n := 0, 0
+	for r in s { w += tw(f, utf8.runes_to_string({r}, context.temp_allocator)); n += 1 }
+	return w + sp * max(n - 1, 0)
+}
+@(private)
+spaced :: proc(cv: ^Canvas, f: ^Font, s: string, x, y, h: int, c: u32, sp: int, glow := false) {
+	xx := x
+	for r in s {
+		ch := utf8.runes_to_string({r}, context.temp_allocator)
+		if glow { // a faint halo: the glyph again, offset, see-through
+			for d in ([4][2]int{{-1, 0}, {1, 0}, {0, -1}, {0, 1}}) do text_in(cv, f, ch, xx + d[0], y + d[1], h, argb(c, 0x40))
+		}
+		text_in(cv, f, ch, xx, y, h, argb(c, 0xff))
+		xx += tw(f, ch) + sp
+	}
+}
+@(private)
+spaced_fit :: proc(f: ^Font, s: string, sp, w: int) -> string { // cut with an ellipsis to fit
+	if spaced_w(f, s, sp) <= w do return s
+	r := utf8.string_to_runes(s, context.temp_allocator)
+	for n := len(r) - 1; n > 0; n -= 1 {
+		t := strings.concatenate({utf8.runes_to_string(r[:n], context.temp_allocator), "…"}, context.temp_allocator)
+		if spaced_w(f, t, sp) <= w do return t
+	}
+	return ""
+}
+
+// A rectangle with its top-right and bottom-left corners cut (the HUD's cards).
+@(private)
+cut_rect :: proc(cv: ^Canvas, x, y, w, h, c: int, color: u32) {
+	for yy in 0 ..< h {
+		l, r := x, x + w
+		if yy < c do r = x + w - (c - yy)
+		if yy >= h - c do l = x + (yy - (h - c))
+		fill_rect(cv, l, y + yy, r - l, 1, color)
+	}
+}
+
+@(private)
+pad2 :: proc(n: int) -> string { return n < 10 ? fmt.tprintf("0%d", n) : fmt.tprintf("%d", n) }
+
+@(private)
+ws_hud_label :: proc(c: Ov_Card) -> string {
+	return c.label != "" ? fmt.tprintf("WS %s %s", pad2(c.ws.num), strings.to_upper(c.label, context.temp_allocator)) : fmt.tprintf("WS %s", pad2(c.ws.num))
+}
+
+// One window in a card's miniature, HUD style: lit (focused, the cursor's, a match) in the
+// accent with a glow, alarms in pink, the rest faint; title bar, the mark large, the app.
+@(private)
+ov_mini :: proc(a: ^App, cv: ^Canvas, S, mx, my, MW, MH: int, wi: Prev_Win, on, hit, faded: bool, H: HUD) -> [4]int {
+	o := a.ov
+	g := wi.full ? 0 : 3 * S
+	bx := mx + int(wi.x * f32(MW)) + g
+	by := my + int(wi.y * f32(MH)) + g
+	bw := max(int(wi.w * f32(MW)) - 2 * g, 8 * S)
+	bh := max(int(wi.h * f32(MH)) - 2 * g, 8 * S)
+	bx, by = clamp(bx, mx, mx + MW - bw), clamp(by, my, my + MH - bh)
+	lit := on || hit || wi.focused
+	col := wi.urgent ? H.hot : (lit ? H.acc : H.faint)
+	if wi.floating do fill_rect(cv, bx + 2 * S, by + 8 * S, bw, bh, argb(0, 0xcc))
+	if lit || wi.urgent do for k in 1 ..= 3 do rounded_rect(cv, bx - k * S, by - k * S, bw + 2 * k * S, bh + 2 * k * S, 0, 0, f32(S), argb(wi.urgent ? H.hot : H.acc, u8(0x30 / k)))
+	fill_rect(cv, bx, by, bw, bh, argb(H.screen, 0xff))
+	fill_rect(cv, bx, by, bw, bh, wi.urgent ? argb(H.hot, 0x1f) : (on ? argb(H.acc, 0x38) : (lit ? argb(H.acc, 0x14) : argb(H.win, 0xff))))
+	rounded_rect(cv, bx, by, bw, bh, 0, 0, f32(S), argb(on ? H.fg : col, 0xff))
+	top := by + S
+	if !wi.full {
+		th := 10 * S
+		text_in(cv, o.f7, ellipsize(o.f7, wi.title, bw - 8 * S), bx + 3 * S, top, th, argb(lit ? H.fg : H.dim, 0xff))
+		fill_rect(cv, bx, top + th, bw, S, argb(on ? H.fg : col, 0xff))
+		top += th + S
+	}
+	small := bw < int(f32(MW) * 0.45) || bh < int(f32(MH) * 0.45)
+	mf := small ? o.f11b : o.f16b
+	app := strings.to_upper(wi.app, context.temp_allocator)
+	total := int(mf.line_h) + 3 * S + int(o.f7.line_h)
+	cy := top + max((by + bh - top - total) / 2, 0)
+	mc := wi.urgent ? H.hot : (lit ? H.acc : H.dim)
+	if cy + int(mf.line_h) <= by + bh {
+		mw := spaced_w(mf, wi.mono, S)
+		spaced(cv, mf, wi.mono, bx + (bw - mw) / 2, cy, int(mf.line_h), mc, S, lit || wi.urgent)
+	}
+	if cy + total <= by + bh {
+		aw := spaced_w(o.f7, app, 2 * S)
+		if aw <= bw - 6 * S do spaced(cv, o.f7, app, bx + (bw - aw) / 2, cy + int(mf.line_h) + 3 * S, int(o.f7.line_h), H.dim, 2 * S)
+	}
+	if faded do fill_rect(cv, bx - 3 * S, by - 3 * S, bw + 6 * S, bh + 6 * S, argb(H.card, 0xbf))
+	return {bx, by, bw, bh}
+}
+
 ov_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	o := a.ov
-	t := a.theme
+	H := hud()
 	canvas_clear(cv)
-	fill_rect(cv, 0, 0, cv.w, cv.h, argb(0, 0x80)) // the dimmed desktop
+	fill_rect(cv, 0, 0, cv.w, cv.h, argb(0x02060A, 0xb8)) // the dimmed desktop
 	w := min(OV_W * S, cv.w - 40 * S)
 	h := min(OV_H * S, cv.h - 40 * S)
 	x, y := (cv.w - w) / 2, (cv.h - h) / 2
 	o.x, o.y, o.w, o.h = x, y, w, h
-	fill_rect(cv, x, y, w, h, argb(t.bg, 0xff))
-	rounded_rect(cv, x, y, w, h, 0, 0, f32(2 * S), argb(t.accent, 0xff))
+	fill_rect(cv, x, y, w, h, argb(H.bg, 0xff))
+	for gx := x; gx < x + w; gx += 32 * S do fill_rect(cv, gx, y, S, h, argb(H.acc, 0x0b)) // the grid
+	for gy := y; gy < y + h; gy += 32 * S do fill_rect(cv, x, gy, w, S, argb(H.acc, 0x0b))
+	for sy := y; sy < y + h; sy += 3 * S do fill_rect(cv, x, sy, w, S, argb(0xffffff, 0x06)) // scanlines
+	rounded_rect(cv, x, y, w, h, 0, 0, f32(S), argb(H.line, 0xff))
+	cl := 26 * S
+	for c in ([4][2]int{{0, 0}, {1, 0}, {0, 1}, {1, 1}}) { // the corner brackets
+		cx := c[0] == 0 ? x : x + w - cl
+		cy := c[1] == 0 ? y : y + h - cl
+		fill_rect(cv, cx, c[1] == 0 ? cy : cy + cl - 2 * S, cl, 2 * S, argb(H.acc, 0xff))
+		fill_rect(cv, c[0] == 0 ? cx : cx + cl - 2 * S, cy, 2 * S, cl, argb(H.acc, 0xff))
+	}
 	hit_add(a, x, y, w, h, .Web, -1, -1)
-	sel := t.selection
-	B := 2 * S
 	q := ov_query(a)
 	hits := ov_hits(a)
-	// header: OVERVIEW · the search · the count · Super+Tab
-	hy, hh := y + B, 50 * S
-	chip := "OVERVIEW"
-	cw := tw(o.f12b, chip) + 16 * S
-	chh := int(o.f12b.line_h) + 8 * S
-	fill_rect(cv, x + 18 * S, hy + (hh - chh) / 2, cw, chh, argb(t.accent, 0xff))
-	text_in(cv, o.f12b, chip, x + 18 * S + 8 * S, hy + (hh - chh) / 2, chh, argb(t.bg, 0xff))
-	key := "Super+Tab"
-	kw := tw(o.f11, key) + 12 * S
-	kx := x + w - 18 * S - kw
-	rounded_rect(cv, kx, hy + (hh - 20 * S) / 2, kw, 20 * S, 0, 0, f32(S), argb(sel, 0xff))
-	text_in(cv, o.f11, key, kx + 6 * S, hy, hh, argb(t.fg_dim, 0xff))
+	// header: the title · the query box · the link and outputs
+	hy, hh := y, 64 * S
+	px := x + 30 * S
+	title := "◢ K4://OVERVIEW"
+	tw1 := spaced_w(o.f14b, title, 3 * S)
+	sub := "WORKSPACE MATRIX · SUPER+TAB"
+	tw2 := spaced_w(o.f9, sub, 3 * S)
+	ty := hy + (hh - int(o.f14b.line_h) - 3 * S - int(o.f9.line_h)) / 2
+	spaced(cv, o.f14b, title, px, ty, int(o.f14b.line_h), H.acc, 3 * S, true)
+	spaced(cv, o.f9, sub, px, ty + int(o.f14b.line_h) + 3 * S, int(o.f9.line_h), H.dim, 3 * S)
+	px += max(tw1, tw2) + 22 * S
+	link := o.hypr ? "HYPRLAND IPC · LINKED" : (o.ipc >= 0 ? "SWAY IPC · LINKED" : "IPC · OFFLINE")
+	outs := o.outputs_line
+	t := libc_now_hms()
+	line2 := outs != "" ? fmt.tprintf("%s · %s", outs, t) : t
+	rw := max(spaced_w(o.f10, link, 2 * S) + 13 * S, spaced_w(o.f10, line2, 2 * S))
+	rx := x + w - 30 * S - rw
+	ry := hy + (hh - 2 * int(o.f10.line_h) - 3 * S) / 2
+	lx := x + w - 30 * S - spaced_w(o.f10, link, 2 * S)
+	fill_rect(cv, lx - 13 * S, ry + (int(o.f10.line_h) - 6 * S) / 2, 6 * S, 6 * S, argb(o.hypr || o.ipc >= 0 ? H.ok : H.hot, 0xff))
+	spaced(cv, o.f10, link, lx, ry, int(o.f10.line_h), H.fg, 2 * S)
+	spaced(cv, o.f10, line2, x + w - 30 * S - spaced_w(o.f10, line2, 2 * S), ry + int(o.f10.line_h) + 3 * S, int(o.f10.line_h), H.dim, 2 * S)
+	// the query box
+	bx, bw := px, rx - 22 * S - px
+	bh := 36 * S
+	by := hy + (hh - bh) / 2
+	fill_rect(cv, bx, by, bw, bh, argb(H.panel, 0xff))
+	rounded_rect(cv, bx, by, bw, bh, 0, 0, f32(S), argb(H.line, 0xff))
+	fill_rect(cv, bx, by, 3 * S, bh, argb(H.acc, 0xff))
+	spaced(cv, o.f16b, "›", bx + 12 * S, by, bh, H.acc, 0, true)
 	total := 0
 	for c in o.cards do total += len(c.wins)
-	count := q != "" ? (len(hits) == 1 ? "1 match" : fmt.tprintf("%d matches", len(hits))) : fmt.tprintf("%d workspaces · %d windows", len(o.cards), total)
-	cnt_x := kx - 14 * S - tw(o.f12, count)
-	text_in(cv, o.f12, count, cnt_x, hy, hh, argb(t.fg_dim, 0xff))
-	qx := x + 18 * S + cw + 14 * S
-	qtext := string(a.query[:])
-	if qtext == "" do text_in(cv, o.f16, "Type to find a window…   1–9 jump to a workspace", qx, hy, hh, argb(t.fg_dim, 0xff), cnt_x - 14 * S)
-	else do text_in(cv, o.f16, qtext, qx, hy, hh, argb(t.fg, 0xff), cnt_x - 14 * S)
-	qs := shape(o.f16, qtext)
+	count := q != "" ? (len(hits) == 1 ? "1 HIT" : fmt.tprintf("%d HITS", len(hits))) : fmt.tprintf("%s SECTORS · %s WINDOWS", pad2(len(o.cards)), pad2(total))
+	cw := spaced_w(o.f10, count, 2 * S)
+	spaced(cv, o.f10, count, bx + bw - 12 * S - cw, by, bh, q != "" ? H.acc : H.dim, 2 * S)
+	qx := bx + 12 * S + tw(o.f16b, "›") + 10 * S
+	qclip := bx + bw - 24 * S - cw
+	qt := string(a.query[:])
+	if qt == "" do text_in(cv, o.f15, "query windows · 1–9 jump · arrows navigate", qx, by, bh, argb(0x3F6873, 0xff), qclip)
+	else do text_in(cv, o.f15, qt, qx, by, bh, argb(H.fg, 0xff), qclip)
+	qs := shape(o.f15, qt)
 	cp := utf8.rune_count_in_string(string(a.query[:a.cursor]))
 	caret := qx + int(qs.cp_x[min(cp, len(qs.cp_x) - 1)])
-	fill_rect(cv, caret, hy + (hh - int(o.f16.line_h)) / 2, max(S, 2), int(o.f16.line_h), argb(t.accent, 0xff))
-	fill_rect(cv, x + B, hy + hh, w - 2 * B, S, argb(sel, 0xff))
-	// footer: hints or what happened
-	fh := 32 * S
-	fy := y + h - B - fh
-	fill_rect(cv, x + B, fy, w - 2 * B, S, argb(sel, 0xff))
-	if o.toast != "" do text_in(cv, o.f11, o.toast, x + 18 * S, fy, fh, argb(t.accent, 0xff))
-	else {
-		H: [][2]string
-		switch {
-		case q != "": H = {{"↑↓", "Next match"}, {"↵", "Go to match"}, {"Esc", "Clear"}}
-		case o.win >= 0: H = {{"Tab", "Next window"}, {"↵", "Focus window"}, {"⇧↵", "Move here"}, {"x", "Close window"}, {"Esc", "Back"}}
-		case: H = {{"←→↑↓", "Workspace"}, {"↵", "Go"}, {"1–9", "Jump"}, {"Tab", "Windows"}, {"⇧↵", "Move focused window here"}, {"type", "Find a window"}, {"Esc", "Close"}}
-		}
-		hx := x + 18 * S
-		for k in H {
-			kw2 := tw(o.f10, k[0]) + 10 * S
-			kh := int(o.f10.line_h) + 2 * S
-			fill_rect(cv, hx, fy + (fh - kh) / 2, kw2, kh, argb(sel, 0xff))
-			text_in(cv, o.f10, k[0], hx + 5 * S, fy + (fh - kh) / 2, kh, argb(t.fg, 0xff))
-			hx += kw2 + 5 * S
-			text_in(cv, o.f11, k[1], hx, fy, fh, argb(t.fg_dim, 0xff))
-			hx += tw(o.f11, k[1]) + 16 * S
-		}
+	fill_rect(cv, caret, by + (bh - int(o.f15.line_h)) / 2, max(S, 2), int(o.f15.line_h), argb(H.acc, 0xff))
+	fill_rect(cv, x, hy + hh, w, S, argb(H.line, 0xff))
+	// footer: » status · the hints
+	fh := 38 * S
+	fy := y + h - fh
+	fill_rect(cv, x, fy, w, S, argb(H.line, 0xff))
+	status := o.toast
+	if status == "" {
+		if q != "" do status = fmt.tprintf("SCANNING · %d SIGNAL%s FOUND", len(hits), len(hits) == 1 ? "" : "S")
+		else if o.cur < len(o.cards) do status = fmt.tprintf("TARGET · %s · %d WINDOWS", ws_hud_label(o.cards[o.cur]), len(o.cards[o.cur].wins))
 	}
-	// the cards, four to a row
-	gx, gy := x + 18 * S, hy + hh + S + 16 * S
-	gw, gh := w - 36 * S, fy - 16 * S - gy
+	sc := o.toast != "" ? H.acc : H.dim
+	spaced(cv, o.f10b, "»", x + 30 * S, fy, fh, sc, 0, o.toast != "")
+	HK: [][2]string
+	switch {
+	case q != "": HK = {{"↑↓", "NEXT MATCH"}, {"↵", "ENGAGE"}, {"ESC", "CLEAR"}}
+	case o.win >= 0: HK = {{"TAB", "CYCLE"}, {"↵", "FOCUS"}, {"⇧↵", "TRANSFER"}, {"X", "TERMINATE"}, {"ESC", "BACK"}}
+	case: HK = {{"←→↑↓", "SECTOR"}, {"↵", "JUMP"}, {"1–9", "DIRECT"}, {"TAB", "WINDOWS"}, {"⇧↵", "TRANSFER"}, {"ESC", "CLOSE"}}
+	}
+	hw := 0
+	for k in HK do hw += tw(o.f10b, k[0]) + 10 * S + 6 * S + spaced_w(o.f10, k[1], 2 * S) + 18 * S
+	hx := x + w - 30 * S - hw + 18 * S
+	spaced(cv, o.f10, spaced_fit(o.f10, status, 2 * S, hx - 18 * S - (x + 30 * S + 14 * S)), x + 30 * S + 14 * S, fy, fh, sc, 2 * S, o.toast != "")
+	for k in HK {
+		kw := tw(o.f10b, k[0]) + 10 * S
+		kh := 16 * S
+		fill_rect(cv, hx, fy + (fh - kh) / 2, kw, kh, argb(H.panel, 0xff))
+		rounded_rect(cv, hx, fy + (fh - kh) / 2, kw, kh, 0, 0, f32(S), argb(H.acc, 0x59))
+		text_in(cv, o.f10b, k[0], hx + 5 * S, fy + (fh - kh) / 2, kh, argb(H.acc, 0xff))
+		hx += kw + 6 * S
+		spaced(cv, o.f10, k[1], hx, fy, fh, H.dim, 2 * S)
+		hx += spaced_w(o.f10, k[1], 2 * S) + 18 * S
+	}
+	// the cards: 4 to a row, cut corners
+	gx, gy := x + 30 * S, hy + hh + S + 20 * S
+	gw, gh := w - 60 * S, fy - 16 * S - gy
 	cols := 4
 	rows := max((len(o.cards) + cols - 1) / cols, 1)
-	gap := 14 * S
+	gap := 18 * S
 	cardw := (gw - (cols - 1) * gap) / cols
 	cardh := (gh - (rows - 1) * gap) / rows
-	mf := Mini_Fonts{o.f7, o.f8, o.f9b, o.f12b}
 	for c, ci in o.cards {
 		cx := gx + (ci % cols) * (cardw + gap)
 		cy := gy + (ci / cols) * (cardh + gap)
 		on := ci == o.cur
+		ws := c.ws
+		n := len(c.wins)
 		any_hit := q == ""
 		for wv in c.wins do if ov_match(wv, q) { any_hit = true; break }
-		if on do fill_rect(cv, cx, cy, cardw, cardh, argb(mix(t.bg, t.fg, 0.04), 0xff))
-		rounded_rect(cv, cx, cy, cardw, cardh, 0, 0, f32(2 * S), argb(on ? t.accent : sel, 0xff))
-		// the card's header: number, name, output · windows
-		ch := 30 * S
-		hit_add(a, cx, cy, cardw, ch, .Row, ci, -1)
-		num := fmt.tprintf("%d", c.ws.num)
-		nw := tw(o.f12b, num) + 12 * S
-		ny := cy + (ch - 18 * S) / 2
+		cut := 16 * S
+		if on do for k in 1 ..= 4 do cut_rect(cv, cx - k * 2 * S, cy - k * 2 * S, cardw + k * 4 * S, cardh + k * 4 * S, cut + k * S, argb(H.acc, u8(0x12 / k + 2)))
+		edge := on ? argb(H.acc, 0xff) : (ws.urgent ? argb(H.hot, 0x88) : (ws.focused ? argb(H.acc, 0x80) : argb(H.line, 0xff)))
+		cut_rect(cv, cx, cy, cardw, cardh, cut, edge)
+		cut_rect(cv, cx + S, cy + S, cardw - 2 * S, cardh - 2 * S, cut - S, argb(on ? H.card_sel : H.card, 0xff))
+		// header: 02 · NAME / meta · tag
+		hh2 := 40 * S
+		hit_add(a, cx, cy, cardw, hh2, .Row, ci, -1)
+		num := pad2(ws.num)
+		numc := on || ws.focused ? H.acc : (ws.urgent ? H.hot : H.fg)
+		spaced(cv, o.f24b, num, cx + 12 * S, cy, hh2, numc, 0, on || ws.focused || ws.urgent)
+		nx := cx + 12 * S + tw(o.f24b, num) + 10 * S
+		tag, tagc, tagbg := "STANDBY", H.dim, u32(0)
 		switch {
-		case c.ws.focused: fill_rect(cv, cx + 10 * S, ny, nw, 18 * S, argb(t.accent, 0xff))
-		case c.ws.urgent: fill_rect(cv, cx + 10 * S, ny, nw, 18 * S, argb(t.red, 0xff))
-		case c.ws.visible: rounded_rect(cv, cx + 10 * S, ny, nw, 18 * S, 0, 0, f32(S), argb(t.accent, 0xff))
-		case: rounded_rect(cv, cx + 10 * S, ny, nw, 18 * S, 0, 0, f32(S), argb(sel, 0xff))
+		case ws.focused: tag, tagc, tagbg = "ACTIVE", H.acc, argb(H.acc, 0x1f)
+		case ws.urgent: tag, tagc, tagbg = "ALERT", H.hot, argb(H.hot, 0x1a)
+		case ws.visible: tag, tagc = fmt.tprintf("LIVE · %s", strings.to_upper(ws.output, context.temp_allocator)), H.acc
+		case n == 0: tag, tagc = "IDLE", H.faint
 		}
-		text_in(cv, o.f12b, num, cx + 10 * S + 6 * S, ny, 18 * S, argb(c.ws.focused || c.ws.urgent ? t.bg : (c.ws.visible ? t.accent : t.fg), 0xff))
-		nwin := len(c.wins)
-		meta := nwin == 0 ? "empty" : (nwin == 1 ? "1 window" : fmt.tprintf("%d windows", nwin))
-		mw := tw(o.f11, meta)
-		text_in(cv, o.f11, meta, cx + cardw - 10 * S - mw, cy, ch, argb(t.fg_dim, 0xff))
-		text_in(cv, o.f12b, ellipsize(o.f12b, c.name, cardw - 40 * S - nw - mw), cx + 10 * S + nw + 8 * S, cy, ch, argb(t.fg, 0xff))
-		// the miniature, 16:9
-		mx, my := cx + 8 * S, cy + ch
-		MW := cardw - 16 * S
+		tgw := spaced_w(o.f9b, tag, 2 * S) + 10 * S
+		tgx := cx + cardw - 12 * S - tgw
+		tgy := cy + (hh2 - 14 * S) / 2
+		if tagbg != 0 do fill_rect(cv, tgx, tgy, tgw, 14 * S, tagbg)
+		rounded_rect(cv, tgx, tgy, tgw, 14 * S, 0, 0, f32(S), argb(tagc, 0xff))
+		spaced(cv, o.f9b, tag, tgx + 5 * S, tgy, 14 * S, tagc, 2 * S)
+		name := c.label != "" ? strings.to_upper(c.label, context.temp_allocator) : "UNASSIGNED"
+		meta := fmt.tprintf("%s · %s", n == 0 ? "NO WINDOWS" : (n == 1 ? "1 WINDOW" : fmt.tprintf("%d WINDOWS", n)), strings.to_upper(ws.output, context.temp_allocator))
+		nmw := tgx - 10 * S - nx
+		ny := cy + (hh2 - int(o.f11b.line_h) - 2 * S - int(o.f9.line_h)) / 2
+		spaced(cv, o.f11b, spaced_fit(o.f11b, name, 3 * S, nmw), nx, ny, int(o.f11b.line_h), n == 0 && !on ? H.dim : H.fg, 3 * S)
+		spaced(cv, o.f9, spaced_fit(o.f9, meta, 2 * S, nmw), nx, ny + int(o.f11b.line_h) + 2 * S, int(o.f9.line_h), H.dim, 2 * S)
+		// the meter: a segment per window, 8 at most
+		my0 := cy + hh2
+		segw := (cardw - 24 * S - 7 * 3 * S) / 8
+		for i in 0 ..< 8 {
+			sxx := cx + 12 * S + i * (segw + 3 * S)
+			lit := i < n
+			sc2 := lit ? (ws.urgent ? H.hot : (on || ws.focused ? H.acc : H.dim)) : 0x0E2129
+			if lit && (on || ws.focused) do fill_rect(cv, sxx - S, my0 - S, segw + 2 * S, 5 * S, argb(sc2, 0x40))
+			fill_rect(cv, sxx, my0, segw, 3 * S, argb(sc2, 0xff))
+		}
+		// the miniature: 16:9 on a fine grid
+		mx, my := cx + 10 * S, my0 + 3 * S + 6 * S
+		MW := cardw - 20 * S
 		MH := MW * 9 / 16
-		fill_rect(cv, mx, my, MW, MH, argb(mix(t.bg, t.blue, 0.16), 0xff))
-		if nwin == 0 do text_in(cv, o.f11, "empty", mx + (MW - tw(o.f11, "empty")) / 2, my, MH, argb(t.fg_dim, 0xff))
+		fill_rect(cv, mx, my, MW, MH, argb(H.screen, 0xff))
+		for gx2 := mx; gx2 < mx + MW; gx2 += 12 * S do fill_rect(cv, gx2, my, S, MH, argb(H.acc, 0x0f))
+		for gy2 := my; gy2 < my + MH; gy2 += 12 * S do fill_rect(cv, mx, gy2, MW, S, argb(H.acc, 0x0f))
+		rounded_rect(cv, mx, my, MW, MH, 0, 0, f32(S), argb(H.line, 0xff))
+		if n == 0 {
+			l1, l2 := "NO SIGNAL", "— IDLE SECTOR —"
+			w1, w2 := spaced_w(o.f10, l1, 3 * S), spaced_w(o.f8, l2, 2 * S)
+			yy := my + (MH - int(o.f10.line_h) - 4 * S - int(o.f8.line_h)) / 2
+			spaced(cv, o.f10, l1, mx + (MW - w1) / 2, yy, int(o.f10.line_h), H.dim, 3 * S)
+			spaced(cv, o.f8, l2, mx + (MW - w2) / 2, yy + int(o.f10.line_h) + 4 * S, int(o.f8.line_h), H.faint, 2 * S)
+		}
 		for pass in 0 ..< 2 do for wv, wi in c.wins {
 			if wv.hidden || (pass == 0) == wv.floating do continue
-			r := mini_win(a, cv, S, mx, my, MW, MH, wv, on && o.win == wi, mf, q != "" && !ov_match(wv, q))
+			r := ov_mini(a, cv, S, mx, my, MW, MH, wv, on && o.win == wi, q != "" && ov_match(wv, q), q != "" && !ov_match(wv, q), H)
 			hit_add(a, r[0], r[1], r[2], r[3], .Item, ci, wi)
 		}
-		// up to three windows, then "N more"
-		ry := my + MH + 4 * S
-		rh := 22 * S
+		// up to three windows, then "+N MORE IN SECTOR"
+		ry2 := my + MH + 6 * S
+		rh := 21 * S
 		for wv, wi in c.wins {
-			if wi >= 3 || ry + rh > cy + cardh - 2 * S do break
+			if wi >= 3 || ry2 + rh > cy + cardh - 6 * S do break
 			ron := on && o.win == wi
-			if ron do fill_rect(cv, cx + 2 * S, ry, cardw - 4 * S, rh, argb(t.accent, 0xff))
-			rx := cx + 10 * S
-			fill_rect(cv, rx, ry + 5 * S, 20 * S, 12 * S, argb(token(t, wv.tok, t.fg), 0xff))
-			text_in(cv, o.f9b, wv.mono, rx + (20 * S - tw(o.f9b, wv.mono)) / 2, ry + 5 * S, 12 * S, argb(t.bg, 0xff))
-			rx += 26 * S
-			tag, tc := "", t.fg_dim
+			if ron do fill_rect(cv, cx + S, ry2, cardw - 2 * S, rh, argb(H.acc, 0xff))
+			else if wv.focused do fill_rect(cv, cx + S, ry2, 2 * S, rh, argb(H.acc, 0x99))
+			rx2 := cx + 12 * S
+			mc := ron ? H.bg : (wv.urgent ? H.hot : (wv.focused ? H.acc : H.dim))
+			text_in(cv, o.f9b, wv.mono, rx2, ry2, rh, argb(mc, 0xff))
+			rx2 += 18 * S + 7 * S
+			tag2, tc2 := "", H.dim
 			switch {
-			case wv.urgent: tag, tc = "URGENT", t.red
-			case wv.floating: tag = "FLOAT"
-			case wv.full: tag = "FULL"
-			case len(wv.group) > 1: tag = "TAB"
+			case wv.urgent: tag2, tc2 = "ALERT", H.hot
+			case wv.floating: tag2 = "FLOAT"
+			case wv.full: tag2 = "FULL"
+			case len(wv.group) > 1: tag2 = "TAB"
+			case wv.focused: tag2, tc2 = "ACTIVE", H.acc
 			}
-			right := cx + cardw - 10 * S
-			if tag != "" {
-				tw2 := tw(o.f9b, tag) + 6 * S
-				rounded_rect(cv, right - tw2, ry + 5 * S, tw2, 12 * S, 0, 0, f32(S), argb(ron ? t.bg : tc, 0xff))
-				text_in(cv, o.f9b, tag, right - tw2 + 3 * S, ry + 5 * S, 12 * S, argb(ron ? t.bg : tc, 0xff))
-				right -= tw2 + 6 * S
+			right := cx + cardw - 12 * S
+			if tag2 != "" {
+				tw3 := spaced_w(o.f8b, tag2, 2 * S)
+				spaced(cv, o.f8b, tag2, right - tw3, ry2, rh, ron ? H.bg : tc2, 2 * S)
+				right -= tw3 + 7 * S
 			}
-			label := fmt.tprintf("%s · %s", wv.app, wv.title)
-			fc := ron ? t.bg : (wv.focused ? t.fg : t.fg_dim)
-			lab := ellipsize(o.f11, label, right - rx)
+			label := fmt.tprintf("%s :: %s", strings.to_upper(wv.app, context.temp_allocator), wv.title)
+			fc := ron ? H.bg : (wv.focused ? H.fg : H.dim)
+			lab := ellipsize(o.f10, label, right - rx2)
 			at := q != "" ? strings.index(strings.to_lower(lab, context.temp_allocator), q) : -1
 			if at >= 0 && at + len(q) <= len(lab) { // the match bold in the accent
-				pre, hitp, post := lab[:at], lab[at:at + len(q)], lab[at + len(q):]
-				text_in(cv, o.f11, pre, rx, ry, rh, argb(fc, 0xff))
-				hx2 := rx + tw(o.f11, pre)
-				text_in(cv, o.f12b, hitp, hx2, ry, rh, argb(ron ? t.bg : t.accent, 0xff))
-				text_in(cv, o.f11, post, hx2 + tw(o.f12b, hitp), ry, rh, argb(fc, 0xff))
-			} else do text_in(cv, o.f11, lab, rx, ry, rh, argb(fc, 0xff))
-			if q != "" && !ov_match(wv, q) do fill_rect(cv, cx + 2 * S, ry, cardw - 4 * S, rh, argb(t.bg, 0x99))
-			hit_add(a, cx, ry, cardw, rh, .Item, ci, wi)
-			ry += rh
+				pre, hp, post := lab[:at], lab[at:at + len(q)], lab[at + len(q):]
+				text_in(cv, o.f10, pre, rx2, ry2, rh, argb(fc, 0xff))
+				hx2 := rx2 + tw(o.f10, pre)
+				spaced(cv, o.f10b, hp, hx2, ry2, rh, ron ? H.bg : H.acc, 0, !ron)
+				text_in(cv, o.f10, post, hx2 + tw(o.f10b, hp), ry2, rh, argb(fc, 0xff))
+			} else do text_in(cv, o.f10, lab, rx2, ry2, rh, argb(fc, 0xff))
+			if q != "" && !ov_match(wv, q) do fill_rect(cv, cx + S, ry2, cardw - 2 * S, rh, argb(on ? H.card_sel : H.card, 0xa6))
+			hit_add(a, cx, ry2, cardw, rh, .Item, ci, wi)
+			ry2 += rh
 		}
-		if nwin > 3 && ry + rh <= cy + cardh - 2 * S {
-			text_in(cv, o.f11, fmt.tprintf("+ %d more", nwin - 3), cx + 10 * S, ry, rh, argb(t.fg_dim, 0xff))
+		if n > 3 && ry2 + rh <= cy + cardh - 6 * S {
+			text_in(cv, o.f9b, fmt.tprintf("+%d", n - 3), cx + 12 * S, ry2, rh, argb(H.dim, 0xff))
+			spaced(cv, o.f10, "MORE IN SECTOR", cx + 12 * S + 25 * S, ry2, rh, H.dim, S)
 		}
-		if !any_hit do fill_rect(cv, cx, cy, cardw, cardh, argb(t.bg, 0x8c))
+		if on { // ◉ LOCK on the top edge
+			lk := "◉ LOCK"
+			lw := spaced_w(o.f8b, lk, 3 * S) + 10 * S
+			lx2 := cx + cardw - 18 * S - lw
+			fill_rect(cv, lx2, cy - 7 * S, lw, 13 * S, argb(H.bg, 0xff))
+			spaced(cv, o.f8b, lk, lx2 + 5 * S, cy - 7 * S, 13 * S, H.acc, 3 * S, true)
+		}
+		fade: u8 = 0
+		if q != "" && !any_hit do fade = 0xa6
+		else if n == 0 && !on do fade = 0x4d
+		if fade > 0 do cut_rect(cv, cx - 9 * S, cy - 9 * S, cardw + 18 * S, cardh + 18 * S, cut + 9 * S, argb(H.bg, fade))
 	}
 }
 

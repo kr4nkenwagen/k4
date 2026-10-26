@@ -572,6 +572,7 @@ run_wayland :: proc(a: ^App) -> bool {
 		if (W.dirty || gpu_animating()) && !W.frame_pending && W.configured do timeout = 0
 		tick := a.menu != nil ? menu_tick_ms(a.menu) : -1 // a slow loader: the waiting count and slow lines
 		if a.bar != nil do tick = bar_tick(a)               // the bar: the clock and the next module run
+		if a.ov != nil do tick = 1000 - int(time.to_unix_nanoseconds(time.now()) / 1_000_000 % 1000) + 5 // the overview's clock
 		if a.osd != nil {                                   // the feedback box: gone after 1.2 s
 			left := osd_left(a.osd)
 			if left == 0 { a.done = true; break }
