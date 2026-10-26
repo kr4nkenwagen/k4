@@ -1,0 +1,6 @@
+Slack	Anna Berg · #platform	Can you review the PR before standup? It touches the sway config loader, so it would be good to get eyes on it today.	1		default:Open,reply:Reply,read:Mark read
+Calendar	Standup · 09:30–09:45	Google Meet · 6 guests · Room 3B	1		join:Join Meet,snooze:Snooze 5 min
+Firefox	Downloading ubuntu-24.04.1-desktop.iso	2.1 of 3.4 GB · 40 s left	1	62	pause:Pause,cancel:Cancel
+Slack	Jonas Lind	lunch at 12? thinking the ramen place	1		reply:Reply
+System	Battery critically low · 5%	About 8 minutes left. Plug in, or hibernate to keep your work safe.	2		hibernate:Hibernate,saver:Power saver
+Mail	3 new newsletters	Filed to Updates.	0		

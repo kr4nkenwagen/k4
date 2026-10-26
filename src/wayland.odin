@@ -245,7 +245,7 @@ ptr_enter :: proc "c" (data: rawptr, p: ^wl.pointer, serial: uint, s: ^wl.surfac
 }
 ptr_leave :: proc "c" (data: rawptr, p: ^wl.pointer, serial: uint, s: ^wl.surface) {
 	context = W.ctx
-	if W.app.bar != nil && app_pointer_move(W.app, -1, -1) do W.dirty = true // no hover, no tooltip
+	if (W.app.bar != nil || W.app.nd != nil) && app_pointer_move(W.app, -1, -1) do W.dirty = true // no hover, no tooltip; popups' timers run again
 }
 ptr_motion :: proc "c" (data: rawptr, p: ^wl.pointer, t: uint, x, y: wl.fixed_t) {
 	context = W.ctx
@@ -259,7 +259,7 @@ ptr_button :: proc "c" (data: rawptr, p: ^wl.pointer, serial, t, button: uint, s
 	if W.ptr_surf == W.catcher && W.catcher != nil { W.app.exit = 1; W.app.done = true; return } // a click outside closes
 	// Hyprland hands the pointer to a keyboard-exclusive layer even off it (negative or past
 	// its size): that is a click outside too
-	if W.app.bar == nil && W.app.osd == nil && (W.ptr_x < 0 || W.ptr_y < 0 || W.ptr_x >= W.width * W.scale || W.ptr_y >= W.height * W.scale) {
+	if W.app.bar == nil && W.app.osd == nil && W.app.nd == nil && (W.ptr_x < 0 || W.ptr_y < 0 || W.ptr_x >= W.width * W.scale || W.ptr_y >= W.height * W.scale) {
 		W.app.exit = 1
 		W.app.done = true
 		return
@@ -424,6 +424,18 @@ popup_place :: proc(a: ^App) {
 	else do wlr.layer_surface_v1_set_margin(W.layer, 4, 0, 0, i32(x))
 }
 
+// The popups' size changed: the surface follows (1×1 and click-through when there are none).
+nd_resize :: proc(a: ^App) {
+	w, h := nd_size(a)
+	W.width, W.height = max(w, 1), max(h, 1)
+	wlr.layer_surface_v1_set_size(W.layer, u32(W.width), u32(W.height))
+	r := wl.compositor_create_region(W.compositor)
+	if w > 0 do wl.region_add(r, 0, 0, W.width, W.height)
+	wl.surface_set_input_region(W.surface, r)
+	wl.region_destroy(r)
+	wl.surface_commit(W.surface)
+}
+
 // The menu's size changed (a compact popup fitting its page, or leaving the frame for the
 // launcher's): ask for the new size, placed again.
 menu_resize :: proc(a: ^App) {
@@ -507,6 +519,15 @@ run_wayland :: proc(a: ^App) -> bool {
 		wlr.layer_surface_v1_set_exclusive_zone(W.layer, 0)
 		wlr.layer_surface_v1_set_keyboard_interactivity(W.layer, .exclusive)
 		wl.surface_commit(W.surface)
+	} else if a.nd != nil {
+		// the notification popups: top right under the bar (its exclusive zone keeps them clear),
+		// no keyboard; the surface is as big as the cards, 1×1 and click-through with none
+		W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, nil, .top, "k4-notify")
+		wlr.layer_surface_v1_add_listener(W.layer, &layer_listener, nil)
+		wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor(TOP | RIGHT))
+		wlr.layer_surface_v1_set_margin(W.layer, 4, 6, 0, 0)
+		wlr.layer_surface_v1_set_keyboard_interactivity(W.layer, .none)
+		nd_resize(a)
 	} else if a.osd != nil {
 		// the feedback box: centred above the bottom of the focused output, no input at all
 		W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, nil, .overlay, "k4-osd")
@@ -575,6 +596,8 @@ run_wayland :: proc(a: ^App) -> bool {
 		tick := a.menu != nil ? menu_tick_ms(a.menu) : -1 // a slow loader: the waiting count and slow lines
 		if a.bar != nil do tick = bar_tick(a)               // the bar: the clock and the next module run
 		if a.ov != nil do tick = 1000 - int(time.to_unix_nanoseconds(time.now()) / 1_000_000 % 1000) + 5 // the overview's clock
+		if a.nd != nil do tick = nd_tick(a)                 // popups time out
+		if a.nc != nil do tick = 1000                       // the centre follows the service
 		if a.osd != nil {                                   // the feedback box: gone after 1.2 s
 			left := osd_left(a.osd)
 			if left == 0 { a.done = true; break }
@@ -586,9 +609,13 @@ run_wayland :: proc(a: ^App) -> bool {
 		if a.menu != nil do menu_poll_fds(a.menu, &fds) // background section loaders
 		if a.bar != nil do bar_poll_fds(a.bar, &fds)       // module commands, sway events
 		if a.osd != nil && a.osd.sock >= 0 do append(&fds, linux.Poll_Fd{fd = a.osd.sock, events = {.IN}})
+		if a.nd != nil {
+			if a.nd.bus_fd >= 0 do append(&fds, linux.Poll_Fd{fd = a.nd.bus_fd, events = {.IN}})
+			if a.nd.sock >= 0 do append(&fds, linux.Poll_Fd{fd = a.nd.sock, events = {.IN}})
+		}
 		n, _ := linux.poll(fds[:], timeout)
 		if n == 0 && tick >= 0 {
-			if a.bar != nil { bar_tick(a) } else if a.menu != nil do menu_on_tick(a)
+			if a.bar != nil { bar_tick(a) } else if a.menu != nil { menu_on_tick(a) } else if a.nc != nil do nc_load(a)
 			W.dirty = true
 		}
 		if n > 0 && .IN in fds[0].revents {
@@ -598,6 +625,10 @@ run_wayland :: proc(a: ^App) -> bool {
 		}
 		for pf in fds[1:] do if pf.revents != {} {
 			if a.osd != nil { if osd_on_readable(a.osd) do W.dirty = true }
+			else if a.nd != nil {
+				if pf.fd == a.nd.bus_fd { if nd_on_bus(a) do W.dirty = true }
+				else if nd_on_sock(a) do W.dirty = true
+			}
 			else if a.bar != nil { if bar_on_readable(a, pf.fd) do W.dirty = true }
 			else if menu_on_readable(a, pf.fd) do W.dirty = true
 		}
@@ -608,6 +639,12 @@ run_wayland :: proc(a: ^App) -> bool {
 			W.repeat_at = time.tick_add(time.tick_now(), time.Second / time.Duration(max(W.repeat_rate, 1)))
 		}
 		if a.bar != nil && (a.bar.want_h != W.bar_h || a.bar.want_region != W.bar_region) && W.configured do bar_resize(a.bar)
+		if a.nd != nil {
+			nd_tick(a)
+			w, h := nd_size(a)
+			if max(w, 1) != W.width || max(h, 1) != W.height do nd_resize(a)
+			if nd_popups_visible(a.nd) do W.dirty = true
+		}
 		if (a.bar != nil || a.ov != nil || a.pw != nil) && W.configured && !W.bar_gpu && W.width > 0 {
 			// Ghostty's shaders on the bar and the overview too, once their size is known
 			W.bar_gpu = true

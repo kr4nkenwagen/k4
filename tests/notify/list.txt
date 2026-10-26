@@ -1,0 +1,10 @@
+S	0	9
+N	9	System	2	1793023599	Battery critically low · 5%	About 8 minutes left. Plug in, or hibernate to keep your work safe.	-1	hibernateHibernatesaverPower saver	
+N	8	Calendar	1	1793023359	Standup in 5 min	Google Meet · 6 guests · Room 3B	-1	joinJoin MeetsnoozeSnooze	
+N	7	Slack	1	1793023239	Anna Berg · #platform	Can you review the PR before standup? It touches the sway config loader.	-1	replyReplyreadMark read	
+N	6	Slack	1	1793022759	#infra	Deploy finished on prod · 0 errors	-1	defaultOpen	
+N	5	Slack	1	1793019999	Jonas Lind	lunch at 12? thinking the ramen place	-1	replyReply	
+N	4	Firefox	1	1793022399	Download complete	ubuntu-24.04.1-desktop.iso · 3.4 GB	-1	defaultOpenfolderShow in folder	
+N	3	Capture	1	1793022099	Screenshot copied	Area 1280×720 · ~/Pictures/Screenshots	-1	defaultOpenannotateAnnotate	
+N	2	Capture	1	1793012799	Recording saved	screencast-0912.mp4 · 1:42	-1	defaultPlay	
+N	1	Update	1	1793016399	14 updates available	Includes a security fix for openssl. About 210 MB.	-1	installInstalllaterLater	

@@ -39,6 +39,9 @@ Options :: struct {
 	osd:           string, // --osd SPEC: the on-screen display (osd.odin)
 	overview:      bool,   // --overview
 	power:         bool,   // --power
+	notifyd:       bool,   // --notifyd
+	notify_center: bool,   // --notify-center
+	notify_ctl:    string, // --notify-ctl CMD
 	dump:          bool, // --dump: print the state as text instead of a PNG
 }
 
@@ -74,6 +77,8 @@ App :: struct {
 	osd:      ^Osd, // --osd: the feedback box
 	ov:       ^Ov,  // --overview: every workspace (overview.odin)
 	pw:       ^Pw,  // --power: the system menu (power.odin)
+	nd:       ^Nd,  // --notifyd: the notification service and its popups (notifyd.odin)
+	nc:       ^Nc,  // --notify-center: the notification centre (notify_center.odin)
 	shift:    bool, // Shift is held (the key being handled)
 	osd_font, osd_bold, osd_icon: ^Font,
 	has_icons: bool,
@@ -193,6 +198,8 @@ app_draw :: proc(a: ^App, cv: ^Canvas, scale: int) {
 	if a.osd != nil { osd_draw(a, cv, scale); return }
 	if a.ov != nil { ov_draw(a, cv, scale); return }
 	if a.pw != nil { pw_draw(a, cv, scale); return }
+	if a.nd != nil { nd_draw(a, cv, scale); return }
+	if a.nc != nil { nc_draw(a, cv, scale); return }
 	if a.menu != nil { menu_draw(a, cv, scale); return }
 	t := a.theme
 	S :: proc(v, scale: int) -> int { return v * scale }
@@ -295,6 +302,8 @@ next_cp :: proc(s: []u8, i: int) -> int {
 app_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string, alt := false) -> bool {
 	if a.ov != nil do return ov_key(a, k, ctrl, a.shift, ch, text)
 	if a.pw != nil do return pw_key(a, k, ch, text)
+	if a.nc != nil do return nc_key(a, k, ch, text)
+	if a.nd != nil do return false
 	if a.menu != nil do return menu_key(a, k, ctrl, alt, ch, text)
 	return app_edit_key(a, k, ctrl, ch, text)
 }
@@ -348,6 +357,8 @@ app_pointer_move :: proc(a: ^App, x, y: int) -> bool {
 	if a.bar != nil do return bar_pointer_move(a, x, y)
 	if a.ov != nil do return false
 	if a.pw != nil do return pw_pointer_move(a, x, y)
+	if a.nd != nil do return nd_pointer_move(a, x, y)
+	if a.nc != nil do return nc_pointer_move(a, x, y)
 	if a.menu != nil do return menu_pointer_move(a, x, y)
 	h, ok := hit_at(a, x, y)
 	if !ok || h.kind != .Row || h.a == a.selected do return false
@@ -358,6 +369,8 @@ app_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 	if a.bar != nil do return bar_pointer_click(a, x, y, button)
 	if a.ov != nil do return ov_click(a, x, y, button)
 	if a.pw != nil do return pw_click(a, x, y, button)
+	if a.nd != nil do return nd_click(a, x, y, button)
+	if a.nc != nil do return nc_click(a, x, y, button)
 	if a.menu != nil do return menu_pointer_click(a, x, y, button)
 	if button == 3 { a.exit = 1; a.done = true; return true }
 	h, ok := hit_at(a, x, y)
@@ -368,7 +381,8 @@ app_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 }
 app_pointer_scroll :: proc(a: ^App, n: int) -> bool {
 	if a.bar != nil do return bar_pointer_scroll(a, n)
-	if a.ov != nil || a.pw != nil do return false
+	if a.ov != nil || a.pw != nil || a.nd != nil do return false
+	if a.nc != nil do return nc_scroll(a, n)
 	if a.menu != nil do return menu_pointer_scroll(a, n)
 	app_move(a, n)
 	return true

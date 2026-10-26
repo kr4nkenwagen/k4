@@ -56,5 +56,14 @@ check "power: n cancels" "toast Cancelled" "$(pw --keys "rn" | grep '^toast')"
 check "power: an inhibitor makes it Force" "poweroff!" "$(printf 'I\tapt (upgrading)\n' | cat ../power/tiles.txt - | "$K4" --power --dump --keys "p<left><enter>" 2>&1)"
 check "power: an unavailable tile says why" "toast No swap big enough for 16 GB of RAM. Set it up in Setup › Power." "$(pw --keys "h" | grep '^toast')"
 check "power: Esc closes" "exit 1" "$(pw --keys "<esc>"; echo "exit $?")"
+# notifications: the popups from fixture notes, the centre from a fixture list (no service, no bus)
+nd() { K4_NOTIFY_FIXTURE=1 "$K4" --notifyd --dump "$@" < ../notify/notes.txt 2>&1; }
+check "notify: critical first, one card an app, +N more" "popup System · Battery critically low · 5%|popup Mail · 3 new newsletters|popup Slack · Jonas Lind +1|+2 more" "$(nd | grep '^popup\|more' | paste -sd'|')"
+nc() { K4_NOTIFY_LIST=../notify/list.txt "$K4" --notify-center --dump "$@" 2>&1; }
+check "centre: grouped by app, newest first" "centre 9 · dnd off|*   System · Battery critically low · 5%|    Calendar · Standup in 5 min|  [Slack 3]" "$(nc | head -4 | paste -sd'|')"
+check "centre: space folds a group" "* [Slack 3 folded]|    Slack · Anna Berg · #platform +2" "$(nc --keys "<down><down> " | grep -A1 '^\* \[Slack' | paste -sd'|')"
+check "centre: enter runs the first action" "toast Hibernate · Battery critically low · 5%  (act 9 hibernate)" "$(nc --keys "<enter>" | grep '^toast')"
+check "centre: a button's letter runs it" "toast Power saver · Battery critically low · 5%  (act 9 saver)" "$(nc --keys "p" | grep '^toast')"
+check "centre: x dismisses, d do not disturb" "toast Dismissed  (dismiss 8)|toast Do not disturb on  (dnd toggle)" "$( (nc --keys "<down>x"; nc --keys "d") | grep '^toast' | paste -sd'|')"
 echo "bar tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

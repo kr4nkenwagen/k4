@@ -38,6 +38,9 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --osd SPEC              the on-screen display for 1.2 s; a second call updates it (osd.odin)
   --overview              every workspace and its windows at once (Super+Tab; overview.odin)
   --power                 the system menu: lock, suspend, … shut down (Super+Esc; tiles on stdin, power.odin)
+  --notifyd               the notification service: popups, history, do not disturb (notifyd.odin)
+  --notify-center         the notification centre (Super+N; notify_center.odin)
+  --notify-ctl CMD        a command to the service: list status clear dnd on|off|toggle … (prints its reply)
   --output NAME           the bar's output (default: the compositor's choice)
   --config FILE           accepted and ignored (fuzzel compatibility)
   --dry-run FILE.png      render one frame to a PNG without Wayland, then print the selection
@@ -123,6 +126,9 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--compact": o.compact = true
 		case "--overview": o.overview = true
 		case "--power": o.power = true
+		case "--notifyd": o.notifyd = true
+		case "--notify-center": o.notify_center = true
+		case "--notify-ctl": o.notify_ctl = value(args, &i, inline, has_inline)
 		case "--osd": o.osd = value(args, &i, inline, has_inline)
 		case "--config": _ = value(args, &i, inline, has_inline)
 		case "--dry-run": o.dry_run = value(args, &i, inline, has_inline)
@@ -150,6 +156,12 @@ state_file :: proc(name: string) -> string {
 main :: proc() {
 	opts, prompt_only, ok := parse_args(os.args[1:])
 	if !ok do os.exit(2)
+	if opts.notify_ctl != "" { // a command to the notification service, no window
+		reply, sent := nd_ctl(opts.notify_ctl)
+		if !sent { fmt.eprintln("k4: the notification service is not running"); os.exit(1) }
+		fmt.print(reply)
+		os.exit(0)
+	}
 	a := new(App)
 	a.opts = opts
 	a.scale = 1
@@ -164,6 +176,18 @@ main :: proc() {
 	if opts.overview {
 		ov_setup(a)
 		a.width, a.height = a.opts.width_chars > 0 ? a.opts.width_chars : 1920, 1080 // dry runs; Wayland: the output
+	} else if opts.notifyd {
+		if !nd_setup(a) do os.exit(1)
+		if os.get_env("K4_NOTIFY_HEADLESS", context.temp_allocator) != "" { nd_run_headless(a); nd_close(a.nd); os.exit(0) }
+		if os.get_env("K4_NOTIFY_FIXTURE", context.temp_allocator) != "" {
+			data, _ := os.read_entire_file(os.stdin, context.allocator)
+			nd_fixture(a, string(data))
+		}
+		a.width, a.height = nd_size(a)
+		a.width, a.height = max(a.width, 1), max(a.height, 1)
+	} else if opts.notify_center {
+		nc_setup(a)
+		a.width, a.height = nc_size(a)
 	} else if opts.power {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		pw_setup(a, string(data))
@@ -206,7 +230,7 @@ main :: proc() {
 			a.width = a.opts.width_chars > 0 ? a.opts.width_chars : 1280 // dry runs: a 1280 px strip unless -w
 			a.bar.width = a.width
 		} else if a.menu != nil { if wait || nowait == "keys" do menu_load_all(a) }
-		else if a.ov == nil && a.pw == nil do app_layout(a)
+		else if a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil do app_layout(a)
 		// shaders: where the selection was before the keys, so a cursor shader shows the move
 		pre: [4]int
 		if opts.dry_run != "" && os.get_env("K4_DRY_SHADERS", context.temp_allocator) != "" && opts.keys != "" {
@@ -220,7 +244,7 @@ main :: proc() {
 		press_keys(a, opts.keys)
 		if a.menu != nil && wait do menu_load_all(a) // a stay action started by the keys, and the reload after it
 		if a.menu != nil && !wait { time.sleep(time.Duration(clamp(a.menu.slow_ms, 0, 2000) + 50) * time.Millisecond); menu_on_tick(a) }
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil do app_move(a, opts.select)
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil do app_move(a, opts.select)
 		if a.menu != nil do a.width, a.height = menu_size(a)
 		if a.bar != nil { bar_tick(a); a.height = a.bar.want_h } // a tooltip or the preview grows it
 		s := opts.scale
@@ -256,20 +280,24 @@ main :: proc() {
 		}
 		if opts.dump && a.ov != nil && !a.done do fmt.print(ov_dump(a))
 		if opts.dump && a.pw != nil && !a.done do fmt.print(pw_dump(a))
+		if opts.dump && a.nd != nil do fmt.print(nd_dump(a))
+		if opts.dump && a.nc != nil && !a.done do fmt.print(nc_dump(a))
+		if a.nd != nil do a.exit = 0
 		if opts.dump && a.osd != nil do fmt.printfln("osd %s %d/%d %s %s", a.osd.icon, a.osd.pct, a.osd.vmax, a.osd.value, a.osd.label)
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && !a.done do app_accept(a)
-		if (a.menu != nil || a.bar != nil || a.ov != nil || a.pw != nil) && !a.done do a.exit = 1
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && !a.done do app_accept(a)
+		if (a.menu != nil || a.bar != nil || a.ov != nil || a.pw != nil || a.nc != nil) && !a.done do a.exit = 1
 		if a.osd != nil do a.exit = 0
 	} else {
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil do app_layout(a)
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil do app_layout(a)
 		press_keys(a, opts.keys)
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil do app_move(a, opts.select)
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil do app_move(a, opts.select)
 		if a.menu != nil do a.width, a.height = menu_size(a)
 		if a.osd != nil do osd_listen(a.osd)
-		menu_like := a.bar == nil && a.osd == nil
+		menu_like := a.bar == nil && a.osd == nil && a.nd == nil // the service is not a menu
 		if menu_like do single_take()
 		ok := run_wayland(a)
 		if menu_like do single_drop()
+		if a.nd != nil do nd_close(a.nd)
 		if !ok do os.exit(2)
 		if a.osd != nil { osd_close(a.osd); os.exit(0) }
 	}
