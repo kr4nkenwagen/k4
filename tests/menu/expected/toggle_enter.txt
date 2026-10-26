@@ -1,0 +1,12 @@
+focus Sub
+crumb KESTREL › TOGGLE
+query (Search Toggle…)
+count 3 actions
+toast Ran  mute
+title Toggle · Flip things
+  Waybar | [on]
+* Mute output | off [on]
+  Night light | [off]
+exit 1
+log: load apps
+log: run mute value=on

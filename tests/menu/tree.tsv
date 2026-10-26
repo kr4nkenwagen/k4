@@ -23,6 +23,10 @@ N	GitHub is slow to answer	Results fill in when they arrive.	muted	slow
 A	k4:retry	Retry			slow
 H	Review requests
 K	2
+S	tog	Toggle	T	Flip things	x
+A	waybar	Waybar			toggle=on
+A	mute	Mute output	off		toggle=off
+A	night	Night light			toggle=off
 S	docker	Docker	X	Containers	x	dim;group=Not installed
 N	Docker isn't installed	Install it to manage containers.	muted
 A	install	Install Docker	opens terminal

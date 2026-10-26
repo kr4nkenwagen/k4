@@ -79,6 +79,7 @@ Action :: struct {
 	count: string,
 	mark, markc, sub, chip, chipc, metac, thumb, key: string,
 	dim, slow: bool,
+	toggle, on: bool, // toggle=on|off: drawn as a switch; Space or Enter flips it
 	choices: []string,
 	// notice: label = title, meta = body, tone; card: glyph, state, label = title, meta = line,
 	// line2 = flags; progress: label, meta, pct; bars: bars
@@ -287,6 +288,7 @@ action_from :: proc(f: []string) -> Action {
 		case strings.has_prefix(flag, "jump="): a.jump = strings.clone(flag[5:])
 		case flag == "current": a.current = true
 		case flag == "dim": a.dim = true
+		case strings.has_prefix(flag, "toggle="): a.toggle, a.stay, a.on = true, true, flag[7:] == "on"
 		case flag == "slow": a.slow = true
 		case strings.has_prefix(flag, "mark="): a.mark = strings.clone(flag[5:])
 		case strings.has_prefix(flag, "markc="): a.markc = strings.clone(flag[6:])
@@ -695,6 +697,26 @@ menu_enter :: proc(a: ^App, idx: int) {
 	select_current_action(m)
 }
 
+// The design's switch (30×16, square 12 px knob), right-aligned at x_right; returns its width.
+@(private)
+draw_switch :: proc(a: ^App, cv: ^Canvas, S, x_right, y, h: int, on, sel: bool) -> int {
+	t := a.theme
+	w, sh, k := 30 * S, 16 * S, 12 * S
+	x, sy := x_right - w, y + (h - 16 * S) / 2
+	track, border, knob: u32
+	has_track := true
+	switch {
+	case on && sel: track, border, knob = t.bg, t.bg, t.accent
+	case on: track, border, knob = t.accent, t.accent, t.bg
+	case sel: has_track, border, knob = false, t.bg, t.bg
+	case: track, border, knob = mix(t.bg, t.fg, 0.18), mix(t.bg, t.fg, 0.18), t.fg_dim
+	}
+	rounded_rect(cv, x, sy, w, sh, 0, has_track ? argb(track, 0xff) : 0, f32(S), argb(border, 0xff))
+	kx := on ? x + w - 2 * S - k : x + 2 * S
+	fill_rect(cv, kx, sy + (sh - k) / 2, k, k, argb(knob, 0xff))
+	return w
+}
+
 // A row flagged "current" is selected when its section or page opens.
 @(private)
 select_current_action :: proc(m: ^Menu) {
@@ -915,6 +937,13 @@ execute :: proc(a: ^App, sec, idx: int) {
 	}
 	if !act.stay || m.run_cmd == "" { finish(a, act.id); return }
 	if act.input { enter_input(a, act.id, act.label, act.input_prompt, act.input_hint, act.input_password); return }
+	if act.toggle {
+		// the switch flips now; the section's reload shows the real state
+		if m.runner.state == .Loading { m.toast = "Still running the last action…"; return }
+		m.sections[sec].actions[idx].on = !act.on
+		start_runner(a, act.id, "K4_VALUE", act.on ? "off" : "on", fmt.aprintf("%s  %s", act.label, act.on ? "off" : "on"))
+		return
+	}
 	if len(act.choices) > 0 do start_runner(a, act.id, "K4_VALUE", act.meta, fmt.aprintf("%s  %s", act.label, act.meta))
 	else if act.slider do start_runner(a, act.id, "K4_VALUE", fmt.tprintf("%d", act.value), fmt.aprintf("%s  %d%%", act.label, act.value))
 	else do start_runner(a, act.id, "", "", strings.concatenate({act.label, "  …"}))
@@ -1089,6 +1118,7 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 		case m.focus == .Sub && len(text) == 1 && text[0] >= '1' && text[0] <= '9':
 			n := int(text[0] - '1')
 			if n < len(m.sel_actions) { m.si = n; menu_run(a) }
+		case m.focus == .Sub && text == " ": menu_run(a) // Space runs (and toggles) the row
 		case m.focus == .Sub && len(text) == 1 && action_by_key(m, text) >= 0:
 			m.si = action_by_key(m, text)
 			menu_run(a)
@@ -1106,6 +1136,11 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 		case 'c', 'g': a.exit = 1; a.done = true; return true
 		}
 		return app_edit_key(a, k, ctrl, ch, text)
+	}
+	// Space on a switch row toggles it (only with nothing typed: then it is part of the filter)
+	if text == " " && empty && m.focus == .Sub && m.si < len(m.sel_actions) && m.sections[m.open].actions[m.sel_actions[m.si]].toggle && m.sections[m.open].query_id == "" {
+		menu_run(a)
+		return true
 	}
 	grid := m.focus == .View && m.views[m.view].grid
 	if grid && (k == .Left || k == .Right) { menu_move(a, k == .Left ? -1 : 1); return true }
@@ -1345,7 +1380,7 @@ menu_hints :: proc(a: ^App, sc: bool) -> (hints: [][2]string) {
 	case srch: hints = {{"↑↓", "Move"}, {"↵", "Run"}, {"Esc", "Shortcuts"}}
 	case m.focus == .Menu: hints = {{"↑↓", "Move"}, {"→ ↵", "Open"}, {"type", "Search all"}, {"Esc", "Shortcuts"}}
 	case m.focus == .Sub && on_slider(m): hints = {{"↑↓", "Move"}, {"← →", "Adjust"}, {"⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
-	case m.focus == .Sub: hints = {{"↑↓", "Move"}, {"↵", "Run"}, {"← ⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
+	case m.focus == .Sub: hints = {{"↑↓", "Move"}, {"↵ ␣", "Run / toggle"}, {"← ⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
 	case m.focus == .Web: hints = {{"↑↓", "Bang"}, {"↵", "Open in browser"}, {"⌫", "Exit mode"}}
 	case m.focus == .Calc: hints = {{"↵", "Copy result"}, {"⌫", "Exit mode"}, {"Esc", "Back"}}
 	case m.views[m.view].name == "wall": hints = {{"←→↑↓", "Move"}, {"↵", "Set background"}, {"⌫", "Back"}}
@@ -1624,6 +1659,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 				text_in(cv, m.f_body, act.label, lx, py, ah, argb(lc, 0xff), right - sw - 12 * S)
 				break
 			}
+			if act.toggle do right -= draw_switch(a, cv, S, right, py, ah, act.on, on) + 12 * S
 			meta := act.meta
 			if len(act.choices) > 0 do meta = fmt.tprintf("‹ %s ›", act.meta)
 			if meta == "" && act.confirm_title != "" do meta = "asks first"
@@ -1721,9 +1757,11 @@ draw_results :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 			py += rh
 			continue
 		}
+		sw := 0
+		if r.act >= 0 && sec.actions[r.act].toggle do sw = draw_switch(a, cv, S, tag_x - 12 * S, py, rh, sec.actions[r.act].on, on) + 12 * S
 		mw := meta != "" ? tw(m.f_small, meta) : 0
-		if mw > 0 do text_in(cv, m.f_small, meta, tag_x - 12 * S - mw, py, rh, argb(mc, 0xff))
-		text_in(cv, m.f_row, label, x, py, rh, argb(lc, 0xff), tag_x - 12 * S - mw - (mw > 0 ? 12 * S : 0))
+		if mw > 0 do text_in(cv, m.f_small, meta, tag_x - 12 * S - sw - mw, py, rh, argb(mc, 0xff))
+		text_in(cv, m.f_row, label, x, py, rh, argb(lc, 0xff), tag_x - 12 * S - sw - mw - (mw > 0 ? 12 * S : 0))
 		py += rh
 	}
 }
@@ -2192,6 +2230,7 @@ menu_dump :: proc(a: ^App) -> string {
 				meta := act.meta
 				if len(act.choices) > 0 do meta = fmt.tprintf("‹ %s ›", act.meta)
 				if act.slider do meta = fmt.tprintf("%d%%", act.value)
+				if act.toggle do meta = strings.concatenate({meta, meta != "" ? " " : "", act.on ? "[on]" : "[off]"}, context.temp_allocator)
 				extra := make([dynamic]string, 0, 4, context.temp_allocator)
 				if act.mark != "" do append(&extra, fmt.tprintf("mark %s", act.mark))
 				if act.sub != "" do append(&extra, fmt.tprintf("sub%s", act.sub))

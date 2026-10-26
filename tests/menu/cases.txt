@@ -29,3 +29,8 @@ view_alt	net	<down><down><down><down><down><down><down><enter><down><down><tab>
 view_current_now	net	<down><down><down><down><down><down><down><enter><down><enter>	K4_DRY_NOWAIT=keys|K4_SLOW_MS=1
 stale_not_reloaded	net	<down><down><down><right>
 stale_reloaded_on_show	net	<down><down><down><right><bs><down>
+toggles	tog	-
+toggle_space	tog	 
+toggle_enter	tog	<down><enter>
+toggle_space_filters	tog	night l
+toggle_now	tog	<down><down> 	K4_DRY_NOWAIT=keys|K4_SLOW_MS=1

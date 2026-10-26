@@ -2,7 +2,7 @@ focus Sub
 crumb NETWORK › ASK
 query (Ask a question…)
 count gemma
-hints ↑↓ Move · ↵ Run · ← ⌫ Back · ⌃J ⌃K Vim
+hints ↑↓ Move · ↵ ␣ Run / toggle · ← ⌫ Back · ⌃J ⌃K Vim
 title Ask · Type a question (full width)
 !! accent: Enter sends to gemma · Answers open in a terminal.
 * Model | ‹ gemma ›
