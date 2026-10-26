@@ -45,6 +45,7 @@ Options :: struct {
 	clip:          bool,   // --clip
 	tray:          bool,   // --tray
 	perf:          bool,   // --perf
+	send:          bool,   // --send
 	dump:          bool, // --dump: print the state as text instead of a PNG
 }
 
@@ -85,6 +86,7 @@ App :: struct {
 	clip:     ^Clip, // --clip: the clipboard history (clip.odin)
 	tray:     ^Tray, // --tray: the system tray (tray.odin)
 	perf:     ^Perf, // --perf: performance and utilities (perf.odin)
+	send:     ^Send, // --send: Send to, over LocalSend (send.odin)
 	shift:    bool, // Shift is held (the key being handled)
 	osd_font, osd_bold, osd_icon: ^Font,
 	has_icons: bool,
@@ -209,6 +211,7 @@ app_draw :: proc(a: ^App, cv: ^Canvas, scale: int) {
 	if a.clip != nil { clip_draw(a, cv, scale); return }
 	if a.tray != nil { tray_draw(a, cv, scale); return }
 	if a.perf != nil { perf_draw(a, cv, scale); return }
+	if a.send != nil { send_draw(a, cv, scale); return }
 	if a.menu != nil { menu_draw(a, cv, scale); return }
 	t := a.theme
 	S :: proc(v, scale: int) -> int { return v * scale }
@@ -315,6 +318,7 @@ app_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string, alt := fals
 	if a.clip != nil do return clip_key(a, k, ctrl, alt, ch, text)
 	if a.tray != nil do return tray_key(a, k, ctrl, ch, text)
 	if a.perf != nil do return perf_key(a, k, ctrl, ch, text)
+	if a.send != nil do return send_key(a, k, ctrl, ch, text)
 	if a.nd != nil do return false
 	if a.menu != nil do return menu_key(a, k, ctrl, alt, ch, text)
 	return app_edit_key(a, k, ctrl, ch, text)
@@ -373,7 +377,7 @@ app_pointer_move :: proc(a: ^App, x, y: int) -> bool {
 	if a.nc != nil do return nc_pointer_move(a, x, y)
 	if a.clip != nil do return false
 	if a.tray != nil do return tray_pointer_move(a, x, y)
-	if a.perf != nil do return false
+	if a.perf != nil || a.send != nil do return false
 	if a.menu != nil do return menu_pointer_move(a, x, y)
 	h, ok := hit_at(a, x, y)
 	if !ok || h.kind != .Row || h.a == a.selected do return false
@@ -389,6 +393,7 @@ app_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 	if a.clip != nil do return clip_click(a, x, y, button)
 	if a.tray != nil do return tray_click(a, x, y, button)
 	if a.perf != nil do return perf_click(a, x, y, button)
+	if a.send != nil do return send_click(a, x, y, button)
 	if a.menu != nil do return menu_pointer_click(a, x, y, button)
 	if button == 3 { a.exit = 1; a.done = true; return true }
 	h, ok := hit_at(a, x, y)
@@ -402,7 +407,7 @@ app_pointer_scroll :: proc(a: ^App, n: int) -> bool {
 	if a.ov != nil || a.pw != nil || a.nd != nil do return false
 	if a.nc != nil do return nc_scroll(a, n)
 	if a.clip != nil do return clip_scroll(a, n)
-	if a.tray != nil || a.perf != nil do return false
+	if a.tray != nil || a.perf != nil || a.send != nil do return false
 	if a.menu != nil do return menu_pointer_scroll(a, n)
 	app_move(a, n)
 	return true

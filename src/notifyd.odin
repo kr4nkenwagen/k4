@@ -30,6 +30,7 @@ ND_HISTORY :: 100
 Note :: struct {
 	id: u32,
 	app, title, body, image: string,
+	tag, icon, quote, cmd: string, // posted by k4's own services (post): a tag, a glyph, a quoted text, the command their buttons run
 	actions: [dynamic][2]string, // key, label ("default": a click on the card)
 	urgency: int, // 0 low, 1 normal, 2 critical
 	progress: int, // 0–100 from the "value" hint, -1 none
@@ -135,6 +136,11 @@ nd_add :: proc(a: ^App, x: Note) -> u32 {
 	note.left = note.timeout
 	note.popup = !n.dnd || note.urgency == 2
 	note.at = time.to_unix_seconds(time.now())
+	if note.image != "" && note.cmd == "" && nd_have_share() { // a screenshot: Send to… (LocalSend)
+		have := false
+		for p in note.actions do if p[0] == "k4-send" do have = true
+		if !have do append(&note.actions, [2]string{strings.clone("k4-send"), strings.clone("Send to…")})
+	}
 	if i := note.id > 0 ? nd_find(n, note.id) : -1; i >= 0 {
 		was := n.notes[i].popup
 		nd_free(&n.notes[i])
@@ -149,8 +155,22 @@ nd_add :: proc(a: ^App, x: Note) -> u32 {
 	return note.id
 }
 
+@(private = "file")
+nd_share_known, nd_share_ok: bool
+
+// k4-share is there to send with.
+nd_have_share :: proc() -> bool {
+	if !nd_share_known {
+		nd_share_known = true
+		state, _, _, err := os.process_exec({command = {"sh", "-c", "command -v k4-share"}}, context.temp_allocator)
+		nd_share_ok = err == nil && state.exit_code == 0
+	}
+	return nd_share_ok
+}
+
 nd_free :: proc(x: ^Note) {
 	delete(x.app); delete(x.title); delete(x.body); delete(x.image)
+	delete(x.tag); delete(x.icon); delete(x.quote); delete(x.cmd)
 	for p in x.actions { delete(p[0]); delete(p[1]) }
 	delete(x.actions)
 }
@@ -168,7 +188,19 @@ nd_remove :: proc(a: ^App, id: u32, reason: u32) {
 
 nd_act :: proc(a: ^App, id: u32, key: string) {
 	n := a.nd
-	if nd_find(n, id) < 0 do return
+	i := nd_find(n, id)
+	if i < 0 do return
+	x := n.notes[i]
+	if key == "k4-send" { // our own button: the image to the Send page
+		libc.system(strings.clone_to_cstring(fmt.tprintf("setsid -f k4-share send-file %s >/dev/null 2>&1 </dev/null", sh_quote(x.image)), context.temp_allocator))
+		nd_remove(a, id, 2)
+		return
+	}
+	if x.cmd != "" { // posted by a k4 service: its command gets the button's key and the card's id
+		libc.system(strings.clone_to_cstring(fmt.tprintf("setsid -f sh -c %s >/dev/null 2>&1 </dev/null", sh_quote(fmt.tprintf("%s %s %d", x.cmd, sh_quote(key), id))), context.temp_allocator))
+		nd_remove(a, id, 2)
+		return
+	}
 	if n.conn != nil {
 		msg := dbus_message_new_signal("/org/freedesktop/Notifications", "org.freedesktop.Notifications", "ActionInvoked")
 		it: DBus_Iter
@@ -568,6 +600,28 @@ nd_command :: proc(a: ^App, line: string) -> (reply: string, changed: bool) {
 		n.dnd = v == "on" ? true : (v == "off" ? false : !n.dnd)
 		if n.dnd do for &x in n.notes do if x.urgency < 2 do x.popup = false
 		return n.dnd ? "on\n" : "off\n", true
+	case "post": // k4's services: post ID APP TITLE BODY URGENCY PROGRESS TIMEOUT TAG ICON QUOTE ACTIONS(key:label,…) CMD [IMAGE]
+		p := strings.split(rest, "\t", context.temp_allocator)
+		get :: proc(p: []string, i: int) -> string { return i < len(p) ? strings.clone(p[i]) : "" }
+		x := Note{progress = -1, urgency = 1, timeout = -1}
+		if id, ok := strconv.parse_uint(get(p, 0)); ok do x.id = u32(id)
+		x.app, x.title, x.body = get(p, 1), get(p, 2), get(p, 3)
+		if u, ok := strconv.parse_int(get(p, 4)); ok do x.urgency = clamp(u, 0, 2)
+		if v, ok := strconv.parse_int(get(p, 5)); ok do x.progress = clamp(v, -1, 100)
+		if t, ok := strconv.parse_int(get(p, 6)); ok do x.timeout = t
+		x.tag, x.icon, x.quote = get(p, 7), get(p, 8), get(p, 9)
+		for kv in strings.split(get(p, 10), ",", context.temp_allocator) do if j := strings.index_byte(kv, ':'); j > 0 {
+			append(&x.actions, [2]string{strings.clone(kv[:j]), strings.clone(kv[j + 1:])})
+		}
+		x.cmd, x.image = get(p, 11), get(p, 12)
+		was_popup := false
+		if j := nd_find(n, x.id); j >= 0 do was_popup = n.notes[j].popup
+		id := nd_add(a, x)
+		if j := nd_find(n, id); j >= 0 && x.id > 0 && !was_popup && x.progress >= 0 do n.notes[j].popup = false // progress updates stay where they are
+		return fmt.tprintf("%d\n", id), true
+	case "close": // close ID: a k4 service's card goes (no D-Bus signal needed, but sent)
+		if len(f) > 1 do if id, ok := strconv.parse_uint(f[1]); ok do nd_remove(a, u32(id), 3)
+		return "ok\n", true
 	case "notify": // tests and scripts without notify-send: notify APP\tTITLE\tBODY[\tURGENCY]
 		p := strings.split(rest, "\t", context.temp_allocator)
 		x := Note{progress = -1, urgency = 1, timeout = -1}
@@ -581,9 +635,14 @@ nd_command :: proc(a: ^App, line: string) -> (reply: string, changed: bool) {
 }
 
 // k4 --notify-ctl CMD…: one command to the service, its reply printed.
-nd_ctl :: proc(cmd: string) -> (string, bool) {
-	addr, ok := nd_addr()
-	if !ok do return "", false
+nd_ctl :: proc(cmd: string) -> (string, bool) { return unix_ctl(nd_sock_path(), cmd) }
+
+// One line to a service's unix socket, its whole reply back (the notification and LocalSend services).
+unix_ctl :: proc(path, cmd: string) -> (string, bool) {
+	addr: linux.Sock_Addr_Un
+	addr.sun_family = .UNIX
+	if len(path) >= len(addr.sun_path) do return "", false
+	copy(addr.sun_path[:], path)
 	fd, err := linux.socket(.UNIX, .STREAM, {.CLOEXEC}, .HOPOPT)
 	if err != .NONE do return "", false
 	defer linux.close(fd)
@@ -605,6 +664,7 @@ nd_ctl :: proc(cmd: string) -> (string, bool) {
 
 // An app's colour: one of the theme's, picked by its name; red for critical.
 note_app_color :: proc(t: logic.Theme, app: string) -> u32 {
+	if app == "LocalSend" || app == "Capture" do return t.accent // as the design draws them
 	cs := [6]u32{t.blue, t.magenta, t.yellow, t.green, t.cyan, t.orange}
 	return cs[hash.fnv32a(transmute([]u8)app) % 6]
 }
@@ -622,6 +682,26 @@ note_ago :: proc(at: i64) -> string {
 note_mono :: proc(app: string) -> string {
 	for r in app do return strings.to_upper(fmt.tprint(r), context.temp_allocator)
 	return "?"
+}
+
+// Words wrapped to a width, a word too long for a line (a link) broken where it fits.
+wrap_hard :: proc(f: ^Font, s: string, w: int) -> []string {
+	out := make([dynamic]string, 0, 4, context.temp_allocator)
+	for l in wrap_text(f, s, w) {
+		rest := l
+		for tw(f, rest) > w {
+			cut := 0
+			for _, i in rest {
+				if i > 0 && tw(f, rest[:i]) > w do break
+				cut = i
+			}
+			if cut <= 0 do break
+			append(&out, rest[:cut])
+			rest = rest[cut:]
+		}
+		append(&out, rest)
+	}
+	return out[:]
 }
 
 // ---------- the popups ----------
@@ -660,16 +740,24 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 	iw := w - pl - pr
 	// the content's height first
 	thumb := note.image != ""
+	dev := note.icon != ""
 	tw_ := thumb ? iw - 72 * S - 12 * S : iw
+	if dev do tw_ -= 40 * S + 12 * S
 	title_l := wrap_text(n.f13b, note.title, tw_)
 	if len(title_l) > 2 do title_l = title_l[:2]
-	body_l := note.body != "" ? wrap_text(n.f12, note.body, tw_) : nil
+	body_l := note.body != "" && note.progress < 0 ? wrap_text(n.f12, note.body, tw_) : nil // with progress the body goes under the bar
 	if len(body_l) > 2 { body_l = body_l[:2]; body_l[1] = strings.concatenate({ellipsize(n.f12, body_l[1], tw_ - tw(n.f12, "…")), "…"}, context.temp_allocator) }
 	text_h := len(title_l) * 18 * S + (len(body_l) > 0 ? 4 * S + len(body_l) * 17 * S : 0)
-	row2 := max(text_h, thumb ? 46 * S : 0)
+	row2 := max(text_h, thumb ? 46 * S : 0, dev ? 40 * S : 0)
+	quote_l: []string
+	if note.quote != "" {
+		quote_l = wrap_hard(n.f12, note.quote, iw - 20 * S)
+		if len(quote_l) > 3 do quote_l = quote_l[:3]
+	}
 	acts := make([dynamic][2]string, 0, 4, context.temp_allocator)
 	for p in note.actions do if p[0] != "default" && p[1] != "" do append(&acts, p)
 	h := pt + 18 * S + 9 * S + row2
+	if len(quote_l) > 0 do h += 9 * S + 16 * S + len(quote_l) * 18 * S
 	if note.progress >= 0 do h += 9 * S + 4 * S + 5 * S + int(n.f10.line_h)
 	if len(acts) > 0 do h += 9 * S + 24 * S
 	h += pb
@@ -683,7 +771,7 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 		rounded_rect(cv, x + 8 * S, y + h + 5 * S - 7 * S, w - 16 * S, 12 * S, 0, 0, f32(S), argb(H.line, 0xff))
 	}
 	cut := 10 * S
-	edge_on := hover || note.urgency == 2
+	edge_on := hover || note.urgency == 2 || note.tag == "WAITING"
 	if note.urgency == 2 do for k in 1 ..= 3 do cut_outline(cv, x - k * 2 * S, y - k * 2 * S, w + k * 4 * S, h + k * 4 * S, cut + k * S, 2 * S, argb(lvl, u8(0x0c / k + 1)))
 	cut_rect(cv, x + S, y + S, w - 2 * S, h - 2 * S, cut - S, argb(note.urgency == 2 ? mix(H.bg, H.hot, 0.08) : H.bg, a.bg_alpha))
 	cut_rect(cv, x + S, y + S, w - 2 * S, h - 2 * S, cut - S, argb(t.fg, 0x08))
@@ -712,6 +800,7 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 	right -= 18 * S + 8 * S
 	tag, tagc := "", H.dim
 	switch {
+	case note.tag != "": tag, tagc = note.tag, note.tag == "SAVED" ? t.green : H.acc
 	case count > 1: tag, tagc = fmt.tprintf("+%d", count - 1), H.acc
 	case note.urgency == 2: tag, tagc = "CRITICAL", H.hot
 	case hover && note.timeout >= 0: tag = "PAUSED"
@@ -723,11 +812,19 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 		spaced(cv, n.f9b, tag, right - gw + 5 * S, yy + 2 * S, 14 * S, tagc, S)
 	}
 	yy += 18 * S + 9 * S
-	// the text, the image
+	// the device, the text, the image
+	tx := x + pl
+	if dev {
+		on := note.tag == "WAITING"
+		fill_rect(cv, tx, yy, 40 * S, 40 * S, on ? argb(H.acc, 0x14) : argb(H.bg, 0xff))
+		rounded_rect(cv, tx, yy, 40 * S, 40 * S, 0, 0, f32(S), argb(on ? H.acc : H.line, 0xff))
+		text_in(cv, n.f13, note.icon, tx + (40 * S - tw(n.f13, note.icon)) / 2, yy, 40 * S, argb(on ? H.acc : soft, 0xff))
+		tx += 40 * S + 12 * S
+	}
 	ty := yy
-	for l in title_l { text_in(cv, n.f13b, l, x + pl, ty, 18 * S, argb(note.urgency == 0 ? soft : H.fg, 0xff)); ty += 18 * S }
+	for l in title_l { text_in(cv, n.f13b, l, tx, ty, 18 * S, argb(note.urgency == 0 ? soft : H.fg, 0xff)); ty += 18 * S }
 	if len(body_l) > 0 do ty += 4 * S
-	for l in body_l { text_in(cv, n.f12, l, x + pl, ty, 17 * S, argb(soft, 0xff)); ty += 17 * S }
+	for l in body_l { text_in(cv, n.f12, l, tx, ty, 17 * S, argb(soft, 0xff)); ty += 17 * S }
 	if thumb {
 		ix, iy := x + w - pr - 72 * S, yy
 		fill_rect(cv, ix, iy, 72 * S, 46 * S, argb(H.bg, 0xff))
@@ -736,6 +833,16 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 		rounded_rect(cv, ix, iy, 72 * S, 46 * S, 0, 0, f32(S), argb(H.line, 0xff))
 	}
 	yy += row2
+	// a quoted text (a message sent over LocalSend): a link in the accent
+	if len(quote_l) > 0 {
+		yy += 9 * S
+		qh := 16 * S + len(quote_l) * 18 * S
+		fill_rect(cv, x + pl, yy, iw, qh, argb(H.bg, 0xff))
+		rounded_rect(cv, x + pl, yy, iw, qh, 0, 0, f32(S), argb(H.line, 0xff))
+		qc := strings.has_prefix(note.quote, "http") ? H.acc : H.fg
+		for l, i in quote_l do text_in(cv, n.f12, l, x + pl + 10 * S, yy + 8 * S + i * 18 * S, 18 * S, argb(qc, 0xff))
+		yy += qh
+	}
 	// progress: 20 segments, the percentage
 	if note.progress >= 0 {
 		yy += 9 * S
@@ -746,6 +853,7 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 		yy += 4 * S + 5 * S
 		pc := fmt.tprintf("%d%%", note.progress)
 		text_in(cv, n.f10b, pc, x + w - pr - tw(n.f10b, pc), yy, int(n.f10.line_h), argb(H.fg, 0xff))
+		if note.body != "" do text_in(cv, n.f10, ellipsize(n.f10, note.body, iw - tw(n.f10b, pc) - 10 * S), x + pl, yy, int(n.f10.line_h), argb(H.dim, 0xff))
 		yy += int(n.f10.line_h)
 	}
 	// the actions: the first one stands out
@@ -859,6 +967,7 @@ nd_click :: proc(a: ^App, x, y, button: int) -> bool {
 nd_fixture :: proc(a: ^App, data: string) {
 	text := data
 	for line in strings.split_lines_iterator(&text) {
+		if strings.has_prefix(line, "post\t") { nd_command(a, line); continue } // as k4's services post
 		f := strings.split(line, "\t", context.temp_allocator)
 		if len(f) < 2 do continue
 		get :: proc(f: []string, i: int) -> string { return i < len(f) ? f[i] : "" }

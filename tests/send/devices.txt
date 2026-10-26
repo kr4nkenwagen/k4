@@ -1,0 +1,7 @@
+S	3 FILES	report-q3.pdf, IMG_2231.jpg, notes.md	24.2 MB · picked in Files	files	/tmp/a/tmp/b/tmp/c	files	
+D	FP1	Jon’s Pixel 8	mobile	Pixel 8	192.168.1.23	2	1
+D	FP2	Elin’s MacBook Air	laptop	MacBook Air M2	192.168.1.31	4	0
+D	FP3	Living-room PC	desktop	Custom	192.168.1.40	12	0
+D	FP4	nas	server	Synology DS224+	192.168.1.5	1	0
+D	FP5	Firefox on Elin’s phone	web	localsend.org/web	192.168.1.36	3	0
+D	FP6	iPad	tablet	iPad Air	192.168.1.27	90	0

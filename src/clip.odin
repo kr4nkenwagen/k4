@@ -11,7 +11,8 @@ import "core:unicode/utf8"
 // search field and All / Text / Blocks / Images, the history (pinned, today, earlier) beside a
 // preview of the picked entry and its actions. ↑↓ (^J ^K, PgUp PgDn) move, Tab the filter,
 // typing searches, ↵ pastes it into the window k4 came from, ⇧↵ copies, ^↵ pastes plain text /
-// opens a block in the editor / saves an image, ^P pins, Del (^D) deletes, Alt+1–9 pastes the
+// opens a block in the editor / saves an image, ^S sends it to a nearby device (LocalSend), ^P
+// pins, Del (^D) deletes, Alt+1–9 pastes the
 // nth unpinned one, Esc clears the search, then closes. The entries come on stdin:
 //   S <recording 1|0>        R <command>: runs "VERB ID" in place (pin, delete; its output
 //   L <command>: the list again        is the footer's message)
@@ -156,6 +157,7 @@ clip_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 	case k == .Enter && a.shift: clip_done(a, "copy")
 	case k == .Enter: clip_done(a, "paste")
 	case ctrl && ch == 'p': clip_stay(a, "pin")
+	case ctrl && ch == 's': clip_done(a, "send") // over LocalSend: the Send page with this entry
 	case ctrl && ch == 'd', k == .Delete: clip_stay(a, "delete")
 	case alt && ch >= '1' && ch <= '9':
 		want, seen := int(ch - '0'), 0
@@ -190,6 +192,7 @@ clip_click :: proc(a: ^App, x, y, button: int) -> bool {
 		case 2: if e, ok2 := clip_sel(c); ok2 { if e.kind == 0 do clip_done(a, "plain"); else do clip_done(a, "extra") }
 		case 3: clip_stay(a, "pin")
 		case 4: clip_stay(a, "delete")
+		case 5: clip_done(a, "send")
 		}
 	}
 	return true
@@ -485,17 +488,22 @@ clip_preview :: proc(a: ^App, cv: ^Canvas, S, x, y, w, h: int, e: Clip_Entry, H:
 	ah := 28 * S + 26 * S
 	ay := y + h - ah
 	fill_rect(cv, x, ay, w, S, argb(H.line, 0xff))
-	acts := [5][2]string{{"Paste", "↵"}, {"Copy", "⇧↵"}, {e.kind == 2 ? "Save as…" : (e.kind == 1 ? "Open in editor" : "Paste plain"), "^↵"}, {e.pinned ? "Unpin" : "Pin", "^P"}, {"Delete", "Del"}}
+	acts := [6][3]string{{"Paste", "↵", "0"}, {"Copy", "⇧↵", "1"}, {e.kind == 2 ? "Save as…" : (e.kind == 1 ? "Open in editor" : "Paste plain"), "^↵", "2"}, {"Send to…", "^S", "5"}, {e.pinned ? "Unpin" : "Pin", "^P", "3"}, {"Delete", "Del", "4"}}
 	bx := x + 20 * S
+	keys := true // the key hints go when the buttons would not fit
+	total := 0
+	for p in acts do total += tw(c.f11b, p[0]) + 7 * S + tw(c.f11, p[1]) + 20 * S + 6 * S
+	if total > w - 40 * S do keys = false
 	for p, i in acts {
-		bw := tw(c.f11b, p[0]) + 7 * S + tw(c.f11, p[1]) + 20 * S
+		bw := keys ? tw(c.f11b, p[0]) + 7 * S + tw(c.f11, p[1]) + 20 * S : tw(c.f11b, p[0]) + 20 * S
 		prim := i == 0
 		by := ay + 12 * S
 		if prim do fill_rect(cv, bx, by, bw, 28 * S, argb(H.acc, 0xff))
 		rounded_rect(cv, bx, by, bw, 28 * S, 0, 0, f32(S), argb(prim ? H.acc : H.line, 0xff))
 		text_in(cv, c.f11b, p[0], bx + 10 * S, by, 28 * S, argb(prim ? H.bg : soft, 0xff))
-		text_in(cv, c.f11, p[1], bx + 10 * S + tw(c.f11b, p[0]) + 7 * S, by, 28 * S, argb(prim ? H.bg : H.dim, 0xff))
-		hit_add(a, bx, by, bw, 28 * S, .Chip, i, 0)
+		if keys do text_in(cv, c.f11, p[1], bx + 10 * S + tw(c.f11b, p[0]) + 7 * S, by, 28 * S, argb(prim ? H.bg : H.dim, 0xff))
+		id, _ := strconv.parse_int(p[2])
+		hit_add(a, bx, by, bw, 28 * S, .Chip, id, 0)
 		bx += bw + 6 * S
 	}
 	// the body

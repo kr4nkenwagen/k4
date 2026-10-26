@@ -93,5 +93,12 @@ check "perf: utilities left column first" "* Free up space · Empty trash|  Free
 check "perf: a utility marked ask asks first" "* Free up space · Empty trash (asking)" "$(pf --keys "3<enter>" | sed -n 2p)"
 check "perf: y runs it, n cancels" "toast (trash)|* Free up space · Empty trash" "$( (pf --keys "3<enter>y" | grep '^toast'; pf --keys "3<enter>n" | sed -n 2p) | paste -sd'|')"
 check "perf: a step row moves its value" "toast (profile Performance)" "$(pf --keys "3<right><down><right>" | grep '^toast')"
+# Send to (LocalSend): devices from a file, no service
+sd() { K4_SEND_FIXTURE=1 "$K4" --send --dump "$@" < ../send/devices.txt 2>&1; }
+check "send: the devices, the first picked" "send 3 FILES · files · 6 devices|* Jon’s Pixel 8" "$(sd | head -2 | paste -sd'|')"
+check "send: space picks several, enter sends to all" "send 3 FILES · files · 6 devices · 2 picked|toast (send files to 2)" "$(sd --keys "<down> <down> <enter>" | grep '^send\|^toast' | paste -sd'|')"
+check "send: a device not answering is not sent to" "toast iPad is not answering · pick another or scan again (r)" "$(sd --keys "<down><down><down><down><down><enter>" | grep '^toast')"
+check "send: Tab closes to pick what is sent" "pick	folder" "$(sd --keys "<tab>")"
+check "send: Esc clears picks, then closes" "exit 0" "$(sd --keys "<down> <esc><esc>" >/dev/null; echo "exit $?")"
 echo "bar tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

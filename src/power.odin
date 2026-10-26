@@ -73,6 +73,7 @@ pw_setup :: proc(a: ^App, data: string) {
 			if t.id != "" do append(&p.tiles, t)
 		}
 	}
+	for t, i in p.tiles do if t.id == "lock" { p.cur = i; break } // Lock picked, as the design opens it
 }
 
 @(private = "file")
