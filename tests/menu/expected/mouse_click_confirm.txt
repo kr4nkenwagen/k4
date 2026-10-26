@@ -1,0 +1,8 @@
+focus Confirm
+crumb CONFIRM
+query ()
+count 
+hints y Yes · n Esc No · ← → Choose
+confirm Reboot now? · Unsaved work is lost. · No
+exit 1
+log: load apps

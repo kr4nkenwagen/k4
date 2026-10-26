@@ -41,3 +41,12 @@ weather	wx	-
 weather_day	wx	<down>
 weather_setting	wx	<down><down><right>
 weather_no_typing	wx	abc <down>
+mouse_hover_section	-	<move:100,135>
+mouse_click_section	-	<click:100,107>
+mouse_hover_action	net	<move:400,195>
+mouse_click_confirm	net	<click:400,195>
+mouse_confirm_yes	net	<click:400,195><click:290,346>
+mouse_slider	net	<click:632,230>
+mouse_preview_click	-	<click:400,170>
+mouse_right_back	net	<rclick:400,300>
+mouse_wheel	net	<wheel:2>

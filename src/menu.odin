@@ -1476,6 +1476,7 @@ draw_panes :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
 			}
 		}
 		on := i == (m.focus == .Menu ? m.cur : root(m, m.open))
+		hit_add(a, x0, ry, lw, rh, .Section, i, 0)
 		strong := on && m.focus == .Menu
 		col := s.dim ? mix(bg, fg, 0.3) : fg
 		if strong { fill_rect(cv, x0, ry, lw, rh, argb(acc, 0xff)); col = bg }
@@ -1625,6 +1626,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			}
 		case .Day: // outside the dashboard: a plain row
 			on := m.focus == .Sub && e == sel_entry
+			hit_add(a, px, py, x1 - px, ah, .Action, sec_index(m, s), m.shown_actions[e])
 			if on do fill_rect(cv, px, py, x1 - px, ah, argb(acc, 0xff))
 			text_in(cv, m.f_body, act.label, mx + 28 * S, py, ah, argb(on ? bg : fgb, 0xff))
 			r := fmt.tprintf("%s – %s", act.meta, act.line2)
@@ -1685,6 +1687,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 		case .Row:
 			j := row - 1
 			on := m.focus == .Sub && e == sel_entry
+			hit_add(a, px, py, x1 - px, ah, .Action, sec_index(m, s), m.shown_actions[e])
 			lc := m.focus == .Sub ? fgb : fg
 			if act.dim do lc = faint
 			mc := tone_color(t, act.metac, dim)
@@ -1709,6 +1712,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			right := x1 - 20 * S
 			if act.slider {
 				sw := draw_slider(a, cv, S, act.value, right, py, ah, on, act.vmax, act.dim)
+				hit_add(a, right - sw - 4 * S, py, 120 * S + 8 * S, ah, .Slider, sec_index(m, s), m.shown_actions[e], right - sw, 120 * S)
 				text_in(cv, m.f_body, act.label, lx, py, ah, argb(lc, 0xff), right - sw - 12 * S)
 				break
 			}
@@ -1793,6 +1797,7 @@ draw_results :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		r := m.results[n]
 		sec := m.sections[r.sec]
 		on := n == m.si
+		hit_add(a, x0, py, bw, rh, .Result, n, 0)
 		lc, mc, tc := fgb, dim, acc
 		if on { fill_rect(cv, x0, py, bw, rh, argb(acc, 0xff)); lc, mc, tc = bg, bg, bg }
 		label, meta, tag := sec.name, "", "section"
@@ -1845,6 +1850,8 @@ draw_confirm :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	yes_x, no_x := x + pad_x, x + pad_x + bw + 12 * S
 	yes_bg, yes_fg := m.cf == 0 ? argb(acc, 0xff) : 0, m.cf == 0 ? bg : acc
 	no_bg, no_fg := m.cf == 1 ? argb(fgb, 0xff) : 0, m.cf == 1 ? bg : fgb
+	hit_add(a, yes_x, yy, bw, bh_, .Confirm, 0, 0)
+	hit_add(a, no_x, yy, bw, bh_, .Confirm, 1, 0)
 	rounded_rect(cv, yes_x, yy, bw, bh_, 0, yes_bg, f32(S), argb(acc, 0xff))
 	rounded_rect(cv, no_x, yy, bw, bh_, 0, no_bg, f32(S), argb(mix(bg, fg, 0.35), 0xff))
 	text_in(cv, m.f_bold13, "y  Yes", yes_x + (bw - tw(m.f_bold13, "y  Yes")) / 2, yy, bh_, argb(yes_fg, 0xff))
@@ -1890,6 +1897,7 @@ draw_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 			tx := x0 + pad + c * (tile_w + gx)
 			ty := py + r * cell_h
 			on := j == m.si
+			hit_add(a, tx - 4 * S, ty - 4 * S, tile_w + 8 * S, cell_h - 4 * S, .Item, j, 0)
 			if on do rounded_rect(cv, tx - 4 * S, ty - 4 * S, tile_w + 8 * S, tile_h + 8 * S, 0, 0, f32(2 * S), argb(acc, 0xff))
 			fill_rect(cv, tx, ty, tile_w, tile_h, argb(mix(bg, fg, 0.08), 0xff))
 			if it.image != "" {
@@ -1914,6 +1922,7 @@ draw_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	for j in m.scroll ..< min(m.scroll + visible, len(m.shown_items)) {
 		it := v.items[m.shown_items[j]]
 		on := j == m.si
+		hit_add(a, x0, py, bw, rh, .Item, j, 0)
 		lc, mc := fgb, dim
 		if on { fill_rect(cv, x0, py, bw, rh, argb(acc, 0xff)); lc, mc = bg, bg }
 		if swatches {
@@ -2017,6 +2026,7 @@ draw_web :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	for r, j in rows {
 		h := (j == 0 ? 48 : 36) * S
 		on := j == m.si
+		hit_add(a, x0, py, bw, h, .Web, j, 0)
 		lc, tc, mc := fgb, acc, dim
 		if on { fill_rect(cv, x0, py, bw, h, argb(acc, 0xff)); lc, tc, mc = bg, bg, bg }
 		text_in(cv, m.f_small, r.tag, x0 + 20 * S, py, h, argb(tc, 0xff))
@@ -2130,6 +2140,7 @@ draw_font :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	for j in m.scroll ..< min(m.scroll + visible, len(m.sel_actions)) {
 		act := pg.actions[m.sel_actions[j]]
 		on := j == m.si
+		hit_add(a, x0, py, lw, rh, .Action, m.open, m.sel_actions[j])
 		lc, mc := fgb, dim
 		if on { fill_rect(cv, x0, py, lw, rh, argb(acc, 0xff)); lc, mc = bg, bg }
 		ff := family_fonts(a, act.label, false)
@@ -2464,6 +2475,7 @@ draw_weather :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		if act.slow do continue
 		on := i == sel_act && m.focus == .Sub
 		if act.kind == .Day {
+			hit_add(a, px, y, x1 - px, ah, .Action, m.open, i)
 			lc, sc := fg, dim
 			if on { fill_rect(cv, px, y, x1 - px, ah, argb(acc, 0xff)); lc, sc = bg, bg }
 			x := px + 20 * S
@@ -2496,6 +2508,7 @@ draw_weather :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 			settings_head = true
 		}
 		if y + ah > fy do break
+		hit_add(a, px, y, x1 - px, ah, .Action, m.open, i)
 		if on do fill_rect(cv, px, y, x1 - px, ah, argb(acc, 0xff))
 		meta := len(act.choices) > 0 ? fmt.tprintf("‹ %s ›", act.meta) : act.meta
 		mw := tw(m.f_small, meta)
@@ -2558,6 +2571,7 @@ draw_theme_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	for j in m.scroll ..< min(m.scroll + visible, len(m.shown_items)) {
 		it := v.items[m.shown_items[j]]
 		on := j == m.si
+		hit_add(a, x0, y, lw, rh, .Item, j, 0)
 		lc, mc := fg, dim
 		if on { fill_rect(cv, x0, y, lw, rh, argb(acc, 0xff)); lc, mc = bg, bg }
 		// right to left: the ● column (12 px), the swatch strip, then the name
@@ -2722,4 +2736,110 @@ draw_weather_pane :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, x, y_, xr, 
 		text_in(cv, m.f_body, act.line2, xr - 30 * S, y, rh, argb(fgb, 0xff))
 		y += rh
 	}
+}
+
+// ---------- mouse ----------
+// Every draw records where its rows are (buffer pixels). Moving the pointer selects what is
+// under it, a left click runs it (on a slider's track: sets the level there), a right click
+// goes back, the wheel moves the selection.
+
+Hit_Kind :: enum { Section, Action, Slider, Result, Item, Web, Confirm, Row }
+Hit :: struct { x, y, w, h: int, kind: Hit_Kind, a, b: int, tx, tw: int }
+
+hit_add :: proc(a: ^App, x, y, w, h: int, kind: Hit_Kind, i, j: int, tx := 0, tw := 0) {
+	append(&a.hits, Hit{x, y, w, h, kind, i, j, tx, tw})
+}
+
+@(private)
+sec_index :: proc(m: ^Menu, s: ^Section) -> int {
+	for &x, i in m.sections do if &x == s do return i
+	return -1
+}
+
+hit_at :: proc(a: ^App, x, y: int) -> (Hit, bool) {
+	#reverse for h in a.hits do if x >= h.x && x < h.x + h.w && y >= h.y && y < h.y + h.h do return h, true
+	return {}, false
+}
+
+@(private)
+sel_pos :: proc(m: ^Menu, act: int) -> int {
+	for v, i in m.sel_actions do if v == act do return i
+	return -1
+}
+
+// The pointer moved (buffer pixels): select what is under it. True when that changed.
+menu_pointer_move :: proc(a: ^App, x, y: int) -> bool {
+	m := a.menu
+	h := hit_at(a, x, y) or_return
+	switch h.kind {
+	case .Section:
+		if m.focus != .Menu || searching(m, a) || m.cur == h.a do return false
+		m.cur = h.a
+		refresh_if_stale(m, &m.sections[m.cur].load)
+		loader_start(m, &m.sections[m.cur].load)
+		menu_refilter(a)
+		return true
+	case .Action, .Slider:
+		if m.focus != .Sub || m.open != h.a do return false
+		p := sel_pos(m, h.b)
+		if p < 0 || p == m.si do return false
+		m.si = p
+		return true
+	case .Result, .Item, .Web:
+		if m.si == h.a do return false
+		m.si = h.a
+		return true
+	case .Confirm:
+		if m.cf == h.a do return false
+		m.cf = h.a
+		return true
+	case .Row:
+	}
+	return false
+}
+
+// A click: button 1 runs, 3 goes back.
+menu_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
+	m := a.menu
+	if button == 3 { menu_back(a); return true }
+	if button != 1 do return false
+	h := hit_at(a, x, y) or_return
+	m.toast = ""
+	switch h.kind {
+	case .Section:
+		menu_enter(a, h.a)
+	case .Slider:
+		if m.focus != .Sub || m.open != h.a do menu_enter(a, h.a)
+		act := &m.sections[h.a].actions[h.b]
+		vmax := act.vmax > 0 ? act.vmax : 100
+		step := act.step > 0 ? act.step : 1
+		v := clamp((x - h.tx) * vmax / max(h.tw, 1), 0, vmax)
+		v = (v + step / 2) / step * step
+		if p := sel_pos(m, h.b); p >= 0 do m.si = p
+		act.value = clamp(v, 0, vmax)
+		execute(a, h.a, h.b, true)
+	case .Action:
+		if m.focus != .Sub || m.open != h.a do menu_enter(a, h.a)
+		p := sel_pos(m, h.b)
+		if p < 0 do return true
+		m.si = p
+		menu_run(a)
+	case .Result, .Item, .Web:
+		m.si = h.a
+		menu_run(a)
+	case .Confirm:
+		m.cf = h.a
+		menu_run(a)
+	case .Row:
+	}
+	return true
+}
+
+// The wheel: n steps (positive is down).
+menu_pointer_scroll :: proc(a: ^App, n: int) -> bool {
+	m := a.menu
+	if m.focus == .Confirm || m.focus == .Input || n == 0 do return false
+	grid := m.focus == .View && m.views[m.view].grid
+	menu_move(a, n * (grid ? 4 : 1))
+	return true
 }

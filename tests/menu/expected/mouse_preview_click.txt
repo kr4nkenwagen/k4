@@ -1,0 +1,8 @@
+focus Input
+crumb SEARCH
+query (Type here)
+count Enter to submit
+hints ↵ Submit · Esc Cancel
+ask Search · Names in apt
+exit 1
+log: load apps

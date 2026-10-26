@@ -34,7 +34,8 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --dry-run FILE.png      render one frame to a PNG without Wayland, then print the selection
   --dump                  like --dry-run without the PNG: print the menu state as text (tests)
   --keys KEYS, --select N keys pressed before the first frame: text plus <down> <up> <left>
-                          <right> <enter> <esc> <tab> <bs> <alt-x> <ctrl-x>; then move the selection
+                          <right> <enter> <esc> <tab> <bs> <alt-x> <ctrl-x>, and the pointer:
+                          <move:x,y> <click:x,y> <rclick:x,y> <wheel:n>; then move the selection
   --scale N               dry runs: buffer scale
 
 Ghostty's custom shaders (the custom-shader lines of ~/.config/ghostty/config and the files
@@ -178,7 +179,13 @@ main :: proc() {
 				os.exit(2)
 			}
 		}
-		if opts.dump && a.menu != nil && !a.done do fmt.print(menu_dump(a))
+		if opts.dump && a.menu != nil && !a.done {
+			fmt.print(menu_dump(a))
+			if os.get_env("K4_DUMP_HITS", context.temp_allocator) != "" { // where the rows are, for pointer tests
+				hits_refresh(a)
+				for h in a.hits do fmt.printfln("hit %v %d:%d at %d,%d %dx%d", h.kind, h.a, h.b, h.x, h.y, h.w, h.h)
+			}
+		}
 		if a.menu == nil && !a.done do app_accept(a)
 		if a.menu != nil && !a.done do a.exit = 1
 	} else {
@@ -223,6 +230,13 @@ app_load_style :: proc(a: ^App, first: bool) -> bool {
 	return true
 }
 
+// Dry runs: draw once (scale 1) so the pointer tokens find what is where.
+hits_refresh :: proc(a: ^App) {
+	if a.width <= 0 || a.height <= 0 do return
+	cv := Canvas{make([]u32, a.width * a.height, context.temp_allocator), a.width, a.height}
+	app_draw(a, &cv, 1)
+}
+
 // --keys: text is typed; <name> presses a key (see USAGE).
 press_keys :: proc(a: ^App, keys: string) {
 	s := keys
@@ -231,6 +245,22 @@ press_keys :: proc(a: ^App, keys: string) {
 			if end := strings.index_byte(s, '>'); end > 0 {
 				tok := s[1:end]
 				s = s[end + 1:]
+				// pointer tokens (tests): <move:x,y> <click:x,y> <rclick:x,y> <wheel:n>, logical pixels
+				if c := strings.index_byte(tok, ':'); c > 0 && (tok[:c] == "move" || tok[:c] == "click" || tok[:c] == "rclick" || tok[:c] == "wheel") {
+					hits_refresh(a)
+					xy := strings.split(tok[c + 1:], ",", context.temp_allocator)
+					x, _ := strconv.parse_int(xy[0])
+					y := 0
+					if len(xy) > 1 do y, _ = strconv.parse_int(xy[1])
+					switch tok[:c] {
+					case "move": app_pointer_move(a, x, y)
+					case "click": app_pointer_click(a, x, y, 1)
+					case "rclick": app_pointer_click(a, x, y, 3)
+					case "wheel": app_pointer_scroll(a, x)
+					}
+					if a.menu != nil && (a.opts.dry_run != "" || a.opts.dump) && os.get_env("K4_DRY_NOWAIT", context.temp_allocator) == "" do menu_load_all(a)
+					continue
+				}
 				ctrl, alt := false, false
 				if strings.has_prefix(tok, "ctrl-") { ctrl = true; tok = tok[5:] }
 				if strings.has_prefix(tok, "alt-") { alt = true; tok = tok[4:] }

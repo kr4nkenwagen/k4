@@ -1,0 +1,10 @@
+focus Sub
+crumb KESTREL › APPS
+query (Search Apps…)
+count 2 actions
+hints ↑↓ Move · ↵ ␣ Run / toggle · ← ⌫ Back · ⌃J ⌃K Vim
+title Apps · Integrations first
+* Steam | 2 d ago (key G)
+  GitHub | 6 unread (key R)
+exit 1
+log: load apps

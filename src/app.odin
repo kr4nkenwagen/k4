@@ -53,6 +53,7 @@ App :: struct {
 	family:   string,
 	scale:    int, // buffer scale of the output (fonts are sized for it)
 	caret:    [4]int, // the text caret as last drawn (buffer pixels: x, y top, w, h; w 0 = none), for shaders
+	hits:     [dynamic]Hit, // where the last frame drew its rows (mouse)
 	menu:     ^Menu,
 	has_icons: bool,
 	// layout in logical pixels
@@ -165,6 +166,7 @@ draw_text_f :: proc(cv: ^Canvas, f: ^Font, text: string, x, y_top: int, color: u
 }
 
 app_draw :: proc(a: ^App, cv: ^Canvas, scale: int) {
+	clear(&a.hits)
 	if a.menu != nil { menu_draw(a, cv, scale); return }
 	t := a.theme
 	S :: proc(v, scale: int) -> int { return v * scale }
@@ -198,6 +200,7 @@ app_draw :: proc(a: ^App, cv: ^Canvas, scale: int) {
 		m := a.matches[i]
 		row := a.rows[m.row]
 		sel := i == a.selected
+		hit_add(a, inner - S(4, scale), y, right - inner + S(8, scale), rh, .Row, i, 0)
 		if sel do rounded_rect(cv, inner - S(4, scale), y, right - inner + S(8, scale), rh, f32(S(4, scale)), argb(t.selection, 0xff))
 		tx := inner
 		if a.has_icons {
@@ -309,5 +312,28 @@ app_edit_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> boo
 		for r in text do if r < 0x20 || r == 0x7f do return false
 		app_insert(a, text)
 	}
+	return true
+}
+
+// dmenu mode: the pointer selects a row, a click takes it, the wheel moves.
+app_pointer_move :: proc(a: ^App, x, y: int) -> bool {
+	if a.menu != nil do return menu_pointer_move(a, x, y)
+	h, ok := hit_at(a, x, y)
+	if !ok || h.kind != .Row || h.a == a.selected do return false
+	a.selected = h.a
+	return true
+}
+app_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
+	if a.menu != nil do return menu_pointer_click(a, x, y, button)
+	if button == 3 { a.exit = 1; a.done = true; return true }
+	h, ok := hit_at(a, x, y)
+	if button != 1 || !ok || h.kind != .Row do return false
+	a.selected = h.a
+	app_accept(a)
+	return true
+}
+app_pointer_scroll :: proc(a: ^App, n: int) -> bool {
+	if a.menu != nil do return menu_pointer_scroll(a, n)
+	app_move(a, n)
 	return true
 }

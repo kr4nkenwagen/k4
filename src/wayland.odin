@@ -4,6 +4,7 @@ import "base:runtime"
 import "core:c"
 import "core:fmt"
 import "core:os"
+import "core:strconv"
 import "core:strings"
 import "core:sys/linux"
 import "core:time"
@@ -27,6 +28,12 @@ Wl :: struct {
 	shm:        ^wl.shm,
 	seat:       ^wl.seat,
 	keyboard:   ^wl.keyboard,
+	pointer:    ^wl.pointer,
+	ptr_x, ptr_y: int,  // buffer pixels
+	axis_src:   int,    // this frame's axis source (0 wheel: steps come as axis_discrete)
+	axis_acc:   f32,    // touchpad scrolling, accumulated
+	cursor_theme: rawptr,
+	cursor_surface: ^wl.surface,
 	shell:      ^wlr.layer_shell_v1,
 	outputs:    [dynamic]Output,
 	surface:    ^wl.surface,
@@ -126,6 +133,10 @@ layer_listener := wlr.layer_surface_v1_listener{configure = layer_configure, clo
 // ---------- seat and keyboard ----------
 seat_caps :: proc "c" (data: rawptr, s: ^wl.seat, caps: wl.seat_capability) {
 	context = W.ctx
+	if u(caps) & 1 != 0 && W.pointer == nil {
+		W.pointer = wl.seat_get_pointer(s)
+		wl.pointer_add_listener(W.pointer, &pointer_listener, nil)
+	}
 	has_kb := u(caps) & 2 != 0
 	if has_kb && W.keyboard == nil {
 		W.keyboard = wl.seat_get_keyboard(s)
@@ -176,6 +187,81 @@ kb_key :: proc "c" (data: rawptr, kb: ^wl.keyboard, serial, t, key: uint, state:
 	}
 }
 keyboard_listener := wl.keyboard_listener{keymap = kb_keymap, enter = kb_enter, leave = kb_leave, key = kb_key, modifiers = kb_modifiers, repeat_info = kb_repeat_info}
+
+// ---------- pointer ----------
+foreign import wl_cursor_lib "system:wayland-cursor"
+Wl_Cursor_Image :: struct { width, height, hotspot_x, hotspot_y, delay: u32 }
+Wl_Cursor :: struct { image_count: u32, images: [^]^Wl_Cursor_Image, name: cstring }
+@(default_calling_convention = "c")
+foreign wl_cursor_lib {
+	wl_cursor_theme_load       :: proc(name: cstring, size: c.int, shm: ^wl.shm) -> rawptr ---
+	wl_cursor_theme_get_cursor :: proc(theme: rawptr, name: cstring) -> ^Wl_Cursor ---
+	wl_cursor_image_get_buffer :: proc(image: ^Wl_Cursor_Image) -> ^wl.buffer ---
+}
+
+// The theme's arrow over k4 (an entering pointer has no image until the client sets one).
+set_cursor :: proc(serial: uint) {
+	if W.cursor_theme == nil {
+		size := 24
+		if v, ok := strconv.parse_int(os.get_env("XCURSOR_SIZE", context.temp_allocator)); ok && v > 0 do size = v
+		theme := os.get_env("XCURSOR_THEME", context.temp_allocator)
+		W.cursor_theme = wl_cursor_theme_load(theme != "" ? strings.clone_to_cstring(theme, context.temp_allocator) : nil, c.int(size * W.scale), W.shm)
+		if W.cursor_theme == nil do return
+		W.cursor_surface = wl.compositor_create_surface(W.compositor)
+	}
+	cur := wl_cursor_theme_get_cursor(W.cursor_theme, "default")
+	if cur == nil do cur = wl_cursor_theme_get_cursor(W.cursor_theme, "left_ptr")
+	if cur == nil || cur.image_count == 0 do return
+	img := cur.images[0]
+	buf := wl_cursor_image_get_buffer(img)
+	if buf == nil do return
+	wl.surface_attach(W.cursor_surface, buf, 0, 0)
+	wl.surface_set_buffer_scale(W.cursor_surface, W.scale)
+	wl.surface_damage_buffer(W.cursor_surface, 0, 0, int(img.width), int(img.height))
+	wl.surface_commit(W.cursor_surface)
+	wl.pointer_set_cursor(W.pointer, serial, W.cursor_surface, int(img.hotspot_x) / W.scale, int(img.hotspot_y) / W.scale)
+}
+
+ptr_xy :: proc(x, y: wl.fixed_t) { W.ptr_x, W.ptr_y = int(f32(x) / 256 * f32(W.scale)), int(f32(y) / 256 * f32(W.scale)) }
+ptr_enter :: proc "c" (data: rawptr, p: ^wl.pointer, serial: uint, s: ^wl.surface, x, y: wl.fixed_t) {
+	context = W.ctx
+	ptr_xy(x, y)
+	set_cursor(serial)
+}
+ptr_leave :: proc "c" (data: rawptr, p: ^wl.pointer, serial: uint, s: ^wl.surface) {}
+ptr_motion :: proc "c" (data: rawptr, p: ^wl.pointer, t: uint, x, y: wl.fixed_t) {
+	context = W.ctx
+	ptr_xy(x, y)
+	if app_pointer_move(W.app, W.ptr_x, W.ptr_y) do W.dirty = true
+}
+ptr_button :: proc "c" (data: rawptr, p: ^wl.pointer, serial, t, button: uint, state: wl.pointer_button_state) {
+	context = W.ctx
+	if state != .pressed do return
+	b := 0
+	switch u(button) { case 0x110: b = 1; case 0x111: b = 3; case 0x112: b = 2 } // BTN_LEFT, RIGHT, MIDDLE
+	if b != 0 && app_pointer_click(W.app, W.ptr_x, W.ptr_y, b) do W.dirty = true
+}
+ptr_axis :: proc "c" (data: rawptr, p: ^wl.pointer, t: uint, axis: wl.pointer_axis, value: wl.fixed_t) {
+	context = W.ctx
+	if axis != .vertical_scroll || W.axis_src == 0 do return // a wheel's steps come as axis_discrete
+	W.axis_acc += f32(value) / 256
+	n := int(W.axis_acc / 15)
+	if n != 0 { W.axis_acc -= f32(n) * 15; if app_pointer_scroll(W.app, n) do W.dirty = true }
+}
+ptr_frame :: proc "c" (data: rawptr, p: ^wl.pointer) { W.axis_src = 0 }
+ptr_axis_source :: proc "c" (data: rawptr, p: ^wl.pointer, src: wl.pointer_axis_source) { W.axis_src = int(src) }
+ptr_axis_stop :: proc "c" (data: rawptr, p: ^wl.pointer, t: uint, axis: wl.pointer_axis) { W.axis_acc = 0 }
+ptr_axis_discrete :: proc "c" (data: rawptr, p: ^wl.pointer, axis: wl.pointer_axis, discrete: int) {
+	context = W.ctx
+	if axis == .vertical_scroll && app_pointer_scroll(W.app, int(i(discrete))) do W.dirty = true
+}
+ptr_axis_value120 :: proc "c" (data: rawptr, p: ^wl.pointer, axis: wl.pointer_axis, v: int) {}
+ptr_axis_rel :: proc "c" (data: rawptr, p: ^wl.pointer, axis: wl.pointer_axis, d: wl.pointer_axis_relative_direction) {}
+pointer_listener := wl.pointer_listener{
+	enter = ptr_enter, leave = ptr_leave, motion = ptr_motion, button = ptr_button, axis = ptr_axis, frame = ptr_frame,
+	axis_source = ptr_axis_source, axis_stop = ptr_axis_stop, axis_discrete = ptr_axis_discrete,
+	axis_value120 = ptr_axis_value120, axis_relative_direction = ptr_axis_rel,
+}
 
 handle_keycode :: proc(code: u32) {
 	if W.state == nil do return
