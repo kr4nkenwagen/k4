@@ -3,7 +3,7 @@ crumb NETWORK › ASK
 query (Ask a question…)
 count gemma
 toast Ran  ask-q
-title Ask · Type a question
+title Ask · Type a question (full width)
 !! accent: Enter sends to gemma · Answers open in a terminal.
 * Model | ‹ gemma ›
 exit 1

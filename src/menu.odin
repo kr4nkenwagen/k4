@@ -58,6 +58,8 @@ import "logic"
 //   Y <key> <label> [<key> <label>…]                  the footer hints
 //   Q <id>                                            typing is input for <id> (run with K4_INPUT) instead
 //                                                     of a filter; Tab steps the first choice row
+//   O pane                                            (after a P record) draw the page in the right pane,
+//                                                     next to the sections, instead of full width
 // A flags for them: mark=<glyph> markc=<tone> sub=<text> chip=<TEXT> chipc=<tone> metac=<tone>
 // thumb=<image> dim slow key=<letter> (shortcut mode), choice=<a>|<b>|<c> (the meta is the
 // value: ← → steps it and runs R with K4_VALUE set). A section's static lines show until its
@@ -127,6 +129,7 @@ Section :: struct {
 	desc0:   string, // the S/P description; D lines override it until the next load
 	count, ph, query_id: string,
 	has_d:   bool, // a D line set the count (an empty one hides it)
+	pane:    bool, // a page drawn in the right pane, next to the sections (O pane)
 	hints:   [dynamic][2]string,
 	dim:     bool,
 	group:   string,
@@ -212,7 +215,7 @@ menu_parse :: proc(m: ^Menu, data: string) {
 			}
 		case "T":
 			m.top_crumb, m.top_ph, m.top_count = get(f, 1), get(f, 2), get(f, 3)
-		case "A", "H", "E", "N", "K", "C", "B", "D", "Y", "Q":
+		case "A", "H", "E", "N", "K", "C", "B", "D", "Y", "Q", "O":
 			if len(m.sections) > 0 do section_line(&m.sections[len(m.sections) - 1], f)
 		case "R":
 			if len(f) > 1 do m.run_cmd = strings.join(f[1:], "\t")
@@ -252,6 +255,8 @@ section_line :: proc(s: ^Section, f: []string) {
 		for i := 1; i + 1 < len(f); i += 2 do append(&s.hints, [2]string{strings.clone(f[i]), strings.clone(f[i + 1])})
 	case "Q":
 		s.query_id = strings.clone(get(f, 1))
+	case "O":
+		for flag in strings.split(get(f, 1), ";", context.temp_allocator) do if flag == "pane" do s.pane = true
 	}
 }
 
@@ -1213,7 +1218,7 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		switch {
 		case srch: draw_results(a, cv, S, body)
 		case m.focus == .Sub && is_page(m, m.open) && m.sections[m.open].kind == .Font: draw_font(a, cv, S, body)
-		case m.focus == .Sub && is_page(m, m.open): draw_page(a, cv, S, body, sc)
+		case m.focus == .Sub && is_page(m, m.open) && !m.sections[m.open].pane: draw_page(a, cv, S, body, sc)
 		case: draw_panes(a, cv, S, body, sc)
 		}
 	case .Confirm: draw_confirm(a, cv, S, body)
@@ -2129,7 +2134,7 @@ menu_dump :: proc(a: ^App) -> string {
 	case .Sub:
 		s := &m.sections[m.open]
 		desc := section_slow(m, s) ? fmt.tprintf("Still waiting on %s", s.name) : s.desc
-		fmt.sbprintfln(&b, "title %s · %s", s.name, desc)
+		fmt.sbprintfln(&b, "title %s · %s%s", s.name, desc, is_page(m, m.open) ? (s.pane ? " (pane)" : " (full width)") : "")
 		for e in m.shown_actions {
 			act := s.actions[e]
 			sel := m.si < len(m.sel_actions) && m.sel_actions[m.si] == e

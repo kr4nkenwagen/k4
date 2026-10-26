@@ -9,6 +9,7 @@ A	ask	Ask…		ask
 A	close	Close the menu			stay
 A	t	Theme	Nord	theme
 P	wifi	Wi-Fi networks	nmcli	printf 'A\tconnect-open\tCafe\t80%%\t\tstay\nA\tconnect-secure\tHome\t40%%\t\tstay;current\nH\tMore\nA\tclose\tClose\t\t\tstay\n'
+O	pane
 P	ask	Ask	Type a question	printf 'Q\task-q\nD\tType a question\tgemma\tAsk a question…\nN\tEnter sends to gemma\tAnswers open in a terminal.\taccent\nA\tmodel\tModel\tgemma\t\tchoice=gemma|qwen|llama\n'
 S	apps	Apps	A	Integrations first	x
 A	steam	Steam	2 d ago		stay;key=G
