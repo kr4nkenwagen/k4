@@ -36,6 +36,7 @@ Face :: struct { data: []u8, info: rawptr, path: string, color: bool, shaper: ^k
 Fallbacks :: struct {
 	faces:  [dynamic]Face,
 	misses: map[rune]bool, // characters no installed font has
+	no_emoji_font: bool,   // fontconfig has no colour emoji font: stop asking
 }
 Glyph :: struct { w, h, xoff, yoff: i32, alpha: []u8, color: []u32 } // color: an emoji (premultiplied ARGB)
 
@@ -275,10 +276,33 @@ emoji_segments :: proc(text: string) -> []Emoji_Segment {
 @(private)
 color_face :: proc(f: ^Font, part: string) -> (face: u8, fc: ^Face, ok: bool) {
 	r, _ := utf8.decode_rune_in_string(part)
-	fface, _, _, found := fallback_glyph(f, r)
-	if !found || f.fallback == nil || int(fface) > len(f.fallback.faces) do return
-	fc = &f.fallback.faces[fface - 1]
-	if !fc.color do return
+	fb := f.fallback
+	if fb == nil do return
+	// a colour face that has it; else ask fontconfig for an emoji font (a plain text font
+	// may cover BMP symbols like ☺ too, and would win the ordinary fallback search)
+	find :: proc(fb: ^Fallbacks, r: rune) -> int {
+		for x, i in fb.faces do if x.color && k4_font_glyph_index(x.info, c.int(r)) != 0 do return i
+		return -1
+	}
+	i := find(fb, r)
+	if i < 0 && !fb.no_emoji_font {
+		if path, index, ok := font_file(fmt.tprintf("emoji:charset=%x", u32(r))); ok {
+			known := false
+			for x in fb.faces do if x.path == path { known = true; break }
+			if !known {
+				if data, err := os.read_entire_file(path, context.allocator); err == nil {
+					if info := k4_font_new_color(raw_data(data), c.int(index)); info != nil {
+						append(&fb.faces, Face{data = data, info = info, path = strings.clone(path), color = true})
+					}
+				}
+			}
+		}
+		i = find(fb, r)
+		if i < 0 do fb.no_emoji_font = true
+	}
+	if i < 0 do return
+	fface := u8(i + 1)
+	fc = &fb.faces[i]
 	if fc.shaper == nil {
 		fc.alloc = new(runtime.Allocator)
 		fc.alloc^ = context.allocator

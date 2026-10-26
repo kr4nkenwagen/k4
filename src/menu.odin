@@ -81,6 +81,7 @@ Action :: struct {
 	heading: bool, // anything that is not a selectable row
 	count: string,
 	mark, markc, sub, chip, chipc, metac, thumb, key: string,
+	find: string, // more words the filter matches (an emoji's keywords), not shown
 	dim, slow: bool,
 	toggle, on: bool, // toggle=on|off: drawn as a switch; Space or Enter flips it
 	choices: []string,
@@ -322,6 +323,7 @@ action_from :: proc(f: []string) -> Action {
 		case flag == "dim": a.dim = true
 		case strings.has_prefix(flag, "toggle="): a.toggle, a.stay, a.on = true, true, flag[7:] == "on"
 		case flag == "slow": a.slow = true
+		case strings.has_prefix(flag, "find="): a.find = strings.clone(flag[5:])
 		case strings.has_prefix(flag, "mark="): a.mark = strings.clone(flag[5:])
 		case strings.has_prefix(flag, "markc="): a.markc = strings.clone(flag[6:])
 		case strings.has_prefix(flag, "sub="): a.sub = strings.clone(flag[4:])
@@ -621,7 +623,7 @@ menu_refilter :: proc(a: ^App) {
 		slow := section_slow(m, s)
 		for act, i in s.actions {
 			if act.slow && !slow do continue
-			if filter && (act.heading || !has_fold(act.label, q)) do continue
+			if filter && (act.heading || !(has_fold(act.label, q) || (act.find != "" && has_fold(act.find, q)))) do continue
 			append(&m.shown_actions, i)
 			if !act.heading do append(&m.sel_actions, i)
 		}
@@ -1369,7 +1371,7 @@ menu_header :: proc(a: ^App, sc: bool) -> (crumb, ph, count: string) {
 		if is_page(m, m.open) {
 			pg := m.sections[m.open]
 			parent := pg.back >= 0 && pg.back < len(m.sections) ? pg.back : root(m, m.open)
-			crumb = strings.to_upper(fmt.tprintf("%s › %s", m.sections[parent].name, pg.name), context.temp_allocator)
+			crumb = strings.to_upper(parent == m.open || m.sections[parent].name == pg.name ? pg.name : fmt.tprintf("%s › %s", m.sections[parent].name, pg.name), context.temp_allocator)
 			noun := page_noun(pg)
 			ph = sc ? "Press a number   / to filter" : fmt.tprintf("Filter %s…", noun)
 			count = sc ? "" : fmt.tprintf("%d %s", len(m.sel_actions), page_noun(pg, len(m.sel_actions)))
