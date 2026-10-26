@@ -100,5 +100,16 @@ check "send: space picks several, enter sends to all" "send 3 FILES · files · 
 check "send: a device not answering is not sent to" "toast iPad is not answering · pick another or scan again (r)" "$(sd --keys "<down><down><down><down><down><enter>" | grep '^toast')"
 check "send: Tab closes to pick what is sent" "pick	folder" "$(sd --keys "<tab>")"
 check "send: Esc clears picks, then closes" "exit 0" "$(sd --keys "<down> <esc><esc>" >/dev/null; echo "exit $?")"
+ss() { "$K4" --ssh --dump "$@" < ../ssh/data.txt 2>&1; }
+check "ssh: hosts grouped, pinned first" "ssh connect · 6 hosts · sshd on|* homelab · PINNED|  prod-web · CONFIG · PROD" "$(ss | head -3 | paste -sd'|')"
+check "ssh: typing filters" "* bastion · CONFIG" "$(ss --keys "bast" | sed -n 2p)"
+check "ssh: user@host is a new host" "* root@10.1.2.3 · TYPED" "$(ss --keys "root@10.1.2.3" | sed -n 2p)"
+check "ssh: enter checks the host step by step" "band step|toast (check pi)" "$(ss --keys "<down><down><down><enter>" | tail -2 | paste -sd'|')"
+check "ssh: a host that is down is not connected to" "toast 192.168.1.171 isn’t answering on 192.168.1.171:22 · try anyway with ⇧↵" "$(ss --keys "<down><down><down><down><down><enter>" | tail -1)"
+check "ssh: ^F asks the forward, enter runs it" "toast (forward homelab 5432:db:5432)" "$(ss --keys "<ctrl-f>5432:db:5432<enter>" | tail -1)"
+check "ssh: password login asks first" "* Password login (asking)|toast (pass on)" "$( (ss --open host --keys "<down><down><down><enter>" | grep asking; ss --open host --keys "<down><down><down><enter>y" | tail -1) | paste -sd"|")"
+check "ssh: a session ends after y" "toast (end pts/3)" "$(ss --open host --keys "<right><del>y" | tail -1)"
+check "ssh: keys, a adds to the agent" "toast (agent-add id_rsa_work)" "$(ss --open keys --keys "<down><down>a" | tail -1)"
+check "ssh: Tab walks the pages" "ssh host · 6 hosts · sshd on" "$(ss --keys "<tab>" | head -1)"
 echo "bar tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -1,0 +1,16 @@
+A	2
+V	1	22	2	1	0	0	1	1
+X	pts/3	anna	192.168.1.40	14:02	vim notes.md
+X	pts/4	kr4nk	100.71.3.9	15:30	bash
+K	ssh-ed25519 AAAA anna@laptop	anna@laptop	ed25519 · SHA256:abcd
+K	ssh-ed25519 BBBB kr4nk@phone	kr4nk@phone	ed25519 · SHA256:efgh
+F	34	45.13.22.9
+M	id_ed25519	ssh-ed25519	kr4nk@kr4nkenstation	SHA256:F0ANk591F15KiJs8lQ9GKRDOPu8x9Kbc0PwxQs2ChYw	1	0	used 1 h ago	ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICTl/2qhvrpa0qLaQvDCukADwN1VH+icL4mn58Y1T7Ck kr4nk@kr4nkenstation
+M	id_ed25519_sk	sk-ssh-ed25519@openssh.com	yubikey	SHA256:Zx9	0	0	never	sk-ssh-ed25519@openssh.com AAAAGnNr yubikey
+M	id_rsa_work	ssh-rsa	work laptop	SHA256:Rr1	0	1	used 3 d ago	ssh-rsa AAAAB3Nza work laptop
+H	homelab	homelab	kr4nk	10.0.0.5	22	~/.ssh/id_ed25519		~/.ssh/config	PINNED	2 h ago		0	4	L:8080:localhost:8080	1
+H	prod-web	prod-web	deploy	web1.example.com	2222	~/.ssh/id_rsa_work	bastion	~/.ssh/config	CONFIG	yesterday	PROD	0	via		0
+H	bastion	bastion	jon	bastion.example.com	22	~/.ssh/id_ed25519		~/.ssh/config	CONFIG	yesterday		0	31		0
+H	pi	pi	pi	pi.tail1234.ts.net	22	~/.ssh/id_ed25519		Tailscale	NEARBY	never		1	12		0
+H	github.com	github.com	git	github.com	22	~/.ssh/id_ed25519		known_hosts	RECENT	never	GIT	0	36		0
+H	192.168.1.171	192.168.1.171	kr4nk	192.168.1.171	22	~/.ssh/id_ed25519		known_hosts	RECENT	never		0	down		0

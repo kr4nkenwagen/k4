@@ -600,6 +600,7 @@ run_wayland :: proc(a: ^App) -> bool {
 		if a.nc != nil do tick = 1000                       // the centre follows the service
 		if a.perf != nil do tick = 1000                     // the numbers move once a second
 		if a.send != nil do tick = time.tick_diff(time.tick_now(), a.send.scan_until) > 0 ? 80 : 500 // devices and the transfer
+		if a.ssh != nil do tick = a.ssh.check.running ? 100 : 500 // the connect steps, the data in the background
 		if a.osd != nil {                                   // the feedback box: gone after 1.2 s
 			left := osd_left(a.osd)
 			if left == 0 { a.done = true; break }
@@ -617,7 +618,7 @@ run_wayland :: proc(a: ^App) -> bool {
 		}
 		n, _ := linux.poll(fds[:], timeout)
 		if n == 0 && tick >= 0 {
-			if a.bar != nil { bar_tick(a) } else if a.menu != nil { menu_on_tick(a) } else if a.nc != nil { nc_load(a) } else if a.perf != nil { perf_sample(a.perf) } else if a.send != nil do send_refresh(a)
+			if a.bar != nil { bar_tick(a) } else if a.menu != nil { menu_on_tick(a) } else if a.nc != nil { nc_load(a) } else if a.perf != nil { perf_sample(a.perf) } else if a.send != nil { send_refresh(a) } else if a.ssh != nil do ssh_tick(a)
 			W.dirty = true
 		}
 		if n > 0 && .IN in fds[0].revents {
