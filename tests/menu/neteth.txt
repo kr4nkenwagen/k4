@@ -1,0 +1,15 @@
+O	width=424;height=524
+D	Ethernet		
+ST	wired · 1 Gb/s	dim
+TB	neteth	Ethernet	in use	accent	1	󰈀	accent
+TB	netwifi	Wi-Fi	standby	dim	0	󰤨	accent
+IB	󰈀	accent	Ethernet	connected · in use	accent
+KV	Speed	1 Gb/s	copy-speed
+KV	IP	192.168.1.37	copy-ip
+KV	Port	enp3s0	copy-port
+KV	MAC	8C:AE:4C:F2:19:0B	copy-mac
+KB	y	copy-ip
+A	dns	DNS	Cloudflare		choice=Default|Google|Cloudflare|Quad9;chips;line2=1.1.1.1
+A	use	Use Ethernet			stay;toggle=on
+A	ethacts	Ethernet	Renew address		choice=Renew address|Advanced ↗;chips;actions
+Y	↑↓	Move	← →	Choose	↵	Run	Tab	Wi-Fi	y	Copy IP

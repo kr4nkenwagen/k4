@@ -1,0 +1,15 @@
+focus Sub
+popup 424x524
+crumb NETWORK
+query (Filter options…)
+count 
+hints ↑↓ Move · ← → Choose · ↵ Connect · Tab Ethernet · r Rescan · Esc Close
+title Network · Ethernet (full width)
+tabs [Ethernet in use] [Wi-Fi standby]*
+  Wi-Fi | [on]
+[info] Home-5G · connected · standby, Ethernet in use | Signal 97% · -54 dBm | IP 192.168.1.42
+* This network | ‹ Forget ›
+== NETWORKS · ↻ scanning
+  Telia-2G3F (mark 󰤥, · 5 GHz, lock)
+exit 1
+log: load apps

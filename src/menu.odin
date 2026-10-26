@@ -71,7 +71,7 @@ import "logic"
 // alt=<label>|<id> (Tab runs it).
 // Enter prints the chosen action's or item's id; a web search prints "url:<url>".
 
-Entry_Kind :: enum { Row, Heading, Empty, Notice, Bars, Card, Progress, Day, Hero, Qr, Big }
+Entry_Kind :: enum { Row, Heading, Empty, Notice, Bars, Card, Progress, Day, Hero, Qr, Big, Info }
 
 // The Weather dashboard's data (WN/WD/WH records), drawn by draw_weather.
 Wx_Hour :: struct { day: int, t, kind, temp: string, rain: int }
@@ -107,6 +107,8 @@ Action :: struct {
 	under, underc, labelc, field: string, // under: the second line (flag line2=)
 	bold, lock, tall: bool,
 	chips: bool, // a choice drawn as chips (the popup's DNS row); Enter steps it
+	actions: bool, // chips that are buttons: ← → moves between them, Enter runs the one picked (K4_VALUE)
+	kvs: [dynamic][3]string, // an info block's key, value and the action a click on it runs (KV lines)
 	bat: int, // -1: none
 }
 Item :: struct {
@@ -151,7 +153,8 @@ Section :: struct {
 	popup_h: int,  // O height=N: the popup's height, whatever it shows (Wi-Fi, Bluetooth)
 	refresh: int,  // O refresh=N: load again every N s while shown (scans)
 	status, statusc: string, // ST: the popup header's status on the right, and its tone
-	keybinds: [dynamic][2]string, // KB <key> <id>: a letter runs an action in the popup
+	keybinds: [dynamic][2]string, // KB <key> <id>: a letter in the popup runs an action
+	tabs: [dynamic]Tab_Rec, // TB: the popup's device tabs (Tab, 1, 2 switch to that page)
 	cd:      Cal_Data, // its data (CS CX CC CE CG CN lines)
 	popup_w: int,  // O width=N: the compact popup's width (default 420)
 	wx_now:  [6]string, // city, location note, icon kind, temperature, condition, feels/high/low
@@ -161,6 +164,9 @@ Section :: struct {
 	dim:     bool,
 	group:   string,
 }
+
+// TB <page id> <label> <status> <status tone> <1: this one> <glyph> <glyph tone>
+Tab_Rec :: struct { id, label, status, tone, glyph, glyphc: string, active: bool }
 
 View :: struct {
 	name, title, subtitle: string,
@@ -296,6 +302,11 @@ section_line :: proc(s: ^Section, f: []string) {
 			if strings.has_prefix(flag, "width=") do s.popup_w, _ = strconv.parse_int(flag[6:])
 		}
 	case "ST": s.status, s.statusc = strings.clone(get(f, 1)), strings.clone(get(f, 2))
+	case "TB": append(&s.tabs, Tab_Rec{strings.clone(get(f, 1)), strings.clone(get(f, 2)), strings.clone(get(f, 3)), strings.clone(get(f, 4)), strings.clone(get(f, 6)), strings.clone(get(f, 7)), get(f, 5) == "1"})
+	case "IB": // an info block: IB <glyph> <glyph tone> <title> <status> <status tone>, then KV lines
+		append(&s.actions, Action{kind = .Info, heading = true, glyph = strings.clone(get(f, 1)), markc = strings.clone(get(f, 2)), label = strings.clone(get(f, 3)), meta = strings.clone(get(f, 4)), metac = strings.clone(get(f, 5)), bat = -1})
+	case "KV": // KV <key> <value> <action id>: a value in the last info block; a click runs the action
+		if n := len(s.actions); n > 0 && s.actions[n - 1].kind == .Info do append(&s.actions[n - 1].kvs, [3]string{strings.clone(get(f, 1)), strings.clone(get(f, 2)), strings.clone(get(f, 3))})
 	case "KB": append(&s.keybinds, [2]string{strings.clone(get(f, 1)), strings.clone(get(f, 2))})
 	case "QR": // a picture centred with a title and a line under it (Wi-Fi: share by QR code)
 		append(&s.actions, Action{kind = .Qr, heading = true, thumb = strings.clone(get(f, 1)), label = strings.clone(get(f, 2)), meta = strings.clone(get(f, 3)), bat = -1})
@@ -328,6 +339,7 @@ section_reset :: proc(s: ^Section) {
 	clear(&s.actions)
 	clear(&s.hints)
 	clear(&s.keybinds)
+	clear(&s.tabs)
 	s.status, s.statusc = "", ""
 	cal_reset(s)
 	clear(&s.wx_details)
@@ -376,6 +388,7 @@ action_from :: proc(f: []string) -> Action {
 		case flag == "lock": a.lock = true
 		case flag == "tall": a.tall = true
 		case flag == "chips": a.chips = true
+		case flag == "actions": a.actions = true
 		case strings.has_prefix(flag, "choice="):
 			a.stay = true
 			cs := strings.split(flag[7:], "|")
@@ -1116,6 +1129,7 @@ slide :: proc(a: ^App, d: int) -> bool {
 		for c, i in act.choices do if c == act.meta { cur = i; break }
 		n := len(act.choices)
 		act.meta = act.choices[((cur + d) % n + n) % n]
+		if act.actions do return true // buttons: ← → only picks one, ↵ runs it
 	} else {
 		if !act.slider do return false
 		step := act.step > 0 ? act.step : 5
@@ -1463,6 +1477,17 @@ menu_size :: proc(a: ^App) -> (int, int) {
 	return w, min(2 + 40 + 1 + 6 + body + 6 + 1 + 30 + 2, COMPACT_MAX_H)
 }
 
+// The popup's device tabs: the page of another tab takes this one's place (Esc still closes).
+tab_switch :: proc(a: ^App, id: string) {
+	m := a.menu
+	for sec, i in m.sections do if sec.id == id {
+		was := at_entry(m)
+		menu_enter(a, i)
+		if was do m.entry = i
+		return
+	}
+}
+
 // ⌃↵: the same page in the full launcher (the caller opens it: k4 prints launcher:ID).
 @(private)
 to_launcher :: proc(a: ^App) {
@@ -1488,6 +1513,11 @@ compact_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> bool
 		return true
 	}
 	switch {
+	case len(s.tabs) > 1 && (k == .Tab || text == "1" || text == "2" || text == "3"): // the device tabs
+		cur := 0
+		for tb, i in s.tabs do if tb.active do cur = i
+		next := k == .Tab ? (cur + 1) % len(s.tabs) : int(text[0] - '1')
+		if next < len(s.tabs) && next != cur do tab_switch(a, s.tabs[next].id)
 	case k == .Escape:
 		if at_entry(m) { a.exit = 1; a.done = true } else do menu_back(a)
 	case (k == .Left || k == .Right) && slide(a, k == .Left ? -1 : 1):
@@ -1497,7 +1527,7 @@ compact_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> bool
 	case k == .Up || k == .Back_Tab || ctrl && (ch == 'k' || ch == 'p'): menu_move(a, -1)
 	case k == .Page_Down: menu_move(a, 8)
 	case k == .Page_Up: menu_move(a, -8)
-	case (k == .Enter || text == " ") && m.si < len(m.sel_actions) && s.actions[m.sel_actions[m.si]].chips: slide(a, 1)
+	case (k == .Enter || text == " ") && m.si < len(m.sel_actions) && s.actions[m.sel_actions[m.si]].chips && !s.actions[m.sel_actions[m.si]].actions: slide(a, 1)
 	case k == .Enter || k == .Right || text == " ": menu_run(a)
 	case len(text) == 1 && action_by_key(m, text) >= 0:
 		m.si = action_by_key(m, text)
@@ -1541,6 +1571,28 @@ menu_draw_compact :: proc(a: ^App, cv: ^Canvas, S: int) {
 	y += hh
 	fill_rect(cv, x0, y, x1 - x0, S, sel)
 	y += S
+	if len(s.tabs) > 1 && m.focus == .Sub { // the device tabs, 34 px
+		th := 34 * S
+		tw_ := (x1 - x0) / len(s.tabs)
+		for tb, i in s.tabs {
+			tx := x0 + i * tw_
+			f := tb.active ? m.f_bold12 : m.f_small
+			sf := msize(a, 10, false, S)
+			gw := tw(m.f_small, tb.glyph)
+			total := gw + 8 * S + tw(f, tb.label) + 8 * S + tw(sf, tb.status)
+			cx := tx + (tw_ - total) / 2
+			text_in(cv, m.f_small, tb.glyph, cx, y, th, argb(tone_color(t, tb.glyphc, dim), 0xff))
+			cx += gw + 8 * S
+			text_in(cv, f, tb.label, cx, y, th, argb(tb.active ? t.fg : dim, 0xff))
+			cx += tw(f, tb.label) + 8 * S
+			text_in(cv, sf, tb.status, cx, y, th, argb(tone_color(t, tb.tone, dim), 0xff))
+			if tb.active do fill_rect(cv, tx, y + th - 2 * S, tw_, 2 * S, argb(acc, 0xff))
+			hit_add(a, tx, y, tw_, th, .Tab, i, 0)
+		}
+		y += th
+		fill_rect(cv, x0, y, x1 - x0, S, sel)
+		y += S
+	}
 	// footer: key hints, or what the last action said
 	fh := 30 * S
 	fy := cv.h - B - fh
@@ -1885,6 +1937,11 @@ entry_h :: proc(m: ^Menu, act: Action, S: int, compact := false) -> int {
 	switch act.kind {
 	case .Qr: return 18 * S + 220 * S + 12 * S + int(m.f_bold13.line_h) + 8 * S + 2 * int(m.f_small.line_h) + 12 * S
 	case .Big: return 20 * S + int(m.f_hero.line_h) + 28 * S + 20 * S
+	case .Info:
+		f14 := m.f_bold13
+		top := max(22 * S, int(f14.line_h) + 2 * S + int(m.f_tiny.line_h))
+		rows := (len(act.kvs) + 1) / 2
+		return 6 * S + 10 * S + top + (rows > 0 ? 9 * S + rows * (int(m.f_tiny.line_h) + 4 * S) - 4 * S : 0) + 10 * S + 8 * S
 	case .Hero: return 10 * S + int(m.f_hero.line_h) + 8 * S + 12 * S + 8 * S + int(m.f_small.line_h) + 12 * S
 	case .Row, .Empty, .Day: return 30 * S
 	case .Heading: return 10 * S + int(m.f_tiny.line_h) + 4 * S
@@ -2001,6 +2058,28 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 				draw_text_f(cv, m.f_small, l, px + (x1 - px - tw(m.f_small, l)) / 2, y, argb(dim, 0xff))
 				y += int(m.f_small.line_h)
 			}
+		case .Info: // the connection's block: glyph, name and state, then key · value pairs (a click copies)
+			bx, bw := px + 12 * S, x1 - px - 24 * S
+			by := py + 6 * S
+			fill_rect(cv, bx, by, bw, h - 14 * S, argb(t.selection, 0xff))
+			gf := msize(a, 22, false, S)
+			top := max(22 * S, int(m.f_bold13.line_h) + 2 * S + int(m.f_tiny.line_h))
+			ty := by + 10 * S
+			text_in(cv, gf, act.glyph, bx + 12 * S, ty, top, argb(tone_color(t, act.markc, acc), 0xff))
+			tx := bx + 12 * S + 22 * S + 10 * S
+			tt := ty + (top - int(m.f_bold13.line_h) - 2 * S - int(m.f_tiny.line_h)) / 2
+			draw_text_f(cv, m.f_bold13, ellipsize(m.f_bold13, act.label, bx + bw - 12 * S - tx), tx, tt, argb(fgb, 0xff))
+			draw_text_f(cv, m.f_tiny, act.meta, tx, tt + int(m.f_bold13.line_h) + 2 * S, argb(tone_color(t, act.metac, dim), 0xff))
+			ky := ty + top + 9 * S
+			colw := (bw - 24 * S - 16 * S) / 2
+			for kv, ki in act.kvs {
+				kx := bx + 12 * S + (ki % 2) * (colw + 16 * S)
+				yy := ky + (ki / 2) * (int(m.f_tiny.line_h) + 4 * S)
+				draw_text_f(cv, m.f_tiny, kv[0], kx, yy, argb(dim, 0xff))
+				v := ellipsize(m.f_tiny, kv[1], colw - tw(m.f_tiny, kv[0]) - 8 * S)
+				draw_text_f(cv, m.f_tiny, v, kx + colw - tw(m.f_tiny, v), yy, argb(fg, 0xff))
+				if kv[2] != "" do hit_add(a, kx, yy, colw, int(m.f_tiny.line_h), .Chip, sec_index(m, s), m.shown_actions[e], 1000 + ki)
+			}
 		case .Big: // a code large in a box, centred (Bluetooth pairing)
 			bw := tw(m.f_hero, act.label) + 44 * S
 			bh := int(m.f_hero.line_h) + 28 * S
@@ -2116,7 +2195,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			}
 			if compact && act.chips && len(act.choices) > 0 { // label and its line in 92 px, the choices as chips on the right
 				lf := m.f_body
-				total := int(lf.line_h) + 2 * S + int(m.f_tiny.line_h)
+				total := act.under != "" ? int(lf.line_h) + 2 * S + int(m.f_tiny.line_h) : int(lf.line_h)
 				ty := py + (h - total) / 2
 				draw_text_f(cv, lf, act.label, lx, ty, argb(on ? bg : fgb, 0xff))
 				if act.under != "" do draw_text_f(cv, m.f_tiny, ellipsize(m.f_tiny, act.under, 92 * S), lx, ty + int(lf.line_h) + 2 * S, argb(on ? bg : dim, 0xff))
@@ -2124,15 +2203,18 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 				cb := msize(a, 11, true, S)
 				cx := right
 				#reverse for c, ci in act.choices {
-					cur := c == act.meta
-					f := cur ? cb : cf
+					cur := c == act.meta && !act.actions
+					focus := act.actions && on && c == act.meta // the button ↵ runs
+					danger := act.actions && strings.has_suffix(c, "? ↵")
+					f := cur || focus ? cb : cf
 					w := tw(f, c) + 14 * S
 					cx -= w
 					ch := 24 * S
 					cy := py + (h - ch) / 2
-					fillc, textc, border := u32(0), on ? bg : dim, on ? bg : t.selection
+					fillc, textc, border := u32(0), on ? bg : (act.actions ? (danger ? t.red : fgb) : dim), on ? bg : t.selection
 					if cur do fillc, textc, border = on ? bg : acc, on ? acc : bg, on ? bg : acc
-					rounded_rect(cv, cx, cy, w, ch, 0, fillc != 0 || cur ? argb(fillc, 0xff) : 0, f32(S), argb(border, 0xff))
+					if focus do fillc, textc, border = bg, danger ? t.red : acc, bg
+					rounded_rect(cv, cx, cy, w, ch, 0, fillc != 0 || cur || focus ? argb(fillc, 0xff) : 0, f32(S), argb(border, 0xff))
 					text_in(cv, f, c, cx + 7 * S, cy, ch, argb(textc, 0xff))
 					hit_add(a, cx, cy, w, ch, .Chip, sec_index(m, s), m.shown_actions[e], ci)
 					cx -= 4 * S
@@ -2148,7 +2230,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 				}
 				meta := act.meta
 				if len(act.choices) > 0 do meta = fmt.tprintf("‹ %s ›", act.meta)
-				if meta == "" && act.confirm_title != "" do meta = "asks first"
+				if meta == "" && act.confirm_title != "" && !act.toggle do meta = "asks first"
 				if meta == "" && act.field != "" && on do meta = "copy"
 				if meta != "" {
 					meta = ellipsize(m.f_small, meta, (right - lx) * 55 / 100)
@@ -2767,6 +2849,11 @@ menu_dump :: proc(a: ^App) -> string {
 		s := &m.sections[m.open]
 		desc := section_slow(m, s) ? fmt.tprintf("Still waiting on %s", s.name) : s.desc
 		fmt.sbprintfln(&b, "title %s · %s%s", s.name, desc, is_page(m, m.open) ? (s.pane ? " (pane)" : " (full width)") : "")
+		if len(s.tabs) > 0 {
+			fmt.sbprintf(&b, "tabs")
+			for tb in s.tabs do fmt.sbprintf(&b, " [%s %s]%s", tb.label, tb.status, tb.active ? "*" : "")
+			fmt.sbprintln(&b)
+		}
 		if s.weather {
 			fmt.sbprintfln(&b, "now %s · %s %s %s · %s", s.wx_now[0], s.wx_now[2], s.wx_now[3], s.wx_now[4], s.wx_now[5])
 			day, n := 0, 0
@@ -2788,6 +2875,10 @@ menu_dump :: proc(a: ^App) -> string {
 			case .Hero: fmt.sbprintfln(&b, "## %d%%%s · %s", act.pct, act.active ? " charging" : "", act.meta)
 			case .Qr: fmt.sbprintfln(&b, "[qr] %s · %s", act.label, act.meta)
 			case .Big: fmt.sbprintfln(&b, "[code] %s", act.label)
+			case .Info:
+				fmt.sbprintf(&b, "[info] %s · %s", act.label, act.meta)
+				for kv in act.kvs do fmt.sbprintf(&b, " | %s %s", kv[0], kv[1])
+				fmt.sbprintln(&b)
 			case .Day: fmt.sbprintfln(&b, "%s day %s %s rain %d%% %s–%s", sel ? "*" : " ", act.label, act.glyph, act.pct, act.meta, act.line2)
 			case .Row:
 				meta := act.meta
@@ -3234,7 +3325,7 @@ draw_weather_pane :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, x, y_, xr, 
 // under it, a left click runs it (on a slider's track: sets the level there), a right click
 // goes back, the wheel moves the selection.
 
-Hit_Kind :: enum { Section, Action, Slider, Result, Item, Web, Confirm, Row, Cal, Chip }
+Hit_Kind :: enum { Section, Action, Slider, Result, Item, Web, Confirm, Row, Cal, Chip, Tab }
 Hit :: struct { x, y, w, h: int, kind: Hit_Kind, a, b: int, tx, tw: int }
 
 hit_add :: proc(a: ^App, x, y, w, h: int, kind: Hit_Kind, i, j: int, tx := 0, tw := 0) {
@@ -3297,6 +3388,21 @@ menu_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 	h := hit_at(a, x, y) or_return
 	m.toast = ""
 	if h.kind == .Cal { cal_click(a, h); return true }
+	if h.kind == .Tab { if h.a < len(m.sections[m.open].tabs) do tab_switch(a, m.sections[m.open].tabs[h.a].id); return true }
+	if h.kind == .Chip && h.tx >= 1000 { // a value in an info block
+		act := m.sections[h.a].actions[h.b]
+		if h.tx - 1000 < len(act.kvs) && m.runner.state != .Loading do start_runner(a, act.kvs[h.tx - 1000][2], "", "", "")
+		return true
+	}
+	if h.kind == .Chip && m.sections[h.a].actions[h.b].actions { // an action chip: run it
+		act := &m.sections[h.a].actions[h.b]
+		if h.tx < len(act.choices) {
+			act.meta = act.choices[h.tx]
+			for v, i in m.sel_actions do if v == h.b { m.si = i; break }
+			if m.runner.state != .Loading do execute(a, h.a, h.b, true)
+		}
+		return true
+	}
 	if h.kind == .Chip {
 		act := &m.sections[h.a].actions[h.b]
 		if h.tx < len(act.choices) && act.meta != act.choices[h.tx] {

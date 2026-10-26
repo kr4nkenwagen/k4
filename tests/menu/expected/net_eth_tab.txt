@@ -1,0 +1,14 @@
+focus Sub
+popup 424x524
+crumb NETWORK
+query (Filter options…)
+count 
+hints ↑↓ Move · ← → Choose · ↵ Run · Tab Wi-Fi · y Copy IP · Esc Close
+title Network · Ethernet (full width)
+tabs [Ethernet in use]* [Wi-Fi standby]
+[info] Ethernet · connected · in use | Speed 1 Gb/s | IP 192.168.1.37 | Port enp3s0 | MAC 8C:AE:4C:F2:19:0B
+* DNS | ‹ Cloudflare › (· 1.1.1.1)
+  Use Ethernet | [on]
+  Ethernet | ‹ Renew address ›
+exit 1
+log: load apps

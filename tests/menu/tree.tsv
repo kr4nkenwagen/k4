@@ -14,6 +14,8 @@ P	gcal	Calendar	Google Calendar	cat "$K4_TEST_DIR/calendar.txt"
 P	wifi2	Wi-Fi	Networks	cat "$K4_TEST_DIR/wifi.txt"
 P	bt2	Bluetooth	Devices	cat "$K4_TEST_DIR/bt.txt"
 P	qr	Share	QR	sed "s|\$K4_TEST_DIR|$K4_TEST_DIR|" "$K4_TEST_DIR/qr.txt"
+P	neteth	Network	Ethernet	cat "$K4_TEST_DIR/neteth.txt"
+P	netwifi	Network	Wi-Fi	cat "$K4_TEST_DIR/netwifi.txt"
 P	bat	Battery	Charge and power	printf 'O\twidth=380\nD\t78%% · 3 h 40 min\t78%%\nX\t78\tDischarging · 3 h 40 min left\nA\tdraw\tPower draw\t8.4 W out\t\tstay\nH\tPower profile\nA\tpp\tProfile\tBalanced\t\tchoice=Balanced|Performance|Power saver\n'
 P	ask	Ask	Type a question	printf 'Q\task-q\nD\tType a question\tgemma\tAsk a question…\nN\tEnter sends to gemma\tAnswers open in a terminal.\taccent\nA\tmodel\tModel\tgemma\t\tchoice=gemma|qwen|llama\n'
 S	apps	Apps	A	Integrations first	x

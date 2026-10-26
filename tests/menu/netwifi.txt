@@ -1,0 +1,13 @@
+O	width=424;height=524
+D	Ethernet		
+ST	wired · 1 Gb/s	dim
+TB	neteth	Ethernet	in use	accent	0	󰈀	accent
+TB	netwifi	Wi-Fi	standby	dim	1	󰤨	accent
+A	power	Wi-Fi			stay;toggle=on
+IB	󰤨	accent	Home-5G	connected · standby, Ethernet in use	dim
+KV	Signal	97% · -54 dBm	copy-signal
+KV	IP	192.168.1.42	copy-wip
+A	wacts	This network	Share		choice=Share|Disconnect|Forget;chips;actions
+H	Networks		↻ scanning	accent
+A	telia	Telia-2G3F			stay;mark=󰤥;line2=5 GHz;lock
+Y	↑↓	Move	← →	Choose	↵	Connect	Tab	Ethernet	r	Rescan
