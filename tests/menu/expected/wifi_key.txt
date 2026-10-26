@@ -5,9 +5,11 @@ query (Filter options…)
 count 
 toast Ran  wifi-power
 title Wi-Fi · Home-5G (full width)
-* Wi-Fi | [on]
+* Ethernet | › (mark 󰈀, · connected · 1 Gb/s · standby, Wi-Fi preferred, bold)
+  Wi-Fi | [on]
 == CONNECTED
   Home-5G | › (mark 󰤨, · connected · 5 GHz · 866 Mb/s, lock, bold)
+  DNS | ‹ Cloudflare › (· 1.1.1.1)
 == NETWORKS · ↻ scanning
   Home-2.4G (mark 󰤥, · 2.4 GHz · saved, lock)
   Telia-2G3F (mark 󰤥, · 5 GHz, lock)

@@ -1,11 +1,13 @@
 O	width=424;height=524
 KB	w	wifi-power
 KB	r	wifi-rescan
+A	eth	Ethernet	›		stay;mark=󰈀;markc=accent;bold;labelc=accent;tall;line2=connected · 1 Gb/s · standby, Wi-Fi preferred
 A	wifi-power	Wi-Fi			stay;toggle=on
 D	Home-5G		
 ST	5 GHz · 97%	dim
 H	Connected
 A	cur	Home-5G	›		stay;mark=󰤨;markc=accent;bold;labelc=accent;line2=connected · 5 GHz · 866 Mb/s;lock
+A	dns	DNS	Cloudflare		choice=Default|Google|Cloudflare|Quad9;chips;line2=1.1.1.1
 H	Networks		↻ scanning	accent
 A	home24	Home-2.4G			stay;mark=󰤥;line2=2.4 GHz · saved;lock
 A	telia	Telia-2G3F			stay;mark=󰤥;line2=5 GHz;lock;input=Telia-2G3F needs a password (WPA2).|Saved to NetworkManager, k4 never stores the password itself.|password

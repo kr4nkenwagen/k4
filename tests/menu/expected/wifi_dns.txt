@@ -1,0 +1,23 @@
+focus Sub
+popup 424x524
+crumb NETWORK › WI-FI
+query (Filter options…)
+count 
+toast Ran  dns
+title Wi-Fi · Home-5G (full width)
+  Ethernet | › (mark 󰈀, · connected · 1 Gb/s · standby, Wi-Fi preferred, bold)
+  Wi-Fi | [on]
+== CONNECTED
+  Home-5G | › (mark 󰤨, · connected · 5 GHz · 866 Mb/s, lock, bold)
+* DNS | ‹ Cloudflare › (· 1.1.1.1)
+== NETWORKS · ↻ scanning
+  Home-2.4G (mark 󰤥, · 2.4 GHz · saved, lock)
+  Telia-2G3F (mark 󰤥, · 5 GHz, lock)
+  Elin’s iPhone (mark 󰤨, · 5 GHz · hotspot, lock)
+  Kaffekoppen Guest (mark 󰤢, · 2.4 GHz · sign-in page)
+  eduroam (mark 󰤟, · 5 GHz · 802.1X, lock)
+  Connect to hidden network…
+  Network settings | ⌃↵ launcher
+exit 1
+log: load apps
+log: run dns value=Quad9

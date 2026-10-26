@@ -106,6 +106,7 @@ Action :: struct {
 	// lock, a small battery, a key column (field=)
 	under, underc, labelc, field: string, // under: the second line (flag line2=)
 	bold, lock, tall: bool,
+	chips: bool, // a choice drawn as chips (the popup's DNS row); Enter steps it
 	bat: int, // -1: none
 }
 Item :: struct {
@@ -374,6 +375,7 @@ action_from :: proc(f: []string) -> Action {
 		case flag == "bold": a.bold = true
 		case flag == "lock": a.lock = true
 		case flag == "tall": a.tall = true
+		case flag == "chips": a.chips = true
 		case strings.has_prefix(flag, "choice="):
 			a.stay = true
 			cs := strings.split(flag[7:], "|")
@@ -1495,6 +1497,7 @@ compact_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> bool
 	case k == .Up || k == .Back_Tab || ctrl && (ch == 'k' || ch == 'p'): menu_move(a, -1)
 	case k == .Page_Down: menu_move(a, 8)
 	case k == .Page_Up: menu_move(a, -8)
+	case (k == .Enter || text == " ") && m.si < len(m.sel_actions) && s.actions[m.sel_actions[m.si]].chips: slide(a, 1)
 	case k == .Enter || k == .Right || text == " ": menu_run(a)
 	case len(text) == 1 && action_by_key(m, text) >= 0:
 		m.si = action_by_key(m, text)
@@ -1873,6 +1876,7 @@ tone_color :: proc(t: logic.Theme, tone: string, def: u32) -> u32 {
 @(private)
 entry_h :: proc(m: ^Menu, act: Action, S: int, compact := false) -> int {
 	if compact && act.kind == .Row && act.slider do return 34 * S
+	if compact && act.kind == .Row && act.chips do return 40 * S
 	if compact && act.kind == .Row && act.under != "" do return (act.tall ? 40 : 34) * S
 	if compact && act.kind == .Notice { // the popup's card: its text wrapped
 		n := len(wrap_text(m.f_small, act.meta, (COMPACT_W - 56) * S))
@@ -2108,6 +2112,31 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 				if act.value > 100 do fill_rect(cv, tx + tw_ * 100 / vm, ty, tw_ * (min(act.value, vm) - 100) / vm, 4 * S, argb(t.red, 0xff))
 				if vm > 100 do fill_rect(cv, tx + tw_ * 100 / vm, ty - 4 * S, S, 12 * S, argb(on ? bg : dim, 0xff))
 				hit_add(a, tx - 4 * S, py, tw_ + 8 * S, sh, .Slider, sec_index(m, s), m.shown_actions[e], tx, tw_)
+				break
+			}
+			if compact && act.chips && len(act.choices) > 0 { // label and its line in 92 px, the choices as chips on the right
+				lf := m.f_body
+				total := int(lf.line_h) + 2 * S + int(m.f_tiny.line_h)
+				ty := py + (h - total) / 2
+				draw_text_f(cv, lf, act.label, lx, ty, argb(on ? bg : fgb, 0xff))
+				if act.under != "" do draw_text_f(cv, m.f_tiny, ellipsize(m.f_tiny, act.under, 92 * S), lx, ty + int(lf.line_h) + 2 * S, argb(on ? bg : dim, 0xff))
+				cf := msize(a, 11, false, S)
+				cb := msize(a, 11, true, S)
+				cx := right
+				#reverse for c, ci in act.choices {
+					cur := c == act.meta
+					f := cur ? cb : cf
+					w := tw(f, c) + 14 * S
+					cx -= w
+					ch := 24 * S
+					cy := py + (h - ch) / 2
+					fillc, textc, border := u32(0), on ? bg : dim, on ? bg : t.selection
+					if cur do fillc, textc, border = on ? bg : acc, on ? acc : bg, on ? bg : acc
+					rounded_rect(cv, cx, cy, w, ch, 0, fillc != 0 || cur ? argb(fillc, 0xff) : 0, f32(S), argb(border, 0xff))
+					text_in(cv, f, c, cx + 7 * S, cy, ch, argb(textc, 0xff))
+					hit_add(a, cx, cy, w, ch, .Chip, sec_index(m, s), m.shown_actions[e], ci)
+					cx -= 4 * S
+				}
 				break
 			}
 			if compact && !act.slider { // the popup's row: a switch, a lock, the meta, a battery; one or two lines
@@ -3205,7 +3234,7 @@ draw_weather_pane :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, x, y_, xr, 
 // under it, a left click runs it (on a slider's track: sets the level there), a right click
 // goes back, the wheel moves the selection.
 
-Hit_Kind :: enum { Section, Action, Slider, Result, Item, Web, Confirm, Row, Cal }
+Hit_Kind :: enum { Section, Action, Slider, Result, Item, Web, Confirm, Row, Cal, Chip }
 Hit :: struct { x, y, w, h: int, kind: Hit_Kind, a, b: int, tx, tw: int }
 
 hit_add :: proc(a: ^App, x, y, w, h: int, kind: Hit_Kind, i, j: int, tx := 0, tw := 0) {
@@ -3268,6 +3297,15 @@ menu_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 	h := hit_at(a, x, y) or_return
 	m.toast = ""
 	if h.kind == .Cal { cal_click(a, h); return true }
+	if h.kind == .Chip {
+		act := &m.sections[h.a].actions[h.b]
+		if h.tx < len(act.choices) && act.meta != act.choices[h.tx] {
+			act.meta = act.choices[h.tx]
+			for v, i in m.sel_actions do if v == h.b { m.si = i; break }
+			if m.runner.state == .Loading { m.slide_pending, m.slide_sec, m.slide_act = true, h.a, h.b } else do execute(a, h.a, h.b, true)
+		}
+		return true
+	}
 	#partial switch h.kind {
 	case .Section:
 		menu_enter(a, h.a)
