@@ -7,6 +7,7 @@ import "core:strconv"
 import "core:strings"
 import "core:sys/linux"
 import "core:unicode/utf8"
+import "logic"
 
 // --overview: every workspace at once (the Kestrel design's Overview, Super+Tab). A
 // fullscreen layer on the focused output, clear of the bar, dims the desktop; the window is
@@ -246,15 +247,21 @@ ov_key :: proc(a: ^App, k: Key, ctrl, shift: bool, ch: rune, text: string) -> bo
 
 // ---------- drawing ----------
 
-// The overview's own palette (the HUD design): near-black, a neon accent, hot pink alarms.
-HUD :: struct { bg, panel, screen, fg, dim, faint, line, acc, hot, ok, card, card_sel, win: u32 }
-hud :: proc() -> HUD {
-	acc: u32 = 0x3DF5FF
+// The HUD design's palette, taken from the theme: its background darkened for the window, the
+// accent for everything lit, red for alarms, green for the link; lines and panels are the
+// background mixed toward the accent and the foreground. K4_OVERVIEW_ACCENT=#RRGGBB overrides
+// the accent.
+HUD :: struct { bg, panel, screen, fg, dim, faint, line, acc, hot, ok, card, card_sel, win, hint, meter: u32 }
+hud :: proc(t: logic.Theme) -> HUD {
+	acc := t.accent
 	if v := os.get_env("K4_OVERVIEW_ACCENT", context.temp_allocator); len(v) == 7 && v[0] == '#' {
 		if n, ok := strconv.parse_u64_of_base(v[1:], 16); ok do acc = u32(n)
 	}
-	return {bg = 0x04070C, panel = 0x07101A, screen = 0x030A11, fg = 0xD6F7FF, dim = 0x5E8A96, faint = 0x2A4650, line = 0x123039,
-		acc = acc, hot = 0xFF3D7F, ok = 0x3DFF9E, card = 0x050B12, card_sel = 0x06121B, win = 0x0A161F}
+	bg := mix(t.bg, 0, 0.35)
+	return {bg = bg, panel = mix(bg, t.fg, 0.04), screen = mix(t.bg, 0, 0.5), fg = t.fg_bright, dim = t.fg_dim,
+		faint = mix(bg, t.fg_dim, 0.45), line = mix(bg, acc, 0.16), acc = acc, hot = t.red, ok = t.green,
+		card = mix(bg, t.fg, 0.015), card_sel = mix(bg, acc, 0.07), win = mix(bg, t.fg, 0.05),
+		hint = mix(t.fg_dim, bg, 0.35), meter = mix(bg, acc, 0.1)}
 }
 
 // Text with letter spacing (the HUD's tracked capitals), and its width.
@@ -351,7 +358,7 @@ ov_mini :: proc(a: ^App, cv: ^Canvas, S, mx, my, MW, MH: int, wi: Prev_Win, on, 
 
 ov_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	o := a.ov
-	H := hud()
+	H := hud(a.theme)
 	canvas_clear(cv)
 	fill_rect(cv, 0, 0, cv.w, cv.h, argb(0x02060A, 0xb8)) // the dimmed desktop
 	w := min(OV_W * S, cv.w - 40 * S)
@@ -411,7 +418,7 @@ ov_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	qx := bx + 12 * S + tw(o.f16b, "›") + 10 * S
 	qclip := bx + bw - 24 * S - cw
 	qt := string(a.query[:])
-	if qt == "" do text_in(cv, o.f15, "query windows · 1–9 jump · arrows navigate", qx, by, bh, argb(0x3F6873, 0xff), qclip)
+	if qt == "" do text_in(cv, o.f15, "query windows · 1–9 jump · arrows navigate", qx, by, bh, argb(H.hint, 0xff), qclip)
 	else do text_in(cv, o.f15, qt, qx, by, bh, argb(H.fg, 0xff), qclip)
 	qs := shape(o.f15, qt)
 	cp := utf8.rune_count_in_string(string(a.query[:a.cursor]))
@@ -502,7 +509,7 @@ ov_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		for i in 0 ..< 8 {
 			sxx := cx + 12 * S + i * (segw + 3 * S)
 			lit := i < n
-			sc2 := lit ? (ws.urgent ? H.hot : (on || ws.focused ? H.acc : H.dim)) : 0x0E2129
+			sc2 := lit ? (ws.urgent ? H.hot : (on || ws.focused ? H.acc : H.dim)) : H.meter
 			if lit && (on || ws.focused) do fill_rect(cv, sxx - S, my0 - S, segw + 2 * S, 5 * S, argb(sc2, 0x40))
 			fill_rect(cv, sxx, my0, segw, 3 * S, argb(sc2, 0xff))
 		}
