@@ -1,0 +1,14 @@
+focus Sub
+crumb KESTREL › TOGGLE
+query (Search Toggle…)
+count 4 actions
+toast Ran  firefox
+title Toggle · Flip things
+  Waybar | [on]
+  Mute output | off [off]
+  Night light | [off]
+* Firefox | 130% [off] (mark 󰕾)
+exit 1
+log: load apps
+log: run firefox value=125
+log: run firefox value=130

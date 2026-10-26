@@ -89,6 +89,7 @@ Action :: struct {
 	stay, app: bool,
 	slider: bool,
 	value, step: int,
+	vmax: int, // slider top (default 100; app streams go to 150)
 	jump: string,
 	confirm_title, confirm_body: string,
 	input: bool, input_password: bool,
@@ -282,7 +283,9 @@ action_from :: proc(f: []string) -> Action {
 		case flag == "app": a.app = true
 		case strings.has_prefix(flag, "slider="):
 			a.slider, a.stay = true, true
-			if v, ok := strconv.parse_int(flag[7:]); ok do a.value = clamp(v, 0, 100)
+			if v, ok := strconv.parse_int(flag[7:]); ok do a.value = max(v, 0)
+		case strings.has_prefix(flag, "max="):
+			if v, ok := strconv.parse_int(flag[4:]); ok do a.vmax = max(v, 1)
 		case strings.has_prefix(flag, "step="):
 			if v, ok := strconv.parse_int(flag[5:]); ok do a.step = v
 		case strings.has_prefix(flag, "jump="): a.jump = strings.clone(flag[5:])
@@ -315,6 +318,10 @@ action_from :: proc(f: []string) -> Action {
 			a.confirm_title = strings.clone(bar >= 0 ? t[:bar] : t)
 			if bar >= 0 do a.confirm_body = strings.clone(t[bar + 1:])
 		}
+	}
+	if a.slider {
+		if a.vmax == 0 do a.vmax = 100
+		a.value = min(a.value, a.vmax)
 	}
 	return a
 }
@@ -446,7 +453,7 @@ menu_on_readable :: proc(a: ^App, fd: linux.Fd) -> bool {
 		m.runner = {}
 		if m.slide_pending {
 			m.slide_pending = false
-			execute(a, m.slide_sec, m.slide_act)
+			execute(a, m.slide_sec, m.slide_act, true)
 			return true
 		}
 		app_load_style(a, false) // a theme or font change shows up in the menu itself
@@ -717,6 +724,9 @@ draw_switch :: proc(a: ^App, cv: ^Canvas, S, x_right, y, h: int, on, sel: bool) 
 	return w
 }
 
+// (slider rows with toggle=: Enter/Space mute, ← → set the level; the script dims them and
+// sets their mark while muted)
+
 // A row flagged "current" is selected when its section or page opens.
 @(private)
 select_current_action :: proc(m: ^Menu) {
@@ -924,7 +934,7 @@ run_action :: proc(a: ^App, sec, idx: int) {
 // Runs the action: "stay" ones in the background through R (the menu stays open and
 // reloads), the rest by printing the id and closing.
 @(private)
-execute :: proc(a: ^App, sec, idx: int) {
+execute :: proc(a: ^App, sec, idx: int, level := false) { // level: ← → moved a slider or stepper
 	m := a.menu
 	act := m.sections[sec].actions[idx]
 	if act.id == "k4:retry" {
@@ -937,7 +947,7 @@ execute :: proc(a: ^App, sec, idx: int) {
 	}
 	if !act.stay || m.run_cmd == "" { finish(a, act.id); return }
 	if act.input { enter_input(a, act.id, act.label, act.input_prompt, act.input_hint, act.input_password); return }
-	if act.toggle {
+	if act.toggle && !level {
 		// the switch flips now; the section's reload shows the real state
 		if m.runner.state == .Loading { m.toast = "Still running the last action…"; return }
 		m.sections[sec].actions[idx].on = !act.on
@@ -1012,7 +1022,7 @@ slide :: proc(a: ^App, d: int) -> bool {
 	} else {
 		if !act.slider do return false
 		step := act.step > 0 ? act.step : 5
-		nv := clamp(act.value + d * step, 0, 100)
+		nv := clamp(act.value + d * step, 0, act.vmax > 0 ? act.vmax : 100)
 		if nv == act.value do return true
 		act.value = nv
 	}
@@ -1020,7 +1030,7 @@ slide :: proc(a: ^App, d: int) -> bool {
 		m.slide_pending, m.slide_sec, m.slide_act = true, sec, idx
 		m.toast = len(act.choices) > 0 ? fmt.aprintf("%s  %s", act.label, act.meta) : fmt.aprintf("%s  %d%%", act.label, act.value)
 	} else {
-		execute(a, sec, idx)
+		execute(a, sec, idx, true)
 	}
 	return true
 }
@@ -1380,6 +1390,7 @@ menu_hints :: proc(a: ^App, sc: bool) -> (hints: [][2]string) {
 	case m.focus == .View && view_alt_label(m) != "": hints = {{"←→↑↓", "Move"}, {"↵", "Launch"}, {"Tab", view_alt_label(m)}, {"⌫", "Back"}}
 	case srch: hints = {{"↑↓", "Move"}, {"↵", "Run"}, {"Esc", "Shortcuts"}}
 	case m.focus == .Menu: hints = {{"↑↓", "Move"}, {"→ ↵", "Open"}, {"type", "Search all"}, {"Esc", "Shortcuts"}}
+	case m.focus == .Sub && on_slider(m) && m.sections[m.open].actions[m.sel_actions[m.si]].toggle: hints = {{"↑↓", "Move"}, {"← →", "Adjust"}, {"↵ ␣", "Mute"}, {"⌫", "Back"}}
 	case m.focus == .Sub && on_slider(m): hints = {{"↑↓", "Move"}, {"← →", "Adjust"}, {"⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
 	case m.focus == .Sub: hints = {{"↑↓", "Move"}, {"↵ ␣", "Run / toggle"}, {"← ⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
 	case m.focus == .Web: hints = {{"↑↓", "Bang"}, {"↵", "Open in browser"}, {"⌫", "Exit mode"}}
@@ -1656,7 +1667,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			lx := mx + 16 * S + 12 * S
 			right := x1 - 20 * S
 			if act.slider {
-				sw := draw_slider(a, cv, S, act.value, right, py, ah, on)
+				sw := draw_slider(a, cv, S, act.value, right, py, ah, on, act.vmax, act.dim)
 				text_in(cv, m.f_body, act.label, lx, py, ah, argb(lc, 0xff), right - sw - 12 * S)
 				break
 			}
@@ -1701,7 +1712,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 // The design's slider: a 120 px track with the accent fill, then the value (36 px, right-aligned).
 // Right-aligned at x_right; returns its width.
 @(private)
-draw_slider :: proc(a: ^App, cv: ^Canvas, S, value, x_right, y, h: int, on: bool) -> int {
+draw_slider :: proc(a: ^App, cv: ^Canvas, S, value, x_right, y, h: int, on: bool, vmax := 100, dim := false) -> int {
 	m := a.menu
 	t := a.theme
 	tw_, th := 120 * S, 4 * S
@@ -1710,9 +1721,12 @@ draw_slider :: proc(a: ^App, cv: ^Canvas, S, value, x_right, y, h: int, on: bool
 	x := x_right - w
 	cy := y + (h - th) / 2
 	track, fill, txt := argb(mix(t.bg, t.fg, 0.18), 0xff), argb(t.accent, 0xff), argb(t.fg, 0xff)
+	if dim do fill, txt = argb(mix(t.bg, t.fg, 0.35), 0xff), argb(t.fg_dim, 0xff) // muted
 	if on do track, fill, txt = argb(mix(t.accent, t.bg, 0.45), 0xff), argb(t.bg, 0xff), argb(t.bg, 0xff)
 	rounded_rect(cv, x, cy, tw_, th, f32(2 * S), track)
-	if value > 0 do rounded_rect(cv, x, cy, max(tw_ * value / 100, th), th, f32(2 * S), fill)
+	vm := max(vmax, 1)
+	if value > 0 do rounded_rect(cv, x, cy, max(tw_ * min(value, vm) / vm, th), th, f32(2 * S), fill)
+	if vm > 100 && !on do fill_rect(cv, x + tw_ * 100 / vm, cy - S, S, th + 2 * S, argb(mix(t.bg, t.fg, 0.45), 0xff)) // the 100% mark
 	pct := fmt.tprintf("%d%%", value)
 	text_in(cv, m.f_small, pct, x_right - tw(m.f_small, pct), y, h, txt)
 	return w
@@ -1753,7 +1767,7 @@ draw_results :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		text_in(cv, m.f_tiny, tag, x1 - 20 * S - tw(m.f_tiny, tag), py, rh, argb(tc, 0xff))
 		if r.act >= 0 && sec.actions[r.act].slider {
 			meta = ""
-			sw := draw_slider(a, cv, S, sec.actions[r.act].value, tag_x - 12 * S, py, rh, on)
+			sw := draw_slider(a, cv, S, sec.actions[r.act].value, tag_x - 12 * S, py, rh, on, sec.actions[r.act].vmax, sec.actions[r.act].dim)
 			text_in(cv, m.f_row, label, x, py, rh, argb(lc, 0xff), tag_x - 24 * S - sw)
 			py += rh
 			continue

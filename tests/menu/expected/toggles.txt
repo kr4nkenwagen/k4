@@ -1,11 +1,12 @@
 focus Sub
 crumb KESTREL › TOGGLE
 query (Search Toggle…)
-count 3 actions
+count 4 actions
 hints ↑↓ Move · ↵ ␣ Run / toggle · ← ⌫ Back · ⌃J ⌃K Vim
 title Toggle · Flip things
 * Waybar | [on]
   Mute output | off [off]
   Night light | [off]
+  Firefox | 120% [off] (mark 󰕾)
 exit 1
 log: load apps

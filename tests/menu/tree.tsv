@@ -27,6 +27,7 @@ S	tog	Toggle	T	Flip things	x
 A	waybar	Waybar			toggle=on
 A	mute	Mute output	off		toggle=off
 A	night	Night light			toggle=off
+A	firefox	Firefox			slider=120;max=150;step=5;toggle=off;mark=󰕾
 S	docker	Docker	X	Containers	x	dim;group=Not installed
 N	Docker isn't installed	Install it to manage containers.	muted
 A	install	Install Docker	opens terminal
