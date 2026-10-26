@@ -371,5 +371,12 @@ app_pointer_scroll :: proc(a: ^App, n: int) -> bool {
 // from the last row, card or tile to this one); the last one drawn wins.
 mark_sel :: proc(a: ^App, x, y, w, h: int) { a.sel = {x, y, w, h} }
 
-// The cursor the shaders get: the selection when there is one, else the text caret.
-shader_cursor :: proc(a: ^App) -> [4]int { return a.sel.z > 0 ? a.sel : a.caret }
+// The cursor the shaders get: the selection when there is one, else the text caret. A big
+// selection (an overview card, a tall tile) gives only a small mark at its top-left, so the
+// smear between them is a thin band; rows keep their whole highlight.
+shader_cursor :: proc(a: ^App) -> [4]int {
+	if a.sel.z <= 0 do return a.caret
+	S := max(a.scale, 1)
+	if a.sel.w > 60 * S do return {a.sel.x, a.sel.y + 8 * S, 3 * S, min(a.sel.w, 24 * S)} // a small mark at the top-left
+	return a.sel
+}
