@@ -201,6 +201,7 @@ main :: proc() {
 		if a.menu != nil && !wait { time.sleep(time.Duration(clamp(a.menu.slow_ms, 0, 2000) + 50) * time.Millisecond); menu_on_tick(a) }
 		if a.menu == nil && a.bar == nil && a.osd == nil do app_move(a, opts.select)
 		if a.menu != nil do a.width, a.height = menu_size(a)
+		if a.bar != nil { bar_tick(a); a.height = a.bar.want_h } // a tooltip or the preview grows it
 		s := opts.scale
 		a.scale = s
 		if s != 1 {

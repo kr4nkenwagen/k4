@@ -85,7 +85,10 @@ Bar :: struct {
 	hover, hover_ws: int, // module and workspace under the pointer, -1
 	hover_at: time.Tick, // when the pointer came to that module
 	tip: int, // module whose tooltip is up, -1
-	want_h: int, // surface height: the strip, plus room for a tooltip while one is up
+	want_h: int, // surface height: the strip, plus room for a tooltip or the preview while up
+	want_region: [4]int, // the preview card's rect (logical; zero: none), for the input region
+	prev: Prev, // the workspace preview (wspreview.odin)
+	ws_x: [dynamic]int, // each workspace cell's left edge as last drawn (logical)
 	f_text, f_bold: ^Font,
 	width: int, // logical width of the output strip (from configure)
 }
@@ -94,6 +97,7 @@ bar_setup :: proc(a: ^App, data: string) {
 	b := new(Bar)
 	a.bar = b
 	b.height, b.hover, b.hover_ws, b.tip = 26, -1, -1, -1
+	b.prev.ws, b.prev.cand, b.prev.row = -1, -1, -1
 	b.ipc_q, b.ipc_ev = -1, -1
 	text := data
 	get :: proc(f: []string, i: int) -> string { return i < len(f) && f[i] != "-" ? f[i] : "" }
@@ -281,7 +285,16 @@ bar_tick :: proc(a: ^App) -> int {
 		if time.tick_diff(now, at) <= 0 do b.tip = b.hover
 		else do wait = min(wait, until(now, at))
 	}
+	if pw := prev_tick(a); pw >= 0 do wait = min(wait, pw)
+	if b.prev.ws >= 0 do b.tip = -1 // never two at once
 	b.want_h = b.tip >= 0 ? b.height + TIP_ROOM : b.height
+	b.want_region = {}
+	if b.prev.ws >= 0 {
+		b.want_h = b.height + 4 + prev_h(&b.prev)
+		px := 0
+		if b.prev.ws < len(b.ws_x) do px = clamp(b.ws_x[b.prev.ws], 8, max(b.width - 8 - PREV_W, 8))
+		b.want_region = {px, b.bottom ? 0 : b.height + 4, PREV_W, prev_h(&b.prev)}
+	}
 	for &m in b.mods {
 		if m.clicking {
 			if st, err := os.process_wait(m.click, 0); err == nil && st.exited do m.clicking = false
@@ -594,6 +607,10 @@ bar_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	strip := Canvas{cv.px[oy * cv.w:], cv.w, sh}
 	bar_draw_strip(a, &strip, S)
 	if oy > 0 do for &h in a.hits do h.y += oy
+	if b.prev.ws >= 0 && b.prev.ws < len(b.ws_x) && cv.h >= sh + (4 + prev_h(&b.prev)) * S {
+		y0 := b.bottom ? oy - (4 + prev_h(&b.prev)) * S : sh + 4 * S
+		prev_draw(a, cv, S, b.ws_x[b.prev.ws] * S, y0)
+	}
 	// the tooltip: under the module (above it at the bottom), kept 8 px from the edges
 	if b.tip >= 0 && b.tip < len(b.mods) && cv.h > sh {
 		m := &b.mods[b.tip]
@@ -673,6 +690,7 @@ bar_draw_strip :: proc(a: ^App, cv: ^Canvas, S: int) {
 		hit_add(a, x, 0, w, cv.h, .Row, i, -1)
 		if m.kind != .Workspaces { chip_draw(a, cv, chips[i], x, w, cv.h, S); return }
 		xx := x
+		clear(&b.ws_x)
 		for ws, k in wss {
 			cw := ws_cell_w(b, ws, S)
 			label, _ := ws_label(ws)
@@ -687,6 +705,7 @@ bar_draw_strip :: proc(a: ^App, cv: ^Canvas, S: int) {
 			}
 			if ws.visible && !ws.focused && !ws.urgent && b.hover == i && b.hover_ws == k do c = t.accent
 			hit_add(a, xx, 0, cw, cv.h, .Row, i, k)
+			append(&b.ws_x, xx / S)
 			text_in(cv, f, label, xx + (cw - tw(f, label)) / 2, 0, cv.h, argb(c, 0xff))
 			xx += cw + 2 * S
 		}
@@ -707,8 +726,19 @@ bar_draw_strip :: proc(a: ^App, cv: ^Canvas, S: int) {
 bar_pointer_move :: proc(a: ^App, x, y: int) -> bool {
 	b := a.bar
 	h, ok := hit_at(a, x, y)
+	if ok && (h.kind == .Item || h.kind == .Web) { // on the preview card: keep it, follow the rows
+		row := h.kind == .Item ? h.a : -1
+		if row == b.prev.row do return false
+		b.prev.row = row
+		return true
+	}
+	changed := false
+	if ok && h.a >= 0 && h.a < len(b.mods) && b.mods[h.a].kind == .Workspaces && h.b >= 0 do changed = prev_pointer(a, h.b, false)
+	else do changed = prev_pointer(a, -1, false)
+	b.prev.row = -1
+	if changed do bar_tick(a)
 	nh, nw := ok ? h.a : -1, ok ? h.b : -1
-	if nh == b.hover && nw == b.hover_ws do return false
+	if nh == b.hover && nw == b.hover_ws do return changed
 	if nh != b.hover do b.hover_at = time.tick_now()
 	b.hover, b.hover_ws = nh, nw
 	bar_tick(a) // a tooltip goes at once
@@ -719,6 +749,8 @@ bar_pointer_move :: proc(a: ^App, x, y: int) -> bool {
 bar_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 	b := a.bar
 	h := hit_at(a, x, y) or_return
+	if h.kind == .Item { if button == 1 do prev_click(a, h.a); return true }
+	if h.kind == .Web do return false
 	m := &b.mods[h.a]
 	if m.kind == .Workspaces && button == 1 {
 		wss := bar_workspaces(b)
@@ -802,6 +834,7 @@ bar_dump :: proc(a: ^App) -> string {
 		}
 		fmt.sbprintln(&sb)
 	}
+	prev_dump(a, &sb)
 	return strings.to_string(sb)
 }
 

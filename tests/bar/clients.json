@@ -1,0 +1,3 @@
+[{"address":"0xa","class":"com.mitchellh.ghostty","title":"~/dots — fish","workspace":{"id":2,"name":"2:web"},"at":[0,26],"size":[960,1054],"floating":false,"hidden":false,"fullscreen":0,"focusHistoryID":1,"grouped":[]},
+ {"address":"0xb","class":"firefox","title":"Sway — ArchWiki","workspace":{"id":2,"name":"2:web"},"at":[960,26],"size":[960,1054],"floating":false,"hidden":false,"fullscreen":0,"focusHistoryID":0,"grouped":[]},
+ {"address":"0xc","class":"chrome-discord.com__channels_@me-Default","title":"Discord","workspace":{"id":2,"name":"2:web"},"at":[600,300],"size":[700,500],"floating":true,"hidden":false,"fullscreen":0,"focusHistoryID":2,"grouped":[]}]

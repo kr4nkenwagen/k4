@@ -58,7 +58,8 @@ focused an accent block, visible elsewhere outlined, urgent red), the focused wi
 format, middle click shows UTC; with `next=FILE` a meeting replaces the date 10 minutes before
 and while it runs), and commands that print plain text or Waybar's JSON plus k4's
 `icon`, `text2`, tones, a `level` bar and a `battery` glyph. Hover fills the module and shows its
-tooltip after 500 ms; a left click's command is watched, so the module stays an accent block
+tooltip after 500 ms; 300 ms on a workspace shows a preview of its windows (a miniature in their
+real places and a row per window; a click jumps to one, `src/wspreview.odin`); a left click's command is watched, so the module stays an accent block
 while its popup is up. Clicks and the wheel get `K4_BAR_X`, `K4_BAR_MX`, `K4_BAR_MW`,
 `K4_BAR_SIDE`, `K4_BAR_WIDTH`, `K4_BAR_OUTPUT`, `K4_BAR_POS` and `K4_BAR_H`.
 

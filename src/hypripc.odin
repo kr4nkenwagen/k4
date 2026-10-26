@@ -86,3 +86,10 @@ hypr_focus_workspace :: proc(name: string) {
 	if lua do hypr_request(strings.concatenate({"dispatch hl.dsp.focus({ workspace = \"", name, "\" })"}, context.temp_allocator))
 	else do hypr_request(fmt.tprintf("dispatch workspace %s", name))
 }
+
+// Focus a window by address (Lua dispatch on Omarchy's Hyprland, the old syntax otherwise).
+hypr_focus_window :: proc(addr: string) {
+	lua := os.exists(strings.concatenate({os.get_env("HOME", context.temp_allocator), "/.config/hypr/hyprland.lua"}, context.temp_allocator))
+	if lua do hypr_request(strings.concatenate({"dispatch hl.dsp.focus({ window = \"address:", addr, "\" })"}, context.temp_allocator))
+	else do hypr_request(strings.concatenate({"dispatch focuswindow address:", addr}, context.temp_allocator))
+}

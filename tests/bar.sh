@@ -35,5 +35,9 @@ printf '%d\t%d\tStandup\t\n' $((now - 60)) $((now + 600)) > "$tmp/now.tsv"
 clock() { printf 'M\tclk\tcenter\tclock\tT1;D1\t0\t-\t-\t-\t-\t-\t-\tnext=%s\n' "$1" | "$K4" --bar --dump -w 1000 2>&1 | sed -n 2p; }
 check "clock: a meeting within 10 min" "center: [T1 · Review in 5 min]" "$(clock "$tmp/soon.tsv")"
 check "clock: a meeting now" "center: [T1 · Standup · now]" "$(clock "$tmp/now.tsv")"
+# hovering a workspace: the preview of its windows (K4_BAR_CLIENTS / K4_BAR_MONITORS stand in for Hyprland)
+prev=$(K4_BAR_CLIENTS=clients.json K4_BAR_MONITORS=monitors.json run2 --keys "<move:50,13>" | grep '^preview')
+check "workspace preview: its windows, focused and floating marked, web apps named" "preview 2 web · eDP-1: [>_ ghostty] [Fi firefox focused] [Di discord float]" "$prev"
+check "no preview off the workspaces" "" "$(K4_BAR_CLIENTS=clients.json K4_BAR_MONITORS=monitors.json run2 --keys "<move:50,13><move:900,13>" | grep '^preview')"
 echo "bar tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

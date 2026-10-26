@@ -54,6 +54,7 @@ Wl :: struct {
 	repeat_at:  time.Tick,
 	cpu:        []u32, // GPU path: the CPU frame before the shaders
 	bar_h:      int,   // the bar's requested surface height (it grows for a tooltip)
+	bar_region: [4]int, // the preview card in the input region as last set
 	// the menu's click catcher: a transparent surface under it over the rest of the output
 	// (clear of the bar's exclusive zone): a click there closes k4
 	catcher:    ^wl.surface,
@@ -394,10 +395,11 @@ redraw :: proc() {
 // The bar grows for a tooltip and shrinks after: the exclusive zone and the input region stay
 // the strip, so windows keep their place and clicks under the tooltip reach them.
 bar_resize :: proc(b: ^Bar) {
-	W.bar_h = b.want_h
+	W.bar_h, W.bar_region = b.want_h, b.want_region
 	wlr.layer_surface_v1_set_size(W.layer, 0, u32(b.want_h))
 	r := wl.compositor_create_region(W.compositor)
 	wl.region_add(r, 0, b.bottom ? b.want_h - b.height : 0, 1 << 20, b.height)
+	if b.want_region[2] > 0 do wl.region_add(r, b.want_region[0], b.want_region[1], b.want_region[2], b.want_region[3]) // the preview takes clicks
 	wl.surface_set_input_region(W.surface, r)
 	wl.region_destroy(r)
 	wl.surface_commit(W.surface)
@@ -590,7 +592,7 @@ run_wayland :: proc(a: ^App) -> bool {
 			handle_keycode(W.repeat_key)
 			W.repeat_at = time.tick_add(time.tick_now(), time.Second / time.Duration(max(W.repeat_rate, 1)))
 		}
-		if a.bar != nil && a.bar.want_h != W.bar_h && W.configured do bar_resize(a.bar)
+		if a.bar != nil && (a.bar.want_h != W.bar_h || a.bar.want_region != W.bar_region) && W.configured do bar_resize(a.bar)
 		if a.menu != nil && W.configured {
 			w, h := menu_size(a)
 			if w != a.width || h != a.height { a.width, a.height = w, h; menu_resize(a) }
