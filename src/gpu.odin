@@ -68,6 +68,12 @@ shader_paths :: proc() -> [dynamic]string {
 	out := make([dynamic]string)
 	env := os.get_env("K4_SHADERS", context.temp_allocator)
 	if env == "off" do return out
+	if env == "list" { // print what Ghostty's config gives, for checking
+		home := os.get_env("HOME", context.temp_allocator)
+		ghostty_shaders(strings.concatenate({home, "/.config/ghostty/config"}, context.temp_allocator), &out, 0)
+		for p in out do fmt.eprintln(p)
+		return out
+	}
 	if env != "" {
 		for p in strings.split(env, ":", context.temp_allocator) do if p != "" do append(&out, strings.clone(p))
 		return out
@@ -90,8 +96,8 @@ ghostty_shaders :: proc(path: string, out: ^[dynamic]string, depth: int) {
 		if len(l) == 0 || l[0] == '#' do continue
 		eq := strings.index_byte(l, '=')
 		if eq < 0 do continue
-		key, val := strings.trim_space(l[:eq]), strings.trim(strings.trim_space(l[eq + 1:]), "\"")
-		val = strings.trim_prefix(val, "?") // ?path: optional include
+		key, val := strings.trim_space(l[:eq]), strings.trim_space(l[eq + 1:])
+		val = strings.trim(strings.trim_prefix(val, "?"), "\"") // ?"path": an optional include (the ? comes before the quotes)
 		if strings.has_prefix(val, "~/") do val = strings.concatenate({os.get_env("HOME", context.temp_allocator), val[1:]}, context.temp_allocator)
 		else if len(val) > 0 && val[0] != '/' do val = strings.concatenate({dir, "/", val}, context.temp_allocator)
 		switch key {

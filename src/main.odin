@@ -46,7 +46,7 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --scale N               dry runs: buffer scale
 
 Ghostty's custom shaders (the custom-shader lines of ~/.config/ghostty/config and the files
-it includes) run over k4's frame on the GPU; K4_SHADERS=off draws without them, K4_SHADERS=
+it includes) run over k4's frame on the GPU; K4_SHADERS=off draws without them, =list prints them, K4_SHADERS=
 a.glsl:b.glsl picks others. Dry runs apply them with K4_DRY_SHADERS=1 (K4_DRY_TIME=seconds).
 
 Exit status: 0 with the choice on stdout, 1 when cancelled.
