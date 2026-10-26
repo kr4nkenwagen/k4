@@ -84,6 +84,7 @@ Bar :: struct {
 	ev_buf: [dynamic]u8,
 	hover, hover_ws: int, // module and workspace under the pointer, -1
 	hover_at: time.Tick, // when the pointer came to that module
+	tip_off: int, // the module last clicked: no tooltip on it until the pointer leaves it
 	tip: int, // module whose tooltip is up, -1
 	want_h: int, // surface height: the strip, plus room for a tooltip or the preview while up
 	want_region: [4]int, // the preview card's rect (logical; zero: none), for the input region
@@ -96,7 +97,7 @@ Bar :: struct {
 bar_setup :: proc(a: ^App, data: string) {
 	b := new(Bar)
 	a.bar = b
-	b.height, b.hover, b.hover_ws, b.tip = 26, -1, -1, -1
+	b.height, b.hover, b.hover_ws, b.tip, b.tip_off = 26, -1, -1, -1, -1
 	b.prev.ws, b.prev.cand, b.prev.row = -1, -1, -1
 	b.ipc_q, b.ipc_ev = -1, -1
 	text := data
@@ -280,7 +281,7 @@ bar_tick :: proc(a: ^App) -> int {
 	until :: proc(now, t: time.Tick) -> int { return max(int(time.duration_milliseconds(time.tick_diff(now, t))), 0) + 1 }
 	// the tooltip: 500 ms after the pointer settles on a module that has one
 	b.tip = -1
-	if b.hover >= 0 && b.hover < len(b.mods) && mod_tooltip(b, b.hover) != "" {
+	if b.hover >= 0 && b.hover < len(b.mods) && b.hover != b.tip_off && mod_tooltip(b, b.hover) != "" {
 		at := time.tick_add(b.hover_at, 500 * time.Millisecond)
 		if time.tick_diff(now, at) <= 0 do b.tip = b.hover
 		else do wait = min(wait, until(now, at))
@@ -739,7 +740,7 @@ bar_pointer_move :: proc(a: ^App, x, y: int) -> bool {
 	if changed do bar_tick(a)
 	nh, nw := ok ? h.a : -1, ok ? h.b : -1
 	if nh == b.hover && nw == b.hover_ws do return changed
-	if nh != b.hover do b.hover_at = time.tick_now()
+	if nh != b.hover { b.hover_at = time.tick_now(); b.tip_off = -1 }
 	b.hover, b.hover_ws = nh, nw
 	bar_tick(a) // a tooltip goes at once
 	return true
@@ -749,6 +750,7 @@ bar_pointer_move :: proc(a: ^App, x, y: int) -> bool {
 bar_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 	b := a.bar
 	h := hit_at(a, x, y) or_return
+	if h.kind != .Item && h.kind != .Web { b.tip_off = h.a; bar_tick(a) } // a click: its tooltip goes and stays gone (a popup opens there)
 	if h.kind == .Item { if button == 1 do prev_click(a, h.a); return true }
 	if h.kind == .Web do return false
 	m := &b.mods[h.a]
