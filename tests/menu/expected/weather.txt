@@ -1,0 +1,14 @@
+focus Sub
+crumb KESTREL › WEATHER
+query ()
+count 3 actions
+hints ↑↓ Move · ↵ ␣ Run / toggle · ← ⌫ Back · ⌃J ⌃K Vim
+title Weather · Forecast
+now Stockholm · part 6° Partly cloudy · Feels 3° · H 9° L 5°
+hourly (day 0) 09 5° 20% · 11 7° 10%
+* day Today part rain 20% 5°–9°
+  day Tue 27 rain rain 80% 4°–8°
+== SETTINGS
+  Units | ‹ °C ›
+exit 1
+log: load apps

@@ -28,6 +28,19 @@ A	waybar	Waybar			toggle=on
 A	mute	Mute output	off		toggle=off
 A	night	Night light			toggle=off
 A	firefox	Firefox			slider=120;max=150;step=5;toggle=off;mark=󰕾
+S	wx	Weather	W	Forecast	x
+O	weather
+WN	Stockholm	automatic location	part	6°	Partly cloudy	Feels 3° · H 9° L 5°
+WD	Wind	6 m/s SW
+WD	Humidity	82%
+WH	0	09	part	5°	20
+WH	0	11	sun	7°	10
+WH	1	06	rain	4°	80
+WH	1	08	rain	5°	70
+WY	Today	part	20	5°	9°	5	9
+WY	Tue 27	rain	80	4°	8°	4	8
+H	Settings
+A	units	Units	°C		choice=°C|°F
 S	docker	Docker	X	Containers	x	dim;group=Not installed
 N	Docker isn't installed	Install it to manage containers.	muted
 A	install	Install Docker	opens terminal

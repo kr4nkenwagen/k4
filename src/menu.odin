@@ -70,7 +70,10 @@ import "logic"
 // alt=<label>|<id> (Tab runs it).
 // Enter prints the chosen action's or item's id; a web search prints "url:<url>".
 
-Entry_Kind :: enum { Row, Heading, Empty, Notice, Bars, Card, Progress }
+Entry_Kind :: enum { Row, Heading, Empty, Notice, Bars, Card, Progress, Day }
+
+// The Weather dashboard's data (WN/WD/WH records), drawn by draw_weather.
+Wx_Hour :: struct { day: int, t, kind, temp: string, rain: int }
 
 Action :: struct {
 	kind: Entry_Kind,
@@ -86,6 +89,7 @@ Action :: struct {
 	tone, glyph, state, line2: string,
 	active: bool,
 	pct, bars: int,
+	wlo, whi: int, // a weather day's low and high (the range bar)
 	stay, app: bool,
 	slider: bool,
 	value, step: int,
@@ -133,6 +137,10 @@ Section :: struct {
 	count, ph, query_id: string,
 	has_d:   bool, // a D line set the count (an empty one hides it)
 	pane:    bool, // a page drawn in the right pane, next to the sections (O pane)
+	weather: bool, // O weather: the design's Weather dashboard instead of rows
+	wx_now:  [6]string, // city, location note, icon kind, temperature, condition, feels/high/low
+	wx_details: [dynamic][2]string,
+	wx_hours: [dynamic]Wx_Hour,
 	hints:   [dynamic][2]string,
 	dim:     bool,
 	group:   string,
@@ -185,6 +193,7 @@ Menu :: struct {
 	dyn_pages: int,
 	families: map[string]Family_Fonts,
 	top_crumb, top_ph, top_count: string, // T record
+	sizes:    map[int]^Font, // msize: more sizes of the UI font
 	slow_ms: int,
 	f_body, f_small, f_tiny, f_big, f_title, f_row, f_huge, f_confirm, f_bold13, f_bold12, f_bold11, f_bold10, f_glyph: ^Font,
 }
@@ -218,7 +227,7 @@ menu_parse :: proc(m: ^Menu, data: string) {
 			}
 		case "T":
 			m.top_crumb, m.top_ph, m.top_count = get(f, 1), get(f, 2), get(f, 3)
-		case "A", "H", "E", "N", "K", "C", "B", "D", "Y", "Q", "O":
+		case "A", "H", "E", "N", "K", "C", "B", "D", "Y", "Q", "O", "WN", "WD", "WH", "WY":
 			if len(m.sections) > 0 do section_line(&m.sections[len(m.sections) - 1], f)
 		case "R":
 			if len(f) > 1 do m.run_cmd = strings.join(f[1:], "\t")
@@ -259,7 +268,24 @@ section_line :: proc(s: ^Section, f: []string) {
 	case "Q":
 		s.query_id = strings.clone(get(f, 1))
 	case "O":
-		for flag in strings.split(get(f, 1), ";", context.temp_allocator) do if flag == "pane" do s.pane = true
+		for flag in strings.split(get(f, 1), ";", context.temp_allocator) {
+			if flag == "pane" do s.pane = true
+			if flag == "weather" do s.weather = true
+		}
+	case "WN":
+		for i in 0 ..< 6 do s.wx_now[i] = strings.clone(get(f, i + 1))
+	case "WD":
+		append(&s.wx_details, [2]string{strings.clone(get(f, 1)), strings.clone(get(f, 2))})
+	case "WH":
+		d, _ := strconv.parse_int(get(f, 1))
+		r, _ := strconv.parse_int(get(f, 5))
+		append(&s.wx_hours, Wx_Hour{d, strings.clone(get(f, 2)), strings.clone(get(f, 3)), strings.clone(get(f, 4)), r})
+	case "WY":
+		// a day: selectable (↑↓ picks the day the hourly panel shows), Enter does nothing
+		r, _ := strconv.parse_int(get(f, 3))
+		lo, _ := strconv.parse_int(get(f, 6))
+		hi, _ := strconv.parse_int(get(f, 7))
+		append(&s.actions, Action{kind = .Day, id = "k4:noop", stay = true, label = strings.clone(get(f, 1)), glyph = strings.clone(get(f, 2)), pct = r, meta = strings.clone(get(f, 4)), line2 = strings.clone(get(f, 5)), wlo = lo, whi = hi})
 	}
 }
 
@@ -268,6 +294,9 @@ section_line :: proc(s: ^Section, f: []string) {
 section_reset :: proc(s: ^Section) {
 	clear(&s.actions)
 	clear(&s.hints)
+	clear(&s.wx_details)
+	clear(&s.wx_hours)
+	s.wx_now = {}
 	s.desc, s.count, s.ph, s.query_id = s.desc0, "", "", ""
 	s.has_d = false
 }
@@ -937,6 +966,7 @@ run_action :: proc(a: ^App, sec, idx: int) {
 execute :: proc(a: ^App, sec, idx: int, level := false) { // level: ← → moved a slider or stepper
 	m := a.menu
 	act := m.sections[sec].actions[idx]
+	if act.id == "k4:noop" do return
 	if act.id == "k4:retry" {
 		if m.open >= 0 && m.open < len(m.sections) && m.sections[m.open].load.cmd != "" {
 			loader_restart(m, &m.sections[m.open].load)
@@ -1147,6 +1177,8 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 		}
 		return app_edit_key(a, k, ctrl, ch, text)
 	}
+	// the Weather dashboard has no filter: text keys do nothing there
+	if m.focus == .Sub && m.sections[m.open].weather && k == .None && !ctrl do return true
 	// Space on a switch row toggles it (only with nothing typed: then it is part of the filter)
 	if text == " " && empty && m.focus == .Sub && m.si < len(m.sel_actions) && m.sections[m.open].actions[m.sel_actions[m.si]].toggle && m.sections[m.open].query_id == "" {
 		menu_run(a)
@@ -1273,7 +1305,7 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	if m.focus == .Input && m.input_password do q = strings.repeat("•", utf8.rune_count_in_string(q), context.temp_allocator)
 	if q == "" do text_in(cv, m.f_big, ph, qx, y, hh, argb(dim, 0xff), qclip)
 	else do text_in(cv, m.f_big, q, qx, y, hh, argb(fgb, 0xff), qclip)
-	if !sc && m.focus != .Confirm {
+	if !sc && m.focus != .Confirm && !(m.focus == .Sub && m.sections[m.open].weather) {
 		qs := shape(m.f_big, q)
 		cur_cp := utf8.rune_count_in_string(string(a.query[:a.cursor]))
 		caret := qx + int(qs.cp_x[min(cur_cp, len(qs.cp_x) - 1)])
@@ -1307,6 +1339,7 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		switch {
 		case srch: draw_results(a, cv, S, body)
 		case m.focus == .Sub && is_page(m, m.open) && m.sections[m.open].kind == .Font: draw_font(a, cv, S, body)
+		case m.focus == .Sub && m.sections[m.open].weather: draw_weather(a, cv, S, body)
 		case m.focus == .Sub && is_page(m, m.open) && !m.sections[m.open].pane: draw_page(a, cv, S, body, sc)
 		case: draw_panes(a, cv, S, body, sc)
 		}
@@ -1348,6 +1381,7 @@ menu_header :: proc(a: ^App, sc: bool) -> (crumb, ph, count: string) {
 		}
 		if !sc {
 			if s.ph != "" do ph = s.ph
+			if s.weather do ph = ""
 			if s.has_d do count = s.count
 			if section_slow(m, s) do count = fmt.tprintf("waiting %d s", int(time.duration_seconds(time.tick_since(s.load.started))))
 		}
@@ -1506,7 +1540,7 @@ tone_color :: proc(t: logic.Theme, tone: string, def: u32) -> u32 {
 @(private)
 entry_h :: proc(m: ^Menu, act: Action, S: int) -> int {
 	switch act.kind {
-	case .Row, .Empty: return 30 * S
+	case .Row, .Empty, .Day: return 30 * S
 	case .Heading: return 10 * S + int(m.f_tiny.line_h) + 4 * S
 	case .Notice: return 8 * S + 12 * S + int(m.f_bold13.line_h) + 4 * S + int(m.f_small.line_h) + 12 * S + 8 * S
 	case .Bars: return act.bars * 30 * S
@@ -1588,6 +1622,12 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 				fill_rect(cv, bx, by, bw, bh, argb(zero ? t.selection : acc, 0xff))
 				text_in(cv, m.f_tiny, act.count, bx + 5 * S, by, bh, argb(zero ? dim : bg, 0xff))
 			}
+		case .Day: // outside the dashboard: a plain row
+			on := m.focus == .Sub && e == sel_entry
+			if on do fill_rect(cv, px, py, x1 - px, ah, argb(acc, 0xff))
+			text_in(cv, m.f_body, act.label, mx + 28 * S, py, ah, argb(on ? bg : fgb, 0xff))
+			r := fmt.tprintf("%s – %s", act.meta, act.line2)
+			text_in(cv, m.f_small, r, x1 - 20 * S - tw(m.f_small, r), py, ah, argb(on ? bg : dim, 0xff))
 		case .Empty:
 			text_in(cv, m.f_body, "–", mx + 4 * S, py, ah, argb(faint, 0xff))
 			text_in(cv, m.f_body, act.label, mx + 28 * S, py, ah, argb(dim, 0xff), x1 - 20 * S)
@@ -1865,6 +1905,7 @@ draw_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	}
 	swatches := false
 	for it in v.items do if it.has_palette { swatches = true; break }
+	if swatches { draw_theme_view(a, cv, S, body); return }
 	rh := (swatches ? 40 : 34) * S
 	visible := max((fy - 8 * S - py) / rh, 1)
 	if m.si < m.scroll do m.scroll = m.si
@@ -2231,6 +2272,14 @@ menu_dump :: proc(a: ^App) -> string {
 		s := &m.sections[m.open]
 		desc := section_slow(m, s) ? fmt.tprintf("Still waiting on %s", s.name) : s.desc
 		fmt.sbprintfln(&b, "title %s · %s%s", s.name, desc, is_page(m, m.open) ? (s.pane ? " (pane)" : " (full width)") : "")
+		if s.weather {
+			fmt.sbprintfln(&b, "now %s · %s %s %s · %s", s.wx_now[0], s.wx_now[2], s.wx_now[3], s.wx_now[4], s.wx_now[5])
+			day, n := 0, 0
+			for act, i in s.actions do if act.kind == .Day { if m.si < len(m.sel_actions) && m.sel_actions[m.si] == i do day = n; n += 1 }
+			hs := make([dynamic]string, 0, 8, context.temp_allocator)
+			for h in s.wx_hours do if h.day == day do append(&hs, fmt.tprintf("%s %s %d%%", h.t, h.temp, h.rain))
+			fmt.sbprintfln(&b, "hourly (day %d) %s", day, strings.join(hs[:], " · ", context.temp_allocator))
+		}
 		for e in m.shown_actions {
 			act := s.actions[e]
 			sel := m.si < len(m.sel_actions) && m.sel_actions[m.si] == e
@@ -2241,6 +2290,7 @@ menu_dump :: proc(a: ^App) -> string {
 			case .Bars: fmt.sbprintfln(&b, "~~ %d loading bars", act.bars)
 			case .Card: fmt.sbprintfln(&b, "[] %s %s · %s · %s", act.state, act.label, act.meta, act.line2)
 			case .Progress: fmt.sbprintfln(&b, "↓ %s %d%% · %s", act.label, act.pct, act.meta)
+			case .Day: fmt.sbprintfln(&b, "%s day %s %s rain %d%% %s–%s", sel ? "*" : " ", act.label, act.glyph, act.pct, act.meta, act.line2)
 			case .Row:
 				meta := act.meta
 				if len(act.choices) > 0 do meta = fmt.tprintf("‹ %s ›", act.meta)
@@ -2275,4 +2325,315 @@ menu_dump :: proc(a: ^App) -> string {
 		fmt.sbprintfln(&b, "= %s", ok ? out : "…")
 	}
 	return strings.to_string(b)
+}
+
+// ---------- Weather dashboard (design 03b) ----------
+
+// Another size of the UI font (bold or not), made on first use and kept.
+@(private)
+msize :: proc(a: ^App, px: int, bold: bool, S: int) -> ^Font {
+	m := a.menu
+	key := px * 2 + (bold ? 1 : 0)
+	f, ok := m.sizes[key]
+	if !ok {
+		base := bold ? m.f_title : m.f_body // f_title is the bold face when there is one
+		f = font_sized(base, f32(px))
+		m.sizes[key] = f
+	}
+	return at_scale(f, S)
+}
+
+// The weather icon for a kind, and its colour (sun yellow, rain blue, the rest grey).
+@(private)
+wx_icon :: proc(t: logic.Theme, kind: string) -> (string, u32) {
+	switch kind {
+	case "sun": return "󰖙", t.yellow
+	case "moon": return "󰖔", mix(t.fg_dim, t.fg, 0.6)
+	case "part": return "󰖕", mix(t.fg_dim, t.fg, 0.7)
+	case "partnight": return "󰼱", mix(t.fg_dim, t.fg, 0.7)
+	case "fog": return "󰖑", t.fg_dim
+	case "rain": return "󰖗", t.blue
+	case "snow": return "󰖘", t.fg
+	case "storm": return "󰖓", t.yellow
+	}
+	return "󰖐", t.fg_dim
+}
+
+// Left: the place, now (icon, temperature, condition), six details and the hourly strip of
+// the selected day (bars = rain %). Right: seven days (rain · low – high with a range bar),
+// then the settings rows. ↑↓ moves through the days and settings.
+@(private)
+draw_weather :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
+	m := a.menu
+	t := a.theme
+	s := &m.sections[m.open]
+	bg, fg, fgb, dim, acc := t.bg, t.fg, t.fg_bright, t.fg_dim, t.accent
+	x0, by, bw, bh := body[0], body[1], body[2], body[3]
+	x1, fy := x0 + bw, by + bh
+	if s.wx_now[0] == "" && len(s.actions) == 0 {
+		text_in(cv, m.f_body, s.load.state == .Failed ? "Weather unavailable" : "Loading…", x0 + 20 * S, by + 16 * S, 30 * S, argb(dim, 0xff))
+		return
+	}
+	lw := 360 * S
+	fill_rect(cv, x0 + lw, by, S, bh, argb(mix(bg, fg, 0.12), 0xff))
+	sel_act := m.si < len(m.sel_actions) ? m.sel_actions[m.si] : -1
+
+	// ---- left
+	lx, rx := x0 + 20 * S, x0 + lw - 20 * S
+	y := by + 16 * S
+	draw_text_f(cv, m.f_title, s.wx_now[0], lx, y, argb(acc, 0xff), nil, 0, rx)
+	{
+		nx := lx + tw(m.f_title, s.wx_now[0]) + 10 * S
+		if nx < rx do draw_text_f(cv, m.f_small, ellipsize(m.f_small, s.wx_now[1], rx - nx), nx, y + int(m.f_title.ascent - m.f_small.ascent), argb(dim, 0xff))
+	}
+	y += int(m.f_title.line_h) + 14 * S
+	big, icf := msize(a, 54, true, S), msize(a, 44, false, S)
+	glyph, gc := wx_icon(t, s.wx_now[2])
+	rowh := max(int(big.line_h), 50 * S)
+	text_in(cv, icf, glyph, lx, y, rowh, argb(gc, 0xff))
+	tx := lx + 50 * S + 14 * S
+	text_in(cv, big, s.wx_now[3], tx, y, rowh, argb(fgb, 0xff))
+	tx += tw(big, s.wx_now[3]) + 14 * S
+	c14 := msize(a, 14, false, S)
+	cy := y + (rowh - int(c14.line_h) - 4 * S - int(m.f_small.line_h)) / 2
+	draw_text_f(cv, c14, s.wx_now[4], tx, cy, argb(fgb, 0xff), nil, 0, rx)
+	draw_text_f(cv, m.f_small, s.wx_now[5], tx, cy + int(c14.line_h) + 4 * S, argb(mix(dim, fg, 0.5), 0xff), nil, 0, rx)
+	y += rowh + 14 * S
+	colw := (rx - lx - 18 * S) / 2
+	for d, i in s.wx_details {
+		cx := lx + (i % 2) * (colw + 18 * S)
+		ry := y + (i / 2) * (int(m.f_small.line_h) + 6 * S)
+		draw_text_f(cv, m.f_small, d[0], cx, ry, argb(dim, 0xff))
+		draw_text_f(cv, m.f_small, d[1], cx + colw - tw(m.f_small, d[1]), ry, argb(fg, 0xff))
+	}
+	y += ((len(s.wx_details) + 1) / 2) * (int(m.f_small.line_h) + 6 * S) + 6 * S
+	fill_rect(cv, lx, y, rx - lx, S, argb(mix(bg, fg, 0.08), 0xff))
+	y += 12 * S
+	// the hourly strip of the selected day (today unless a day row is selected)
+	day := 0
+	dname := "Today"
+	{
+		n := 0
+		for act, i in s.actions do if act.kind == .Day {
+			if i == sel_act { day, dname = n, act.label }
+			n += 1
+		}
+	}
+	title := day == 0 ? "TODAY · NEXT 16 H" : strings.to_upper(fmt.tprintf("%s · hourly", dname), context.temp_allocator)
+	draw_text_f(cv, m.f_tiny, title, lx, y, argb(dim, 0xff))
+	draw_text_f(cv, m.f_tiny, "bars = rain %", rx - tw(m.f_tiny, "bars = rain %"), y, argb(dim, 0xff))
+	y += int(m.f_tiny.line_h) + 10 * S
+	hours := make([dynamic]Wx_Hour, 0, 8, context.temp_allocator)
+	for h in s.wx_hours do if h.day == day && len(hours) < 8 do append(&hours, h)
+	cw := (rx - lx) / 8
+	hi18, b13, t10 := msize(a, 18, false, S), msize(a, 13, true, S), msize(a, 10, false, S)
+	for h, i in hours {
+		cx := lx + i * cw + cw / 2
+		yy := y
+		center :: proc(cv: ^Canvas, f: ^Font, s: string, cx, y: int, c: u32) { draw_text_f(cv, f, s, cx - tw(f, s) / 2, y, c) }
+		center(cv, m.f_tiny, h.t, cx, yy, argb(dim, 0xff))
+		yy += int(m.f_tiny.line_h) + 5 * S
+		g, gcol := wx_icon(t, h.kind)
+		center(cv, hi18, g, cx, yy, argb(gcol, 0xff))
+		yy += int(hi18.line_h) + 5 * S
+		center(cv, b13, h.temp, cx, yy, argb(fgb, 0xff))
+		yy += int(b13.line_h) + 5 * S
+		bh_ := 30 * S
+		fill_rect(cv, cx - 5 * S, yy, 10 * S, bh_, argb(mix(bg, fg, 0.08), 0xff))
+		fh := bh_ * clamp(h.rain, 0, 100) / 100
+		if fh > 0 do fill_rect(cv, cx - 5 * S, yy + bh_ - fh, 10 * S, fh, argb(t.blue, 0xff))
+		yy += bh_ + 5 * S
+		center(cv, t10, fmt.tprintf("%d%%", h.rain), cx, yy, argb(h.rain >= 50 ? t.blue : dim, 0xff))
+	}
+
+	// ---- right: seven days, then the settings rows
+	px := x0 + lw + S
+	pr := x1 - 20 * S
+	y = by + 16 * S
+	draw_text_f(cv, m.f_tiny, "7 DAYS", px + 20 * S, y, argb(dim, 0xff))
+	draw_text_f(cv, m.f_tiny, "rain · low – high", pr - tw(m.f_tiny, "rain · low – high"), y, argb(dim, 0xff))
+	y += int(m.f_tiny.line_h) + 6 * S
+	wk_lo, wk_hi := max(int), min(int)
+	for act in s.actions do if act.kind == .Day { wk_lo = min(wk_lo, act.wlo); wk_hi = max(wk_hi, act.whi) }
+	span := max(wk_hi - wk_lo, 1)
+	ah := 30 * S
+	i16 := msize(a, 16, false, S)
+	settings_head := false
+	for act, i in s.actions {
+		if act.slow do continue
+		on := i == sel_act && m.focus == .Sub
+		if act.kind == .Day {
+			lc, sc := fg, dim
+			if on { fill_rect(cv, px, y, x1 - px, ah, argb(acc, 0xff)); lc, sc = bg, bg }
+			x := px + 20 * S
+			text_in(cv, m.f_body, act.label, x, y, ah, argb(on ? bg : fgb, 0xff))
+			x += 60 * S
+			g, gcol := wx_icon(t, act.glyph)
+			text_in(cv, i16, g, x, y, ah, argb(on ? bg : gcol, 0xff))
+			x += 16 * S + 10 * S
+			r := fmt.tprintf("%d%%", act.pct)
+			text_in(cv, m.f_small, r, x + 36 * S - tw(m.f_small, r), y, ah, argb(on ? bg : (act.pct >= 50 ? t.blue : dim), 0xff))
+			x += 36 * S + 10 * S
+			text_in(cv, m.f_body, act.meta, x + 30 * S - tw(m.f_body, act.meta), y, ah, argb(sc, 0xff))
+			x += 30 * S + 10 * S
+			hi_w := 30 * S
+			bar_w := pr - hi_w - 10 * S - x
+			fill_rect(cv, x, y + (ah - 4 * S) / 2, bar_w, 4 * S, on ? argb(mix(acc, bg, 0.25), 0xff) : argb(mix(bg, fg, 0.18), 0xff))
+			off := bar_w * (act.wlo - wk_lo) / span
+			w := max(bar_w * (act.whi - act.wlo) / span, 2 * S)
+			fill_rect(cv, x + off, y + (ah - 4 * S) / 2, w, 4 * S, argb(on ? bg : acc, 0xff))
+			text_in(cv, m.f_body, act.line2, pr - hi_w, y, ah, argb(lc == bg ? bg : fgb, 0xff))
+			y += ah
+			continue
+		}
+		if act.kind == .Heading do continue // the settings get the design's own heading
+		if act.kind != .Row do continue
+		if !settings_head {
+			y += 14 * S
+			draw_text_f(cv, m.f_tiny, "SETTINGS", px + 20 * S, y, argb(dim, 0xff))
+			y += int(m.f_tiny.line_h) + 6 * S
+			settings_head = true
+		}
+		if y + ah > fy do break
+		if on do fill_rect(cv, px, y, x1 - px, ah, argb(acc, 0xff))
+		meta := len(act.choices) > 0 ? fmt.tprintf("‹ %s ›", act.meta) : act.meta
+		mw := tw(m.f_small, meta)
+		text_in(cv, m.f_small, meta, pr - mw, y, ah, argb(on ? bg : dim, 0xff))
+		text_in(cv, m.f_body, act.label, px + 20 * S, y, ah, argb(on ? bg : fgb, 0xff), pr - mw - 12 * S)
+		y += ah
+	}
+}
+
+// ---------- Theme picker (design 07, reworked) ----------
+
+// The preview's code sample: token kinds k keyword, s string, n number, f function,
+// c comment, t type, r red (throw), p plain, coloured from the theme's own palette.
+THEME_CODE := [][]string{
+	{"c// theme preview · kestrel"},
+	{"kimport", "p { ", "fspawn", "p } ", "kfrom", "p ", "s\"node:child_process\"", "p;"},
+	{},
+	{"kconst", "p themes = [", "s\"nord\"", "p, ", "s\"gruvbox\"", "p];"},
+	{"klet", "p volume = ", "n62", "p;"},
+	{},
+	{"kfunction", "p ", "fsetTheme", "p(name, opts = {}) {"},
+	{"p  ", "kif", "p (!themes.", "fincludes", "p(name)) {"},
+	{"p    ", "rthrow", "p ", "knew", "p ", "tError", "p(", "s`unknown: ${name}`", "p);"},
+	{"p  }"},
+	{"p  ", "kreturn", "p ", "fspawn", "p(", "s\"swaymsg\"", "p, [", "s\"reload\"", "p]);"},
+	{"p}"},
+	{},
+	{"fsetTheme", "p(", "s\"nord\"", "p, { live: ", "ntrue", "p }); ", "c// ok"},
+}
+
+// Left (300 px): the themes, each with a strip of its six colours on its own background
+// and ● on the current one. Right: the highlighted theme previewed in its own colours, a
+// code sample and a shell prompt over its ANSI colours.
+@(private)
+draw_theme_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
+	m := a.menu
+	t := a.theme
+	bg, fg, fgb, dim, acc := t.bg, t.fg, t.fg_bright, t.fg_dim, t.accent
+	x0, by, bw, bh := body[0], body[1], body[2], body[3]
+	x1, fy := x0 + bw, by + bh
+	v := &m.views[m.view]
+	lw := 300 * S
+	fill_rect(cv, x0 + lw, by, S, bh, argb(mix(bg, fg, 0.12), 0xff))
+	y := by + 16 * S
+	draw_text_f(cv, m.f_title, v.title, x0 + 20 * S, y, argb(acc, 0xff))
+	{
+		sx := x0 + 20 * S + tw(m.f_title, v.title) + 12 * S
+		draw_text_f(cv, m.f_small, ellipsize(m.f_small, v.subtitle, x0 + lw - 12 * S - sx), sx, y + int(m.f_title.ascent - m.f_small.ascent), argb(dim, 0xff))
+	}
+	y += int(m.f_title.line_h) + 12 * S
+	if len(m.shown_items) == 0 {
+		text_in(cv, m.f_body, v.load.state == .Ready ? "No theme matches" : "Loading…", x0 + 20 * S, y, 30 * S, argb(dim, 0xff))
+		return
+	}
+	rh := 40 * S
+	visible := max((fy - 8 * S - y) / rh, 1)
+	if m.si < m.scroll do m.scroll = m.si
+	if m.si >= m.scroll + visible do m.scroll = m.si - visible + 1
+	edge := argb(mix(bg, fg, 0.25), 0xff)
+	for j in m.scroll ..< min(m.scroll + visible, len(m.shown_items)) {
+		it := v.items[m.shown_items[j]]
+		on := j == m.si
+		lc, mc := fg, dim
+		if on { fill_rect(cv, x0, y, lw, rh, argb(acc, 0xff)); lc, mc = bg, bg }
+		// right to left: the ● column (12 px), the swatch strip, then the name
+		xr := x0 + lw - 16 * S
+		if it.current do text_in(cv, m.f_small, "●", xr - 12 * S + (12 * S - tw(m.f_small, "●")) / 2, y, rh, argb(on ? bg : acc, 0xff))
+		xr -= 12 * S + 10 * S
+		if it.has_palette {
+			sw, sh := 7 * S, 14 * S
+			box_w, box_h := 6 * sw + 4 * S + 2 * S, sh + 4 * S + 2 * S
+			bx, byy := xr - box_w, y + (rh - box_h) / 2
+			rounded_rect(cv, bx, byy, box_w, box_h, 0, argb(it.palette[0], 0xff), f32(S), edge)
+			for c in 0 ..< 6 do fill_rect(cv, bx + S + 2 * S + c * sw, byy + S + 2 * S, sw, sh, argb(it.palette[2 + c], 0xff))
+			xr = bx - 10 * S
+		}
+		text_in(cv, m.f_body, ellipsize(m.f_body, it.label, xr - (x0 + 20 * S)), x0 + 20 * S, y, rh, argb(on ? bg : (lc == fg ? fgb : lc), 0xff))
+		_ = mc
+		y += rh
+	}
+
+	// preview of the highlighted theme
+	if m.si >= len(m.shown_items) do return
+	it := v.items[m.shown_items[m.si]]
+	if !it.has_palette do return
+	P := it.palette
+	px, pr := x0 + lw + S + 18 * S, x1 - 18 * S
+	y = by + 16 * S
+	draw_text_f(cv, m.f_tiny, "PREVIEW", px, y, argb(dim, 0xff))
+	draw_text_f(cv, m.f_bold13, it.label, px + tw(m.f_tiny, "PREVIEW") + 10 * S, y + int(m.f_tiny.ascent - m.f_bold13.ascent), argb(P[1], 0xff), nil, 0, pr)
+	y += int(m.f_bold13.line_h) + 10 * S
+	lh := 18 * S
+	code_h := 10 * S * 2 + len(THEME_CODE) * lh
+	room := fy - 12 * S - y - (8 * S * 2 + 18 * S * 2 + 4 * S) - 10 * S
+	lines := len(THEME_CODE)
+	if code_h > room { lines = max((room - 20 * S) / lh, 0); code_h = 20 * S + lines * lh }
+	rounded_rect(cv, px, y, pr - px, code_h, 0, argb(P[0], 0xff), f32(S), argb(mix(bg, fg, 0.18), 0xff))
+	tok_color :: proc(k: u8, P: [8]u32) -> u32 {
+		switch k {
+		case 'k': return P[6]
+		case 's': return P[3]
+		case 'n': return P[4]
+		case 'f': return P[5]
+		case 'c': return mix(P[0], P[1], 0.55)
+		case 't': return P[7]
+		case 'r': return P[2]
+		}
+		return P[1]
+	}
+	cf := m.f_small
+	ly := y + 10 * S
+	for li in 0 ..< lines {
+		no := fmt.tprintf("%d", li + 1)
+		text_in(cv, cf, no, px + 30 * S - 12 * S - tw(cf, no), ly, lh, argb(mix(P[0], P[1], 0.35), 0xff))
+		x := px + 30 * S
+		for tok in THEME_CODE[li] {
+			text := tok[1:]
+			text_in(cv, cf, text, x, ly, lh, argb(tok_color(tok[0], P), 0xff), pr - 4 * S)
+			x += tw(cf, text)
+		}
+		ly += lh
+	}
+	y += code_h + 10 * S
+	// a shell prompt and the six ANSI colours
+	term_h := 8 * S * 2 + lh + 4 * S + 10 * S
+	rounded_rect(cv, px, y, pr - px, term_h, 0, argb(P[0], 0xff), f32(S), argb(mix(bg, fg, 0.18), 0xff))
+	x := px + 12 * S
+	ty := y + 8 * S
+	user := os.get_env("USER", context.temp_allocator)
+	host := "kestrel"
+	if data, err := os.read_entire_file("/etc/hostname", context.temp_allocator); err == nil do host = strings.trim_space(string(data))
+	parts := [][2]string{{fmt.tprintf("%s@%s", user != "" ? user : "you", host), "g"}, {":", "p"}, {"~/dots", "b"}, {" $", "m"}, {" swaymsg reload", "p"}}
+	for pp in parts {
+		c := P[1]
+		switch pp[1] { case "g": c = P[3]; case "b": c = P[5]; case "m": c = P[6] }
+		text_in(cv, cf, pp[0], x, ty, lh, argb(c, 0xff), pr - 12 * S)
+		x += tw(cf, pp[0])
+	}
+	ty += lh + 4 * S
+	sw := (pr - px - 24 * S - 5 * 3 * S) / 6
+	for c in 0 ..< 6 do fill_rect(cv, px + 12 * S + c * (sw + 3 * S), ty, sw, 10 * S, argb(P[2 + c], 0xff))
 }

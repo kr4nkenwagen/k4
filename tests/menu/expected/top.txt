@@ -2,11 +2,12 @@ focus Menu
 crumb KESTREL
 query (Search everything…)
 count 3 sections
-hints ↑↓ Move · → ↵ Open · Esc Shortcuts n a r t x
+hints ↑↓ Move · → ↵ Open · Esc Shortcuts n a r t w x
 * [N] Network
   [A] Apps
   [R] GitHub
   [T] Toggle
+  [W] Weather
 == NOT INSTALLED
   [X] Docker (dim)
 exit 1

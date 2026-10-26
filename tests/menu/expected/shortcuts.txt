@@ -7,6 +7,7 @@ hints a–z Open · j k Move · / Search · Esc Close
   [A] Apps
   [R] GitHub
   [T] Toggle
+  [W] Weather
 == NOT INSTALLED
   [X] Docker (dim)
 exit 1
