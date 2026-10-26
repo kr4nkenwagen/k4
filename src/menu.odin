@@ -1268,7 +1268,8 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		cur_cp := utf8.rune_count_in_string(string(a.query[:a.cursor]))
 		caret := qx + int(qs.cp_x[min(cur_cp, len(qs.cp_x) - 1)])
 		fill_rect(cv, caret, y + (hh - int(m.f_big.line_h)) / 2, max(S, 2), int(m.f_big.line_h), argb(acc, 0xff))
-	}
+		a.caret = {caret, y + (hh - int(m.f_big.line_h)) / 2, max(S, 2), int(m.f_big.line_h)}
+	} else do a.caret = {}
 	y += hh
 	fill_rect(cv, x0, y, x1 - x0, S, sep)
 	y += S

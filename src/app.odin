@@ -52,6 +52,7 @@ App :: struct {
 	fonts:    [dynamic]^Font, // extra sizes (menu mode), resized with the buffer scale
 	family:   string,
 	scale:    int, // buffer scale of the output (fonts are sized for it)
+	caret:    [4]int, // the text caret as last drawn (buffer pixels: x, y top, w, h; w 0 = none), for shaders
 	menu:     ^Menu,
 	has_icons: bool,
 	// layout in logical pixels
@@ -178,6 +179,7 @@ app_draw :: proc(a: ^App, cv: ^Canvas, scale: int) {
 	qs := shape(&a.font, q)
 	cx := qx + int(qs.cp_x[min(cur_cp, len(qs.cp_x) - 1)])
 	fill_rect(cv, cx, py, max(scale, 2), int(a.font.line_h), argb(t.fg_bright, 0xff))
+	a.caret = {cx, py, max(scale, 2), int(a.font.line_h)}
 	if len(a.rows) > 0 {
 		count := fmt.tprintf("%d/%d", len(a.matches), len(a.rows))
 		cw := int(shape(&a.font, count).width)

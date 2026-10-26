@@ -37,6 +37,10 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
                           <right> <enter> <esc> <tab> <bs> <alt-x> <ctrl-x>; then move the selection
   --scale N               dry runs: buffer scale
 
+Ghostty's custom shaders (the custom-shader lines of ~/.config/ghostty/config and the files
+it includes) run over k4's frame on the GPU; K4_SHADERS=off draws without them, K4_SHADERS=
+a.glsl:b.glsl picks others. Dry runs apply them with K4_DRY_SHADERS=1 (K4_DRY_TIME=seconds).
+
 Exit status: 0 with the choice on stdout, 1 when cancelled.
 `
 
@@ -163,6 +167,10 @@ main :: proc() {
 		if opts.dry_run != "" {
 			cv := Canvas{make([]u32, a.width * a.height * s * s), a.width * s, a.height * s}
 			app_draw(a, &cv, s)
+			if os.get_env("K4_DRY_SHADERS", context.temp_allocator) != "" {   // the shaders too, offscreen
+				gpu_set_cursor(a.caret.x, a.caret.y, a.caret.z, a.caret.w, cv.h, 0)
+				if !gpu_dry_run(&cv) do fmt.eprintln("k4: no OpenGL 4.3 through EGL: drawn without shaders")
+			}
 			rgba := canvas_rgba(&cv)
 			path := strings.clone_to_cstring(opts.dry_run, context.temp_allocator)
 			if k4_png_write(path, c.int(cv.w), c.int(cv.h), raw_data(rgba)) == 0 {
@@ -198,6 +206,7 @@ app_load_style :: proc(a: ^App, first: bool) -> bool {
 		}
 	}
 	if family == "" do family = "monospace"
+	if !first do gpu_check_shaders() // the starfield toggle rewrites Ghostty's shader list
 	if !first && family == a.family do return true
 	f: Font
 	if !font_load(&f, family, a.font_px, true) {

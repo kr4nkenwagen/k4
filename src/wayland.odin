@@ -45,6 +45,7 @@ Wl :: struct {
 	repeat_rate, repeat_delay: int,
 	repeat_key: u32,
 	repeat_at:  time.Tick,
+	cpu:        []u32, // GPU path: the CPU frame before the shaders
 }
 
 W: Wl
@@ -242,6 +243,26 @@ frame_listener := wl.callback_listener{done = frame_done}
 redraw :: proc() {
 	if !W.configured || W.frame_pending do return
 	w, h := W.width * W.scale, W.height * W.scale
+	if G.ok {
+		// Ghostty's shaders: redraw the frame on the CPU only when something changed, then run
+		// the shader chain to the EGL surface (every frame while one animates)
+		if W.dirty || len(W.cpu) != w * h {
+			if len(W.cpu) != w * h { delete(W.cpu); W.cpu = make([]u32, w * h) }
+			cv := Canvas{W.cpu, w, h}
+			app_draw(W.app, &cv, W.scale)
+			gpu_upload(&cv)
+		}
+		now := gpu_time()
+		c := W.app.caret
+		gpu_set_cursor(c.x, c.y, c.z, c.w, h, now)
+		wl.surface_set_buffer_scale(W.surface, W.scale)
+		cb := wl.surface_frame(W.surface)
+		wl.callback_add_listener(cb, &frame_listener, nil)
+		gpu_present(w, h, now) // eglSwapBuffers commits the surface
+		W.frame_pending = true
+		W.dirty = false
+		return
+	}
 	b: ^Buffer
 	for &cand in W.buffers do if !cand.busy { b = &cand; break }
 	if b == nil do return
@@ -312,6 +333,10 @@ run_wayland :: proc(a: ^App) -> bool {
 	wlr.layer_surface_v1_set_margin(W.layer, m, m, m, m)
 	wlr.layer_surface_v1_set_keyboard_interactivity(W.layer, .exclusive)
 	wl.surface_commit(W.surface)
+	// Ghostty's shaders when it has any and EGL / OpenGL 4.3 work; else the shm path
+	if !gpu_init_window(W.display, W.surface, a.width * W.scale, a.height * W.scale) && G.display != nil && len(shader_paths()) > 0 {
+		fmt.eprintln("k4: shaders need EGL with OpenGL 4.3; drawing without them")
+	}
 
 	fd := linux.Fd(i(wl.display_get_fd(W.display)))
 	for !a.done {
@@ -322,7 +347,7 @@ run_wayland :: proc(a: ^App) -> bool {
 			left := time.tick_diff(time.tick_now(), W.repeat_at)
 			timeout = i32(max(time.duration_milliseconds(left), 0))
 		}
-		if W.dirty && !W.frame_pending && W.configured do timeout = 0
+		if (W.dirty || gpu_animating()) && !W.frame_pending && W.configured do timeout = 0
 		tick := a.menu != nil ? menu_tick_ms(a.menu) : -1 // a slow loader: the waiting count and slow lines
 		if tick >= 0 && (timeout < 0 || i32(tick) < timeout) do timeout = i32(tick)
 		fds := make([dynamic]linux.Poll_Fd, 0, 8, context.temp_allocator)
@@ -342,7 +367,7 @@ run_wayland :: proc(a: ^App) -> bool {
 			handle_keycode(W.repeat_key)
 			W.repeat_at = time.tick_add(time.tick_now(), time.Second / time.Duration(max(W.repeat_rate, 1)))
 		}
-		if W.dirty && !a.done do redraw()
+		if (W.dirty || gpu_animating()) && !a.done do redraw()
 	}
 	wl.display_disconnect(W.display)
 	return true
