@@ -1,2 +1,3 @@
 exit 1
+log: load apps
 log: run close

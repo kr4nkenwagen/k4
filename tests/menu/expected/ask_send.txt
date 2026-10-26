@@ -7,4 +7,5 @@ title Ask · Type a question (full width)
 !! accent: Enter sends to gemma · Answers open in a terminal.
 * Model | ‹ gemma ›
 exit 1
+log: load apps
 log: run ask-q input=hello there

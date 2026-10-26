@@ -9,3 +9,4 @@ hints a–z Open · j k Move · / Search · Esc Close
 == NOT INSTALLED
   [X] Docker (dim)
 exit 1
+log: load apps

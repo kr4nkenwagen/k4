@@ -5,3 +5,4 @@ count 1 result
 hints ↑↓ Move · → ↵ Open · Esc Shortcuts n a r x
 * Fix scaling | GitHub
 exit 1
+log: load apps

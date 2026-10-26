@@ -9,3 +9,4 @@ hints ↑↓ Move · → ↵ Open · Esc Shortcuts n a r x
 == NOT INSTALLED
   [X] Docker (dim)
 exit 1
+log: load apps

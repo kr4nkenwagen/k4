@@ -1,9 +1,11 @@
 focus View
 crumb NETWORK › THEME
 query (Filter themes…)
-count 2 themes
+count 3 themes
 toast Ran  theme-nord
 * Nord (current)
+  Gruvbox
   Portal · 27 h
 exit 1
+log: load apps
 log: run theme-nord

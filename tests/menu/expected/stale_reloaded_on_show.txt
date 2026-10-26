@@ -1,0 +1,14 @@
+focus Menu
+crumb KESTREL
+query (Search everything…)
+count 3 sections
+hints ↑↓ Move · → ↵ Open · Esc Shortcuts n a r x
+  [N] Network
+* [A] Apps
+  [R] GitHub
+== NOT INSTALLED
+  [X] Docker (dim)
+exit 1
+log: load apps
+log: run vol value=50
+log: load apps

@@ -9,3 +9,4 @@ title Wi-Fi networks · nmcli (pane)
 == MORE
   Close
 exit 1
+log: load apps

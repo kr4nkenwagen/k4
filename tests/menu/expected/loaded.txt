@@ -7,3 +7,4 @@ title GitHub · jon · fetched
 == REVIEW REQUESTS [1]
 * Fix scaling | sway#8432 (mark ◆)
 exit 1
+log: load apps

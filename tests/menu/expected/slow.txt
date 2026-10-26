@@ -9,3 +9,4 @@ title GitHub · Still waiting on GitHub
 == REVIEW REQUESTS
 ~~ 2 loading bars
 exit 1
+log: load apps

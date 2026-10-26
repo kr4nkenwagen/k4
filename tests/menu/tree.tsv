@@ -14,6 +14,7 @@ P	ask	Ask	Type a question	printf 'Q\task-q\nD\tType a question\tgemma\tAsk a que
 S	apps	Apps	A	Integrations first	x
 A	steam	Steam	2 d ago		stay;key=G
 A	gh	GitHub	6 unread		stay;key=R
+L	echo load apps >> "$K4_TEST_LOG"; printf 'A\tsteam\tSteam\t2 d ago\t\tstay;key=G\nA\tgh\tGitHub\t6 unread\t\tstay;key=R\n'
 S	gh2	GitHub	R	Review requests	x
 L	sleep ${K4_TEST_SLEEP:-0}; printf 'D\tjon · fetched\t1 item\nH\tReview requests\t1\nA\tpr\tFix scaling\tsway#8432\t\tmark=◆;markc=accent\n'
 D	Fetching from GitHub…	loading	Search PRs…
@@ -25,5 +26,5 @@ K	2
 S	docker	Docker	X	Containers	x	dim;group=Not installed
 N	Docker isn't installed	Install it to manage containers.	muted
 A	install	Install Docker	opens terminal
-V	theme	Theme	Applies everywhere	printf 'I\ttheme-nord\tNord\t\tcurrent\tstay\nI\tgame\tPortal\t\t\tsub=27 h;alt=Store page|store-portal\n'
+V	theme	Theme	Applies everywhere	printf 'I\ttheme-nord\tNord\t\tcurrent\tstay\nI\tgruvbox\tGruvbox\t\t\tstay\nI\tgame\tPortal\t\t\tsub=27 h;alt=Store page|store-portal\n'
 R	@DIR@/runner.sh

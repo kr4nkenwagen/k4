@@ -7,4 +7,5 @@ title Results · for vim (full width)
 * pkg-a | apt
   pkg-b | apt
 exit 1
+log: load apps
 log: run search input=vim

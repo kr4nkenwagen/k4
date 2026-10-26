@@ -7,3 +7,4 @@ title Docker · Containers
 !! muted: Docker isn't installed · Install it to manage containers.
 * Install Docker | opens terminal
 exit 1
+log: load apps

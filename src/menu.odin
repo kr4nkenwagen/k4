@@ -112,6 +112,7 @@ Loader :: struct {
 	proc_: os.Process,
 	buf:   [dynamic]u8,
 	started: time.Tick,
+	stale: bool, // an in-place action ran since it loaded: load again when it is next shown
 }
 
 SLOW_MS :: 8000 // a loader this slow gets the section's "slow" lines (K4_SLOW_MS overrides)
@@ -376,12 +377,37 @@ menu_start_loaders :: proc(m: ^Menu) {
 	for &v in m.views do loader_start(m, &v.load)
 }
 
-// After a "stay" action: load every section and view again, keeping what is shown until
-// the new rows arrive.
+// After a "stay" action: load what is on screen again at once (keeping it shown until the
+// new rows arrive); everything else is marked stale and loads again when it is next shown.
+// Reloading all of it here queued the visible view behind every section (seconds).
 menu_reload :: proc(m: ^Menu) {
-	for &s in m.sections do if s.load.cmd != "" && s.load.state == .Ready { s.load.state = .Lazy; clear(&s.load.buf); s.load.refresh = true }
-	for &v in m.views do if v.load.state == .Ready { v.load.state = .Lazy; clear(&v.load.buf); v.load.refresh = true }
-	menu_start_loaders(m)
+	on_screen :: proc(m: ^Menu, i: int) -> bool {
+		if m.focus == .Menu do return i == m.cur
+		return i == m.open || i == root(m, m.open)
+	}
+	for &v, i in m.views do if v.load.state == .Ready {
+		if m.focus == .View && i == m.view do loader_refresh(m, &v.load)
+		else do v.load.stale = true
+	}
+	for &s, i in m.sections do if s.load.cmd != "" && s.load.state == .Ready {
+		if on_screen(m, i) do loader_refresh(m, &s.load)
+		else do s.load.stale = true
+	}
+}
+
+// Load again, keeping the old rows until the new ones are in.
+@(private)
+loader_refresh :: proc(m: ^Menu, l: ^Loader) {
+	if l.state != .Ready do return
+	l.state, l.refresh, l.stale = .Lazy, true, false
+	clear(&l.buf)
+	loader_start(m, l)
+}
+
+// A section or view about to be shown: reload it if an action ran since it loaded.
+@(private)
+refresh_if_stale :: proc(m: ^Menu, l: ^Loader) {
+	if l.stale do loader_refresh(m, l)
 }
 
 menu_poll_fds :: proc(m: ^Menu, out: ^[dynamic]linux.Poll_Fd) {
@@ -464,6 +490,12 @@ menu_on_readable :: proc(a: ^App, fd: linux.Fd) -> bool {
 		menu_refilter(a)
 		return true
 	}
+	return false
+}
+
+@(private)
+has_current :: proc(v: ^View) -> bool {
+	for it in v.items do if it.current do return true
 	return false
 }
 
@@ -656,6 +688,7 @@ menu_enter :: proc(a: ^App, idx: int) {
 	m := a.menu
 	if idx < 0 || idx >= len(m.sections) do return
 	m.focus, m.open, m.cur, m.si, m.scroll, m.toast = .Sub, idx, root(m, idx), 0, 0, ""
+	refresh_if_stale(m, &m.sections[idx].load)
 	loader_start(m, &m.sections[idx].load)
 	clear_query(a)
 	menu_refilter(a)
@@ -684,6 +717,7 @@ menu_open_view :: proc(a: ^App, name: string, from: int) {
 	for &v, i in m.views {
 		if v.name != name do continue
 		m.focus, m.view, m.view_from, m.scroll, m.toast = .View, i, from, 0, ""
+		refresh_if_stale(m, &v.load)
 		loader_start(m, &v.load)
 		clear_query(a)
 		menu_select_current(m)
@@ -740,6 +774,7 @@ menu_move :: proc(a: ^App, d: int) {
 		pos := 0
 		for s, i in m.shown_sections do if s == m.cur { pos = i; break }
 		m.cur = m.shown_sections[((pos + d) % n + n) % n]
+		refresh_if_stale(m, &m.sections[m.cur].load)
 		loader_start(m, &m.sections[m.cur].load)
 		menu_refilter(a)
 		return
@@ -800,9 +835,17 @@ menu_run :: proc(a: ^App) {
 		if m.si < len(m.sel_actions) do run_action(a, m.open, m.sel_actions[m.si])
 	case .View:
 		if m.si >= len(m.shown_items) do return
-		it := m.views[m.view].items[m.shown_items[m.si]]
-		if it.stay && m.run_cmd != "" do start_runner(a, it.id, "", "", strings.concatenate({it.label, "  …"}))
-		else do finish(a, it.id)
+		v := &m.views[m.view]
+		it := v.items[m.shown_items[m.si]]
+		if it.stay && m.run_cmd != "" {
+			if m.runner.state == .Loading { m.toast = "Still running the last action…"; return }
+			// the picked one is current right away; the view's reload confirms it
+			if it.current || has_current(v) {
+				for &x in v.items do x.current = false
+				v.items[m.shown_items[m.si]].current = true
+			}
+			start_runner(a, it.id, "", "", strings.concatenate({it.label, "  …"}))
+		} else do finish(a, it.id)
 	case .Input:
 		value := string(a.query[:])
 		if strings.trim_space(value) == "" do return

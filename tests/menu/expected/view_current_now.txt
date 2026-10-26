@@ -1,0 +1,11 @@
+focus View
+crumb NETWORK › THEME
+query (Filter themes…)
+count 3 themes
+toast Gruvbox  …
+  Nord
+* Gruvbox (current)
+  Portal · 27 h
+exit 1
+log: load apps
+log: run gruvbox

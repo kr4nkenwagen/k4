@@ -13,3 +13,4 @@ title Network · Wi-Fi and search
   Close the menu
   Theme | Nord
 exit 1
+log: load apps

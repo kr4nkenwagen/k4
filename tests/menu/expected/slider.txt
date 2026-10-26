@@ -13,5 +13,6 @@ title Network · Wi-Fi and search
   Close the menu
   Theme | Nord
 exit 1
+log: load apps
 log: run vol value=50
 log: run vol value=60

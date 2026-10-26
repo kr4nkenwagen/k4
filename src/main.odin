@@ -145,8 +145,10 @@ main :: proc() {
 	if opts.dry_run != "" || opts.dump {
 		// same path as Wayland: layout at 1x, then the fonts at the buffer scale
 		// K4_DRY_NOWAIT: render while loaders still run (skeletons, the slow state)
-		wait := os.get_env("K4_DRY_NOWAIT", context.temp_allocator) == ""
-		if a.menu != nil { if wait do menu_load_all(a) }
+		// (K4_DRY_NOWAIT=keys: wait for the first load, not for what the keys start)
+		nowait := os.get_env("K4_DRY_NOWAIT", context.temp_allocator)
+		wait := nowait == ""
+		if a.menu != nil { if wait || nowait == "keys" do menu_load_all(a) }
 		else do app_layout(a)
 		press_keys(a, opts.keys)
 		if a.menu != nil && wait do menu_load_all(a) // a stay action started by the keys, and the reload after it
