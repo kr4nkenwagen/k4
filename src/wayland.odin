@@ -18,7 +18,7 @@ Buffer :: struct {
 	busy: bool,
 }
 
-Output :: struct { wl: ^wl.output, scale: int }
+Output :: struct { wl: ^wl.output, scale: int, name: string }
 
 Wl :: struct {
 	app:        ^App,
@@ -72,8 +72,8 @@ registry_global :: proc "c" (data: rawptr, reg: ^wl.registry, name: uint, iface:
 		wl.seat_add_listener(W.seat, &seat_listener, nil)
 	case "zwlr_layer_shell_v1": W.shell = cast(^wlr.layer_shell_v1)wl.registry_bind(reg, name, &wlr.layer_shell_v1_interface, uint(min(ver, 4)))
 	case "wl_output":
-		o := cast(^wl.output)wl.registry_bind(reg, name, &wl.output_interface, uint(min(ver, 2)))
-		append(&W.outputs, Output{o, 1})
+		o := cast(^wl.output)wl.registry_bind(reg, name, &wl.output_interface, uint(min(ver, 4)))
+		append(&W.outputs, Output{o, 1, ""})
 		wl.output_add_listener(o, &output_listener, nil)
 	}
 }
@@ -87,7 +87,10 @@ out_done :: proc "c" (data: rawptr, o: ^wl.output) {}
 out_scale :: proc "c" (data: rawptr, o: ^wl.output, factor: int) {
 	for &out in W.outputs do if out.wl == o do out.scale = int(i(factor))
 }
-out_name :: proc "c" (data: rawptr, o: ^wl.output, name: cstring) {}
+out_name :: proc "c" (data: rawptr, o: ^wl.output, name: cstring) {
+	context = W.ctx
+	for &out in W.outputs do if out.wl == o do out.name = strings.clone(string(name))
+}
 out_desc :: proc "c" (data: rawptr, o: ^wl.output, desc: cstring) {}
 output_listener := wl.output_listener{geometry = out_geometry, mode = out_mode, done = out_done, scale = out_scale, name = out_name, description = out_desc}
 
@@ -120,6 +123,7 @@ layer_configure :: proc "c" (data: rawptr, ls: ^wlr.layer_surface_v1, serial, w,
 	wlr.layer_surface_v1_ack_configure(ls, serial)
 	if w > 0 do W.width = int(w)
 	if h > 0 do W.height = int(h)
+	if W.app.bar != nil do W.app.bar.width = W.width
 	W.configured = true
 	W.dirty = true
 }
@@ -397,12 +401,25 @@ run_wayland :: proc(a: ^App) -> bool {
 
 	W.surface = wl.compositor_create_surface(W.compositor)
 	wl.surface_add_listener(W.surface, &surface_listener, nil)
+	TOP, BOTTOM, LEFT, RIGHT :: i32(1), i32(2), i32(4), i32(8)
+	if a.bar != nil {
+		// the bar: a strip along the top of its output that windows keep clear of, no keyboard
+		out: ^wl.output
+		for o in W.outputs do if o.name == a.opts.output do out = o.wl
+		if a.opts.output != "" && out == nil do fmt.eprintfln("k4: no output %q; the compositor picks one", a.opts.output)
+		W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, out, .top, "k4-bar")
+		wlr.layer_surface_v1_add_listener(W.layer, &layer_listener, nil)
+		W.width, W.height = 0, a.height
+		wlr.layer_surface_v1_set_size(W.layer, 0, u32(a.height))
+		wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor(TOP | LEFT | RIGHT))
+		wlr.layer_surface_v1_set_exclusive_zone(W.layer, i32(a.height))
+		wl.surface_commit(W.surface)
+	} else {
 	W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, nil, .overlay, "k4")
 	wlr.layer_surface_v1_add_listener(W.layer, &layer_listener, nil)
 	W.width, W.height = a.width, a.height
 	wlr.layer_surface_v1_set_size(W.layer, u32(a.width), u32(a.height))
 	anchor: i32
-	TOP, BOTTOM, LEFT, RIGHT :: i32(1), i32(2), i32(4), i32(8)
 	switch a.opts.anchor {
 	case .Center:
 	case .Top: anchor = TOP
@@ -417,11 +434,20 @@ run_wayland :: proc(a: ^App) -> bool {
 	wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor(anchor))
 	m := i32(a.opts.margin)
 	wlr.layer_surface_v1_set_margin(W.layer, m, m, m, m)
+	if a.opts.popup_w > 0 {
+		// a popup under a bar module: below the bar (it keeps its exclusive zone), centred on
+		// the module, kept on the output
+		anchor = TOP | LEFT
+		wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor(anchor))
+		left := clamp(a.opts.popup_x - a.width / 2, 8, max(a.opts.popup_w - a.width - 8, 8))
+		wlr.layer_surface_v1_set_margin(W.layer, 6, 0, 0, i32(left))
+	}
 	wlr.layer_surface_v1_set_keyboard_interactivity(W.layer, .exclusive)
 	wl.surface_commit(W.surface)
 	// Ghostty's shaders when it has any and EGL / OpenGL 4.3 work; else the shm path
 	if !gpu_init_window(W.display, W.surface, a.width * W.scale, a.height * W.scale) && G.display != nil && len(shader_paths()) > 0 {
 		fmt.eprintln("k4: shaders need EGL with OpenGL 4.3; drawing without them")
+	}
 	}
 
 	fd := linux.Fd(i(wl.display_get_fd(W.display)))
@@ -435,18 +461,26 @@ run_wayland :: proc(a: ^App) -> bool {
 		}
 		if (W.dirty || gpu_animating()) && !W.frame_pending && W.configured do timeout = 0
 		tick := a.menu != nil ? menu_tick_ms(a.menu) : -1 // a slow loader: the waiting count and slow lines
+		if a.bar != nil do tick = bar_tick(a)               // the bar: the clock and the next module run
 		if tick >= 0 && (timeout < 0 || i32(tick) < timeout) do timeout = i32(tick)
 		fds := make([dynamic]linux.Poll_Fd, 0, 8, context.temp_allocator)
 		append(&fds, linux.Poll_Fd{fd = fd, events = {.IN}})
 		if a.menu != nil do menu_poll_fds(a.menu, &fds) // background section loaders
+		if a.bar != nil do bar_poll_fds(a.bar, &fds)       // module commands, sway events
 		n, _ := linux.poll(fds[:], timeout)
-		if n == 0 && tick >= 0 { menu_on_tick(a); W.dirty = true }
+		if n == 0 && tick >= 0 {
+			if a.bar != nil { bar_tick(a) } else do menu_on_tick(a)
+			W.dirty = true
+		}
 		if n > 0 && .IN in fds[0].revents {
 			if i(wl.display_read_events(W.display)) < 0 { a.exit = 1; break }
 		} else {
 			wl.display_cancel_read(W.display)
 		}
-		for pf in fds[1:] do if pf.revents != {} && menu_on_readable(a, pf.fd) do W.dirty = true
+		for pf in fds[1:] do if pf.revents != {} {
+			if a.bar != nil { if bar_on_readable(a, pf.fd) do W.dirty = true }
+			else if menu_on_readable(a, pf.fd) do W.dirty = true
+		}
 		free_all(context.temp_allocator)
 		if i(wl.display_dispatch_pending(W.display)) < 0 { a.exit = 1; break }
 		if W.repeat_key != 0 && time.tick_diff(W.repeat_at, time.tick_now()) >= 0 {

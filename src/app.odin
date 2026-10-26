@@ -32,6 +32,9 @@ Options :: struct {
 	no_icons:      bool,
 	menu:          bool,
 	open:          string,
+	bar:           bool,   // --bar: the status bar
+	output:        string, // --output NAME: the bar's output
+	popup_x, popup_w: int, // --popup-x/--popup-w: open under a bar module (centre x, output width)
 	dump:          bool, // --dump: print the state as text instead of a PNG
 }
 
@@ -55,6 +58,7 @@ App :: struct {
 	caret:    [4]int, // the text caret as last drawn (buffer pixels: x, y top, w, h; w 0 = none), for shaders
 	hits:     [dynamic]Hit, // where the last frame drew its rows (mouse)
 	menu:     ^Menu,
+	bar:      ^Bar,
 	has_icons: bool,
 	// layout in logical pixels
 	pad, row_h, prompt_h, icon_px, gap, width, height, shown: int,
@@ -167,6 +171,7 @@ draw_text_f :: proc(cv: ^Canvas, f: ^Font, text: string, x, y_top: int, color: u
 
 app_draw :: proc(a: ^App, cv: ^Canvas, scale: int) {
 	clear(&a.hits)
+	if a.bar != nil { bar_draw(a, cv, scale); return }
 	if a.menu != nil { menu_draw(a, cv, scale); return }
 	t := a.theme
 	S :: proc(v, scale: int) -> int { return v * scale }
@@ -317,6 +322,7 @@ app_edit_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> boo
 
 // dmenu mode: the pointer selects a row, a click takes it, the wheel moves.
 app_pointer_move :: proc(a: ^App, x, y: int) -> bool {
+	if a.bar != nil do return bar_pointer_move(a, x, y)
 	if a.menu != nil do return menu_pointer_move(a, x, y)
 	h, ok := hit_at(a, x, y)
 	if !ok || h.kind != .Row || h.a == a.selected do return false
@@ -324,6 +330,7 @@ app_pointer_move :: proc(a: ^App, x, y: int) -> bool {
 	return true
 }
 app_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
+	if a.bar != nil do return bar_pointer_click(a, x, y, button)
 	if a.menu != nil do return menu_pointer_click(a, x, y, button)
 	if button == 3 { a.exit = 1; a.done = true; return true }
 	h, ok := hit_at(a, x, y)
@@ -333,6 +340,7 @@ app_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 	return true
 }
 app_pointer_scroll :: proc(a: ^App, n: int) -> bool {
+	if a.bar != nil do return bar_pointer_scroll(a, n)
 	if a.menu != nil do return menu_pointer_scroll(a, n)
 	app_move(a, n)
 	return true

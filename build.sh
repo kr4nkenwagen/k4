@@ -33,7 +33,7 @@ fi
 case "${1:-}" in
   debug)   odin build src -out:k4 -debug -collection:vendor_k4=vendor ;;
   test)    odin test tests -collection:vendor_k4=vendor -define:ODIN_TEST_LOG_LEVEL=warning
-           odin build src -out:k4 -collection:vendor_k4=vendor && sh tests/menu.sh ;;   # menu behaviour, as text
+           odin build src -out:k4 -collection:vendor_k4=vendor && sh tests/menu.sh && sh tests/bar.sh ;;   # menu and bar behaviour, as text
   install) odin build src -out:k4 -o:speed -collection:vendor_k4=vendor && install -Dm755 k4 "$HOME/.local/bin/k4" ;;
   *)       odin build src -out:k4 -o:speed -collection:vendor_k4=vendor ;;
 esac

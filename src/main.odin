@@ -30,6 +30,9 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --no-icons              ignore icon fields
   --menu                  two-pane launcher (sections, actions, views); input format in menu.odin
   --open ID               menu mode: start inside the section with this id
+  --popup-x X, --popup-w W   open as a popup under a bar module: its centre x, the output width
+  --bar                   the status bar (modules on stdin; format in bar.odin)
+  --output NAME           the bar's output (default: the compositor's choice)
   --config FILE           accepted and ignored (fuzzel compatibility)
   --dry-run FILE.png      render one frame to a PNG without Wayland, then print the selection
   --dump                  like --dry-run without the PNG: print the menu state as text (tests)
@@ -99,6 +102,10 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--no-icons": o.no_icons = true
 		case "--menu": o.menu = true
 		case "--open": o.open = value(args, &i, inline, has_inline)
+		case "--bar": o.bar = true
+		case "--output": o.output = value(args, &i, inline, has_inline)
+		case "--popup-x": o.popup_x, _ = strconv.parse_int(value(args, &i, inline, has_inline))
+		case "--popup-w": o.popup_w, _ = strconv.parse_int(value(args, &i, inline, has_inline))
 		case "--config": _ = value(args, &i, inline, has_inline)
 		case "--dry-run": o.dry_run = value(args, &i, inline, has_inline)
 		case "--dump": o.dump = true
@@ -136,7 +143,11 @@ main :: proc() {
 	}
 
 	// rows, or the menu tree
-	if opts.menu {
+	if opts.bar {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		bar_setup(a, string(data))
+		a.bar.output = opts.output
+	} else if opts.menu {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		menu_setup(a, string(data))
 		if v, ok := strconv.parse_int(os.get_env("K4_SLOW_MS", context.temp_allocator)); ok do a.menu.slow_ms = max(v, 1)
@@ -153,12 +164,16 @@ main :: proc() {
 		// (K4_DRY_NOWAIT=keys: wait for the first load, not for what the keys start)
 		nowait := os.get_env("K4_DRY_NOWAIT", context.temp_allocator)
 		wait := nowait == ""
-		if a.menu != nil { if wait || nowait == "keys" do menu_load_all(a) }
+		if a.bar != nil {
+			bar_load_all(a)
+			a.width = a.opts.width_chars > 0 ? a.opts.width_chars : 1280 // dry runs: a 1280 px strip unless -w
+			a.bar.width = a.width
+		} else if a.menu != nil { if wait || nowait == "keys" do menu_load_all(a) }
 		else do app_layout(a)
 		press_keys(a, opts.keys)
 		if a.menu != nil && wait do menu_load_all(a) // a stay action started by the keys, and the reload after it
 		if a.menu != nil && !wait { time.sleep(time.Duration(clamp(a.menu.slow_ms, 0, 2000) + 50) * time.Millisecond); menu_on_tick(a) }
-		if a.menu == nil do app_move(a, opts.select)
+		if a.menu == nil && a.bar == nil do app_move(a, opts.select)
 		s := opts.scale
 		a.scale = s
 		if s != 1 {
@@ -179,6 +194,7 @@ main :: proc() {
 				os.exit(2)
 			}
 		}
+		if opts.dump && a.bar != nil do fmt.print(bar_dump(a))
 		if opts.dump && a.menu != nil && !a.done {
 			fmt.print(menu_dump(a))
 			if os.get_env("K4_DUMP_HITS", context.temp_allocator) != "" { // where the rows are, for pointer tests
@@ -186,12 +202,12 @@ main :: proc() {
 				for h in a.hits do fmt.printfln("hit %v %d:%d at %d,%d %dx%d", h.kind, h.a, h.b, h.x, h.y, h.w, h.h)
 			}
 		}
-		if a.menu == nil && !a.done do app_accept(a)
-		if a.menu != nil && !a.done do a.exit = 1
+		if a.menu == nil && a.bar == nil && !a.done do app_accept(a)
+		if (a.menu != nil || a.bar != nil) && !a.done do a.exit = 1
 	} else {
-		if a.menu == nil do app_layout(a)
+		if a.menu == nil && a.bar == nil do app_layout(a)
 		press_keys(a, opts.keys)
-		if a.menu == nil do app_move(a, opts.select)
+		if a.menu == nil && a.bar == nil do app_move(a, opts.select)
 		if !run_wayland(a) do os.exit(2)
 	}
 	if a.exit == 0 do fmt.println(a.result)

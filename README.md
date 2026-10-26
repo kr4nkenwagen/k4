@@ -47,6 +47,16 @@ Everything happens inside the launcher:
   replaces them (a skeleton, or the last fetch), and `slow` lines appear when a loader takes
   8 s or more.
 
+## Bar mode
+
+`k4 --bar --output NAME` is a status bar along the top of one output (Waybar's job): modules
+from stdin (format at the top of `src/bar.odin`). Workspaces and the focused window come live
+from sway's IPC socket, the clock is built in, every other module is a command that prints
+plain text or Waybar's JSON (`text`, `tooltip`, `class`), either every N seconds or as a
+running follower. Hovering highlights, clicks and the wheel run the module's commands with
+`K4_BAR_X`, `K4_BAR_WIDTH` and `K4_BAR_OUTPUT` set, so a `k4 --menu --popup-x X --popup-w W`
+opens under the module. Not yet: the system tray and tooltips.
+
 ## Build
 
 Needs [mise](https://mise.jdx.dev) (it installs the Odin version pinned in `mise.toml`), clang

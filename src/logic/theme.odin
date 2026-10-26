@@ -6,12 +6,12 @@ import "core:strings"
 // Colours as 0xRRGGBB, resolved from an Omarchy colors.toml with the same fallbacks
 // Omarchy's templates use.
 Theme :: struct {
-	bg, fg, fg_bright, fg_dim, accent, selection, muted, red, blue, yellow: u32,
+	bg, fg, fg_bright, fg_dim, accent, selection, muted, red, blue, yellow, green, cyan, magenta, orange: u32,
 }
 
 DEFAULT_THEME :: Theme{ // Tokyo Night
 	bg = 0x1a1b26, fg = 0xa9b1d6, fg_bright = 0xc0caf5, fg_dim = 0x565f89,
-	accent = 0x7aa2f7, selection = 0x292e42, muted = 0x414868, red = 0xf7768e, blue = 0x7aa2f7, yellow = 0xe0af68,
+	accent = 0x7aa2f7, selection = 0x292e42, muted = 0x414868, red = 0xf7768e, blue = 0x7aa2f7, yellow = 0xe0af68, green = 0x9ece6a, cyan = 0x7dcfff, magenta = 0xbb9af7, orange = 0xff9e64,
 }
 
 parse_colors_toml :: proc(data: string, allocator := context.temp_allocator) -> map[string]u32 {
@@ -48,5 +48,9 @@ theme_from_colors :: proc(data: string) -> Theme {
 	if v, ok := pick(m, "red", "color1"); ok do t.red = v
 	if v, ok := pick(m, "blue", "color4"); ok do t.blue = v
 	if v, ok := pick(m, "yellow", "color3"); ok do t.yellow = v
+	if v, ok := pick(m, "green", "color2"); ok do t.green = v
+	if v, ok := pick(m, "cyan", "color6"); ok do t.cyan = v
+	if v, ok := pick(m, "magenta", "color5"); ok do t.magenta = v
+	if v, ok := pick(m, "orange", "yellow", "color3"); ok do t.orange = v
 	return t
 }
