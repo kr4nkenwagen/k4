@@ -93,3 +93,9 @@ hypr_focus_window :: proc(addr: string) {
 	if lua do hypr_request(strings.concatenate({"dispatch hl.dsp.focus({ window = \"address:", addr, "\" })"}, context.temp_allocator))
 	else do hypr_request(strings.concatenate({"dispatch focuswindow address:", addr}, context.temp_allocator))
 }
+
+// A dispatch in Omarchy's Lua syntax, or the old one for a classic config.
+hypr_dispatch_lua :: proc(lua_call, classic: string) {
+	lua := os.exists(strings.concatenate({os.get_env("HOME", context.temp_allocator), "/.config/hypr/hyprland.lua"}, context.temp_allocator))
+	hypr_request(strings.concatenate({"dispatch ", lua ? lua_call : classic}, context.temp_allocator))
+}

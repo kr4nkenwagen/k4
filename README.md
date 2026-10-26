@@ -82,6 +82,13 @@ popups are built from these.
 A click outside any k4 menu closes it: a transparent surface under it catches the click, clear
 of the bar.
 
+`k4 --overview` (Super+Tab) shows every workspace at once over the dimmed desktop: a card per
+workspace with its windows in miniature and listed; ←→↑↓ and 1–9 pick and go, Tab steps into a
+card's windows (↵ focuses, x closes), ⇧↵ moves the focused window there, typing finds windows
+across all of them (`src/overview.odin`).
+
+The bar, popups and the overview run Ghostty's shaders as the launcher does.
+
 `k4 --osd 'ICON|PERCENT|MAX|VALUE|…'` is the on-screen display: 300×48 above the bottom of the
 focused output for 1.2 s; another call while it shows updates it in place.
 Not yet: the system tray.

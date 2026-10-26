@@ -55,6 +55,7 @@ Wl :: struct {
 	cpu:        []u32, // GPU path: the CPU frame before the shaders
 	bar_h:      int,   // the bar's requested surface height (it grows for a tooltip)
 	bar_region: [4]int, // the preview card in the input region as last set
+	bar_gpu:    bool,   // the bar tried the shader path (after its first configure: then it has a size)
 	// the menu's click catcher: a transparent surface under it over the rest of the output
 	// (clear of the bar's exclusive zone): a click there closes k4
 	catcher:    ^wl.surface,
@@ -294,6 +295,7 @@ handle_keycode :: proc(code: u32) {
 	sym := state_key_get_one_sym(W.state, code)
 	ctrl := state_mod_name_is_active(W.state, "Control", XKB_STATE_MODS_EFFECTIVE) > 0
 	alt := state_mod_name_is_active(W.state, "Mod1", XKB_STATE_MODS_EFFECTIVE) > 0
+	W.app.shift = state_mod_name_is_active(W.state, "Shift", XKB_STATE_MODS_EFFECTIVE) > 0
 	buf: [64]u8
 	text: string
 	if W.compose != nil && !ctrl && compose_state_feed(W.compose, sym) == XKB_COMPOSE_FEED_ACCEPTED {
@@ -493,7 +495,17 @@ run_wayland :: proc(a: ^App) -> bool {
 	W.surface = wl.compositor_create_surface(W.compositor)
 	wl.surface_add_listener(W.surface, &surface_listener, nil)
 	TOP, BOTTOM, LEFT, RIGHT :: i32(1), i32(2), i32(4), i32(8)
-	if a.osd != nil {
+	if a.ov != nil {
+		// the overview: the focused output, every edge, clear of the bar; all of the keyboard
+		W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, nil, .overlay, "k4-overview")
+		wlr.layer_surface_v1_add_listener(W.layer, &layer_listener, nil)
+		W.width, W.height = 0, 0
+		wlr.layer_surface_v1_set_size(W.layer, 0, 0)
+		wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor(TOP | BOTTOM | LEFT | RIGHT))
+		wlr.layer_surface_v1_set_exclusive_zone(W.layer, 0)
+		wlr.layer_surface_v1_set_keyboard_interactivity(W.layer, .exclusive)
+		wl.surface_commit(W.surface)
+	} else if a.osd != nil {
 		// the feedback box: centred above the bottom of the focused output, no input at all
 		W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, nil, .overlay, "k4-osd")
 		wlr.layer_surface_v1_add_listener(W.layer, &layer_listener, nil)
@@ -593,6 +605,11 @@ run_wayland :: proc(a: ^App) -> bool {
 			W.repeat_at = time.tick_add(time.tick_now(), time.Second / time.Duration(max(W.repeat_rate, 1)))
 		}
 		if a.bar != nil && (a.bar.want_h != W.bar_h || a.bar.want_region != W.bar_region) && W.configured do bar_resize(a.bar)
+		if (a.bar != nil || a.ov != nil) && W.configured && !W.bar_gpu && W.width > 0 {
+			// Ghostty's shaders on the bar and the overview too, once their size is known
+			W.bar_gpu = true
+			if gpu_init_window(W.display, W.surface, W.width * W.scale, W.height * W.scale) do W.dirty = true
+		}
 		if a.menu != nil && W.configured {
 			w, h := menu_size(a)
 			if w != a.width || h != a.height { a.width, a.height = w, h; menu_resize(a) }

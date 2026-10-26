@@ -37,6 +37,7 @@ Options :: struct {
 	popup:         Popup, // --popup: open under a bar module
 	compact:       bool,  // --compact: the module's own page in the design's popup frame
 	osd:           string, // --osd SPEC: the on-screen display (osd.odin)
+	overview:      bool,   // --overview
 	dump:          bool, // --dump: print the state as text instead of a PNG
 }
 
@@ -68,6 +69,8 @@ App :: struct {
 	menu:     ^Menu,
 	bar:      ^Bar,
 	osd:      ^Osd, // --osd: the feedback box
+	ov:       ^Ov,  // --overview: every workspace (overview.odin)
+	shift:    bool, // Shift is held (the key being handled)
 	osd_font, osd_bold, osd_icon: ^Font,
 	has_icons: bool,
 	// layout in logical pixels
@@ -183,6 +186,7 @@ app_draw :: proc(a: ^App, cv: ^Canvas, scale: int) {
 	clear(&a.hits)
 	if a.bar != nil { bar_draw(a, cv, scale); return }
 	if a.osd != nil { osd_draw(a, cv, scale); return }
+	if a.ov != nil { ov_draw(a, cv, scale); return }
 	if a.menu != nil { menu_draw(a, cv, scale); return }
 	t := a.theme
 	S :: proc(v, scale: int) -> int { return v * scale }
@@ -283,6 +287,7 @@ next_cp :: proc(s: []u8, i: int) -> int {
 
 // Returns true when the frame needs redrawing.
 app_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string, alt := false) -> bool {
+	if a.ov != nil do return ov_key(a, k, ctrl, a.shift, ch, text)
 	if a.menu != nil do return menu_key(a, k, ctrl, alt, ch, text)
 	return app_edit_key(a, k, ctrl, ch, text)
 }
@@ -334,6 +339,7 @@ app_edit_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> boo
 // dmenu mode: the pointer selects a row, a click takes it, the wheel moves.
 app_pointer_move :: proc(a: ^App, x, y: int) -> bool {
 	if a.bar != nil do return bar_pointer_move(a, x, y)
+	if a.ov != nil do return false
 	if a.menu != nil do return menu_pointer_move(a, x, y)
 	h, ok := hit_at(a, x, y)
 	if !ok || h.kind != .Row || h.a == a.selected do return false
@@ -342,6 +348,7 @@ app_pointer_move :: proc(a: ^App, x, y: int) -> bool {
 }
 app_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 	if a.bar != nil do return bar_pointer_click(a, x, y, button)
+	if a.ov != nil do return ov_click(a, x, y, button)
 	if a.menu != nil do return menu_pointer_click(a, x, y, button)
 	if button == 3 { a.exit = 1; a.done = true; return true }
 	h, ok := hit_at(a, x, y)
@@ -352,6 +359,7 @@ app_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 }
 app_pointer_scroll :: proc(a: ^App, n: int) -> bool {
 	if a.bar != nil do return bar_pointer_scroll(a, n)
+	if a.ov != nil do return false
 	if a.menu != nil do return menu_pointer_scroll(a, n)
 	app_move(a, n)
 	return true

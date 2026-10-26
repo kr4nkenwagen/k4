@@ -39,5 +39,12 @@ check "clock: a meeting now" "center: [T1 · Standup · now]" "$(clock "$tmp/now
 prev=$(K4_BAR_CLIENTS=clients.json K4_BAR_MONITORS=monitors.json run2 --keys "<move:50,13>" | grep '^preview')
 check "workspace preview: its windows, focused and floating marked, web apps named" "preview 2 web · eDP-1: [>_ ghostty] [Fi firefox focused] [Di discord float]" "$prev"
 check "no preview off the workspaces" "" "$(K4_BAR_CLIENTS=clients.json K4_BAR_MONITORS=monitors.json run2 --keys "<move:50,13><move:900,13>" | grep '^preview')"
+# the overview (Super+Tab): every workspace, 1–8 always, its windows; keys move, Tab steps in, typing finds
+ov() { K4_BAR_WORKSPACES=one-output.json K4_BAR_CLIENTS=clients.json K4_BAR_MONITORS=monitors.json "$K4" --overview --dump "$@" 2>&1; }
+check "overview: 1–8, the focused one picked" "overview 8 workspaces|  1 Workspace 1:|* 2 web: [ghostty] [firefox] [discord]|  3 Workspace 3:" "$(ov | head -4 | paste -sd'|')"
+check "overview: → picks the next card" "* 3 Workspace 3:" "$(ov --keys "<right>" | grep '^\*')"
+check "overview: Tab steps into the windows" "* 2 web: [ghostty] [>firefox] [discord]" "$(ov --keys "<tab><tab>" | grep '^\*')"
+check "overview: typing finds windows" "overview \"fire\" · 1 match|* 2 web: [ghostty] [firefox hit] [discord]" "$(ov --keys "fire" | grep '^overview\|^\*' | paste -sd'|')"
+check "overview: Esc clears the search, then closes" "exit 1" "$(ov --keys "fire<esc><esc>"; echo "exit $?")"
 echo "bar tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

@@ -253,52 +253,13 @@ prev_draw :: proc(a: ^App, cv: ^Canvas, S, x0, y0: int) {
 	MW, MH := PREV_MW * S, PREV_MH * S
 	fill_rect(cv, mx, my, MW, MH, argb(mix(t.bg, t.blue, 0.16), 0xff))
 	if n == 0 do text_in(cv, f11, "empty", mx + (MW - tw(f11, "empty")) / 2, my, MH, argb(t.fg_dim, 0xff))
-	draw_win :: proc(a: ^App, cv: ^Canvas, S, mx, my, MW, MH, i: int, wi: Prev_Win) {
-		b := a.bar
-		t := a.theme
-		p := &b.prev
-		g := wi.full ? 0 : 3 * S
-		bx := mx + int(wi.x * f32(MW)) + g
-		by := my + int(wi.y * f32(MH)) + g
-		bw := max(int(wi.w * f32(MW)) - 2 * g, 8 * S)
-		bh := max(int(wi.h * f32(MH)) - 2 * g, 8 * S)
-		bx, by = clamp(bx, mx, mx + MW - bw), clamp(by, my, my + MH - bh)
-		if wi.floating do fill_rect(cv, bx + 3 * S, by + 6 * S, bw, bh, argb(0, 0x70)) // the shadow
-		fill_rect(cv, bx, by, bw, bh, argb(mix(t.bg, t.fg, 0.04), 0xff))
-		on := p.row == i
-		bc := wi.urgent ? t.red : (wi.focused ? t.accent : (on ? t.fg : t.selection))
-		bt := wi.focused || wi.urgent || on ? 2 * S : S
-		rounded_rect(cv, bx, by, bw, bh, 0, 0, f32(bt), argb(bc, 0xff))
-		top := by + bt
-		if len(wi.group) > 1 { // tabs
-			tw_ := (bw - 2 * bt) / len(wi.group)
-			for gname, gi in wi.group {
-				tx := bx + bt + gi * tw_
-				if gname == wi.app do fill_rect(cv, tx, top, tw_, 13 * S, argb(t.selection, 0xff))
-				text_in(cv, p.f8, ellipsize(p.f8, gname, tw_ - 6 * S), tx + 3 * S, top, 13 * S, argb(gname == wi.app ? t.fg : t.fg_dim, 0xff))
-			}
-			top += 13 * S
-		} else if !wi.full {
-			if wi.focused do fill_rect(cv, bx + bt, top, bw - 2 * bt, 12 * S, argb(t.selection, 0xff))
-			text_in(cv, p.f8, ellipsize(p.f8, wi.title, bw - 2 * bt - 8 * S), bx + bt + 4 * S, top, 12 * S, argb(wi.focused ? t.fg : t.fg_dim, 0xff))
-			top += 12 * S
-		}
-		small := bw < 140 * S || bh < 70 * S
-		mf := small ? p.f10b : p.f13b
-		mww := tw(mf, wi.mono) + 8 * S
-		mhh := int(mf.line_h) + 2 * S
-		inner := by + bh - bt - top
-		total := mhh + 3 * S + int(p.f9.line_h)
-		cy := top + max((inner - total) / 2, 0)
-		fill_rect(cv, bx + (bw - mww) / 2, cy, mww, mhh, argb(token(t, wi.tok, t.fg), 0xff))
-		text_in(cv, mf, wi.mono, bx + (bw - mww) / 2 + 4 * S, cy, mhh, argb(t.bg, 0xff))
-		if cy + mhh + 3 * S + int(p.f9.line_h) <= by + bh - bt {
-			text_in(cv, p.f9, ellipsize(p.f9, wi.app, bw - 8 * S), bx + (bw - tw(p.f9, ellipsize(p.f9, wi.app, bw - 8 * S))) / 2, cy + mhh + 3 * S, int(p.f9.line_h), argb(t.fg_dim, 0xff))
-		}
-		hit_add(a, bx, by, bw, bh, .Item, i, -1)
+	mf := Mini_Fonts{p.f8, p.f9, p.f10b, p.f13b}
+	draw_win :: proc(a: ^App, cv: ^Canvas, S, mx, my, MW, MH, i: int, wi: Prev_Win, mf: Mini_Fonts) {
+		r := mini_win(a, cv, S, mx, my, MW, MH, wi, a.bar.prev.row == i, mf, false)
+		hit_add(a, r[0], r[1], r[2], r[3], .Item, i, -1)
 	}
-	for wi, i in p.wins do if !wi.floating && !wi.hidden do draw_win(a, cv, S, mx, my, MW, MH, i, wi)
-	for wi, i in p.wins do if wi.floating && !wi.hidden do draw_win(a, cv, S, mx, my, MW, MH, i, wi)
+	for wi, i in p.wins do if !wi.floating && !wi.hidden do draw_win(a, cv, S, mx, my, MW, MH, i, wi, mf)
+	for wi, i in p.wins do if wi.floating && !wi.hidden do draw_win(a, cv, S, mx, my, MW, MH, i, wi, mf)
 	// a row per window (hidden tabs too)
 	ry := my + MH + 6 * S
 	for wi, i in p.wins {
@@ -335,6 +296,58 @@ prev_draw :: proc(a: ^App, cv: ^Canvas, S, x0, y0: int) {
 	fill_rect(cv, x, fy, w, S, argb(sel, 0xff))
 	foot := n > 0 ? "Click a window to jump to it · scroll on the bar to switch" : "Click the workspace to go there"
 	text_in(cv, p.f10, ellipsize(p.f10, foot, w - 20 * S), x + 10 * S, fy + S, 24 * S, argb(t.fg_dim, 0xff))
+}
+
+Mini_Fonts :: struct { title, app, mono_small, mono_big: ^Font }
+
+// One window in a miniature (the preview and the overview): its box in its place, the title
+// bar (or the group's tabs), the app's mark and name; on: the pointer's or the cursor's window,
+// faded: it does not match the overview's search. Returns where the box went.
+mini_win :: proc(a: ^App, cv: ^Canvas, S, mx, my, MW, MH: int, wi: Prev_Win, on: bool, f: Mini_Fonts, faded: bool) -> [4]int {
+	t := a.theme
+	g := wi.full ? 0 : 3 * S
+	bx := mx + int(wi.x * f32(MW)) + g
+	by := my + int(wi.y * f32(MH)) + g
+	bw := max(int(wi.w * f32(MW)) - 2 * g, 8 * S)
+	bh := max(int(wi.h * f32(MH)) - 2 * g, 8 * S)
+	bx, by = clamp(bx, mx, mx + MW - bw), clamp(by, my, my + MH - bh)
+	if wi.floating do fill_rect(cv, bx + 3 * S, by + 6 * S, bw, bh, argb(0, 0x70)) // the shadow
+	fill_rect(cv, bx, by, bw, bh, argb(mix(t.bg, t.fg, 0.04), 0xff))
+	bc := on ? t.fg : (wi.urgent ? t.red : (wi.focused ? t.accent : t.selection))
+	bt := wi.focused || wi.urgent || on ? 2 * S : S
+	rounded_rect(cv, bx, by, bw, bh, 0, 0, f32(bt), argb(bc, 0xff))
+	top := by + bt
+	th := int(f.title.line_h) + 2 * S
+	if len(wi.group) > 1 { // tabs
+		tw_ := (bw - 2 * bt) / len(wi.group)
+		for gname, gi in wi.group {
+			tx := bx + bt + gi * tw_
+			if gname == wi.app do fill_rect(cv, tx, top, tw_, th, argb(t.selection, 0xff))
+			text_in(cv, f.title, ellipsize(f.title, gname, tw_ - 6 * S), tx + 3 * S, top, th, argb(gname == wi.app ? t.fg : t.fg_dim, 0xff))
+		}
+		top += th
+	} else if !wi.full {
+		if wi.focused do fill_rect(cv, bx + bt, top, bw - 2 * bt, th, argb(t.selection, 0xff))
+		text_in(cv, f.title, ellipsize(f.title, wi.title, bw - 2 * bt - 8 * S), bx + bt + 4 * S, top, th, argb(wi.focused ? t.fg : t.fg_dim, 0xff))
+		top += th
+	}
+	small := bw < 140 * S || bh < 70 * S
+	mfont := small ? f.mono_small : f.mono_big
+	mww := tw(mfont, wi.mono) + 8 * S
+	mhh := int(mfont.line_h) + 2 * S
+	inner := by + bh - bt - top
+	total := mhh + 3 * S + int(f.app.line_h)
+	cy := top + max((inner - total) / 2, 0)
+	if cy + mhh <= by + bh - bt {
+		fill_rect(cv, bx + (bw - mww) / 2, cy, mww, mhh, argb(token(t, wi.tok, t.fg), 0xff))
+		text_in(cv, mfont, wi.mono, bx + (bw - mww) / 2 + 4 * S, cy, mhh, argb(t.bg, 0xff))
+	}
+	if cy + mhh + 3 * S + int(f.app.line_h) <= by + bh - bt {
+		an := ellipsize(f.app, wi.app, bw - 8 * S)
+		text_in(cv, f.app, an, bx + (bw - tw(f.app, an)) / 2, cy + mhh + 3 * S, int(f.app.line_h), argb(t.fg_dim, 0xff))
+	}
+	if faded do fill_rect(cv, bx, by, bw, bh, argb(t.bg, 0xa6))
+	return {bx, by, bw, bh}
 }
 
 // A click on a window in the card: focus it.

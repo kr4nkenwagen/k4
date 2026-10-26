@@ -36,12 +36,13 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
                           sections or search; ⌃↵ prints launcher:ID for the full launcher)
   --bar                   the status bar (modules on stdin; format in bar.odin)
   --osd SPEC              the on-screen display for 1.2 s; a second call updates it (osd.odin)
+  --overview              every workspace and its windows at once (Super+Tab; overview.odin)
   --output NAME           the bar's output (default: the compositor's choice)
   --config FILE           accepted and ignored (fuzzel compatibility)
   --dry-run FILE.png      render one frame to a PNG without Wayland, then print the selection
   --dump                  like --dry-run without the PNG: print the menu state as text (tests)
   --keys KEYS, --select N keys pressed before the first frame: text plus <down> <up> <left>
-                          <right> <enter> <esc> <tab> <bs> <pgup> <pgdn> <alt-x> <ctrl-x>, and the pointer:
+                          <right> <enter> <esc> <tab> <bs> <pgup> <pgdn> <alt-x> <ctrl-x> <shift-enter>, and the pointer:
                           <move:x,y> <click:x,y> <rclick:x,y> <mclick:x,y> <wheel:n>; then move the selection
   --scale N               dry runs: buffer scale
 
@@ -119,6 +120,7 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 				o.popup.set = o.popup.out_w > 0
 			}
 		case "--compact": o.compact = true
+		case "--overview": o.overview = true
 		case "--osd": o.osd = value(args, &i, inline, has_inline)
 		case "--config": _ = value(args, &i, inline, has_inline)
 		case "--dry-run": o.dry_run = value(args, &i, inline, has_inline)
@@ -157,7 +159,10 @@ main :: proc() {
 	}
 
 	// rows, or the menu tree
-	if opts.osd != "" {
+	if opts.overview {
+		ov_setup(a)
+		a.width, a.height = a.opts.width_chars > 0 ? a.opts.width_chars : 1920, 1080 // dry runs; Wayland: the output
+	} else if opts.osd != "" {
 		if opts.dry_run == "" && opts.dump == false && osd_send(opts.osd) do os.exit(0) // one already shows: it took the update
 		a.osd = new(Osd)
 		osd_set(a.osd, opts.osd)
@@ -195,11 +200,11 @@ main :: proc() {
 			a.width = a.opts.width_chars > 0 ? a.opts.width_chars : 1280 // dry runs: a 1280 px strip unless -w
 			a.bar.width = a.width
 		} else if a.menu != nil { if wait || nowait == "keys" do menu_load_all(a) }
-		else do app_layout(a)
+		else if a.ov == nil do app_layout(a)
 		press_keys(a, opts.keys)
 		if a.menu != nil && wait do menu_load_all(a) // a stay action started by the keys, and the reload after it
 		if a.menu != nil && !wait { time.sleep(time.Duration(clamp(a.menu.slow_ms, 0, 2000) + 50) * time.Millisecond); menu_on_tick(a) }
-		if a.menu == nil && a.bar == nil && a.osd == nil do app_move(a, opts.select)
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil do app_move(a, opts.select)
 		if a.menu != nil do a.width, a.height = menu_size(a)
 		if a.bar != nil { bar_tick(a); a.height = a.bar.want_h } // a tooltip or the preview grows it
 		s := opts.scale
@@ -230,14 +235,15 @@ main :: proc() {
 				for h in a.hits do fmt.printfln("hit %v %d:%d at %d,%d %dx%d", h.kind, h.a, h.b, h.x, h.y, h.w, h.h)
 			}
 		}
+		if opts.dump && a.ov != nil && !a.done do fmt.print(ov_dump(a))
 		if opts.dump && a.osd != nil do fmt.printfln("osd %s %d/%d %s %s", a.osd.icon, a.osd.pct, a.osd.vmax, a.osd.value, a.osd.label)
-		if a.menu == nil && a.bar == nil && a.osd == nil && !a.done do app_accept(a)
-		if (a.menu != nil || a.bar != nil) && !a.done do a.exit = 1
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && !a.done do app_accept(a)
+		if (a.menu != nil || a.bar != nil || a.ov != nil) && !a.done do a.exit = 1
 		if a.osd != nil do a.exit = 0
 	} else {
-		if a.menu == nil && a.bar == nil && a.osd == nil do app_layout(a)
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil do app_layout(a)
 		press_keys(a, opts.keys)
-		if a.menu == nil && a.bar == nil && a.osd == nil do app_move(a, opts.select)
+		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil do app_move(a, opts.select)
 		if a.menu != nil do a.width, a.height = menu_size(a)
 		if a.osd != nil do osd_listen(a.osd)
 		if !run_wayland(a) do os.exit(2)
@@ -312,6 +318,8 @@ press_keys :: proc(a: ^App, keys: string) {
 					continue
 				}
 				ctrl, alt := false, false
+				a.shift = strings.has_prefix(tok, "shift-")
+				if a.shift do tok = tok[6:]
 				if strings.has_prefix(tok, "ctrl-") { ctrl = true; tok = tok[5:] }
 				if strings.has_prefix(tok, "alt-") { alt = true; tok = tok[4:] }
 				k := Key.None
