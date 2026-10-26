@@ -1,0 +1,2 @@
+store-portal
+exit 0

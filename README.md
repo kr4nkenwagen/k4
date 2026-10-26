@@ -57,11 +57,14 @@ make sure that is not the unrelated apt package of the same name.
 ```sh
 ./build.sh            # ./k4
 ./build.sh install    # ~/.local/bin/k4
-./build.sh test       # unit tests (matcher, row parser, theme)
+./build.sh test       # unit tests (matcher, row parser, theme) and menu tests
 ```
 
 `--dry-run out.png` renders one frame without a compositor and prints the row Enter
-would pick, which is how layout and selection are tested headlessly.
+would pick, which is how layout and selection are tested headlessly. `--dump` prints the
+menu's state as text instead; `tests/menu.sh` drives a fixture tree through pages, input,
+directives, steppers, skeletons and slow loads with it and compares the result with
+`tests/menu/expected/` (`UPDATE=1 tests/menu.sh` rewrites those after an intended change).
 
 ## Layout
 

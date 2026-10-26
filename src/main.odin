@@ -32,6 +32,7 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --open ID               menu mode: start inside the section with this id
   --config FILE           accepted and ignored (fuzzel compatibility)
   --dry-run FILE.png      render one frame to a PNG without Wayland, then print the selection
+  --dump                  like --dry-run without the PNG: print the menu state as text (tests)
   --keys KEYS, --select N keys pressed before the first frame: text plus <down> <up> <left>
                           <right> <enter> <esc> <tab> <bs> <alt-x> <ctrl-x>; then move the selection
   --scale N               dry runs: buffer scale
@@ -95,6 +96,7 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--open": o.open = value(args, &i, inline, has_inline)
 		case "--config": _ = value(args, &i, inline, has_inline)
 		case "--dry-run": o.dry_run = value(args, &i, inline, has_inline)
+		case "--dump": o.dump = true
 		case "--keys": o.keys = value(args, &i, inline, has_inline)
 		case "--select": o.select, _ = strconv.parse_int(value(args, &i, inline, has_inline))
 		case "--scale": o.scale, _ = strconv.parse_int(value(args, &i, inline, has_inline))
@@ -140,7 +142,7 @@ main :: proc() {
 	}
 	app_rematch(a)
 
-	if opts.dry_run != "" {
+	if opts.dry_run != "" || opts.dump {
 		// same path as Wayland: layout at 1x, then the fonts at the buffer scale
 		// K4_DRY_NOWAIT: render while loaders still run (skeletons, the slow state)
 		wait := os.get_env("K4_DRY_NOWAIT", context.temp_allocator) == ""
@@ -156,14 +158,17 @@ main :: proc() {
 			font_resize(&a.font, px * f32(s))
 			for f in a.fonts do font_resize(f, f.base_px * f32(s))
 		}
-		cv := Canvas{make([]u32, a.width * a.height * s * s), a.width * s, a.height * s}
-		app_draw(a, &cv, s)
-		rgba := canvas_rgba(&cv)
-		path := strings.clone_to_cstring(opts.dry_run, context.temp_allocator)
-		if k4_png_write(path, c.int(cv.w), c.int(cv.h), raw_data(rgba)) == 0 {
-			fmt.eprintln("k4: could not write", opts.dry_run)
-			os.exit(2)
+		if opts.dry_run != "" {
+			cv := Canvas{make([]u32, a.width * a.height * s * s), a.width * s, a.height * s}
+			app_draw(a, &cv, s)
+			rgba := canvas_rgba(&cv)
+			path := strings.clone_to_cstring(opts.dry_run, context.temp_allocator)
+			if k4_png_write(path, c.int(cv.w), c.int(cv.h), raw_data(rgba)) == 0 {
+				fmt.eprintln("k4: could not write", opts.dry_run)
+				os.exit(2)
+			}
 		}
+		if opts.dump && a.menu != nil && !a.done do fmt.print(menu_dump(a))
 		if a.menu == nil && !a.done do app_accept(a)
 		if a.menu != nil && !a.done do a.exit = 1
 	} else {
@@ -234,13 +239,13 @@ press_keys :: proc(a: ^App, keys: string) {
 					if !ctrl && !alt do text = tok
 				}
 				app_key(a, k, ctrl, ch, text, alt)
-				if a.menu != nil && a.opts.dry_run != "" && os.get_env("K4_DRY_NOWAIT", context.temp_allocator) == "" do menu_load_all(a) // pages and runs a key started
+				if a.menu != nil && (a.opts.dry_run != "" || a.opts.dump) && os.get_env("K4_DRY_NOWAIT", context.temp_allocator) == "" do menu_load_all(a) // pages and runs a key started
 				continue
 			}
 		}
 		r, n := utf8.decode_rune_in_string(s)
 		app_key(a, .None, false, r, s[:n])
-		if a.menu != nil && a.opts.dry_run != "" && os.get_env("K4_DRY_NOWAIT", context.temp_allocator) == "" do menu_load_all(a)
+		if a.menu != nil && (a.opts.dry_run != "" || a.opts.dump) && os.get_env("K4_DRY_NOWAIT", context.temp_allocator) == "" do menu_load_all(a)
 		s = s[n:]
 	}
 }

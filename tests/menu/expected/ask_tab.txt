@@ -1,0 +1,10 @@
+focus Sub
+crumb NETWORK › ASK
+query (Ask a question…)
+count gemma
+toast Ran  model
+title Ask · Type a question
+!! accent: Enter sends to gemma · Answers open in a terminal.
+* Model | ‹ gemma ›
+exit 1
+log: run model value=qwen

@@ -1,0 +1,9 @@
+focus Sub
+crumb KESTREL › DOCKER
+query (Search Docker…)
+count 1 action
+hints ↑↓ Move · ↵ Run · ← ⌫ Back · ⌃J ⌃K Vim
+title Docker · Containers
+!! muted: Docker isn't installed · Install it to manage containers.
+* Install Docker | opens terminal
+exit 1

@@ -3,7 +3,7 @@
 #   ./build.sh            release build to ./k4
 #   ./build.sh debug      debug build
 #   ./build.sh install    release build, copy to ~/.local/bin/k4
-#   ./build.sh test       run the unit tests
+#   ./build.sh test       run the unit tests and the menu tests (tests/menu.sh)
 set -e
 cd "$(dirname "$0")"
 cc=${CC:-cc}; ar=${AR:-ar}
@@ -32,7 +32,8 @@ if [ ! -f vendor/kb_text_shape/lib/kb_text_shape.a ]; then
 fi
 case "${1:-}" in
   debug)   odin build src -out:k4 -debug -collection:vendor_k4=vendor ;;
-  test)    odin test tests -collection:vendor_k4=vendor -define:ODIN_TEST_LOG_LEVEL=warning ;;
+  test)    odin test tests -collection:vendor_k4=vendor -define:ODIN_TEST_LOG_LEVEL=warning
+           odin build src -out:k4 -collection:vendor_k4=vendor && sh tests/menu.sh ;;   # menu behaviour, as text
   install) odin build src -out:k4 -o:speed -collection:vendor_k4=vendor && install -Dm755 k4 "$HOME/.local/bin/k4" ;;
   *)       odin build src -out:k4 -o:speed -collection:vendor_k4=vendor ;;
 esac

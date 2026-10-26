@@ -1,0 +1,9 @@
+focus Sub
+crumb KESTREL › GITHUB
+query (Search GitHub…)
+count 1 item
+hints ↑↓ Move · ↵ Run · ← ⌫ Back · ⌃J ⌃K Vim
+title GitHub · jon · fetched
+== REVIEW REQUESTS [1]
+* Fix scaling | sway#8432 (mark ◆)
+exit 1

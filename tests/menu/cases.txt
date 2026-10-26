@@ -1,0 +1,28 @@
+# name	--open	keys	env (a | separates several VAR=value; - for an empty field)
+top
+search_skips_pages	-	fix
+shortcuts	-	<esc>
+page_open	net	<enter>
+page_back	net	<enter><bs>
+password	net	<enter><enter>secret
+password_run	net	<enter><enter>secret<enter>
+input_cancel	net	<enter><enter>ab<esc>
+input_empty_bs	net	<down><enter><bs>
+results_page	net	<down><enter>vim<enter>
+results_back	net	<down><enter>vim<enter><enter>
+confirm_yes	net	<down><down><enter>y
+confirm_no	net	<down><down><enter><esc>
+slider	net	<down><down><down><right><right>
+choice	net	<down><down><down><down><right>
+choice_wraps	net	<down><down><down><down><left>
+ask_page	net	<down><down><down><down><down><enter>
+ask_send	net	<down><down><down><down><down><enter>hello there<enter>
+ask_tab	net	<down><down><down><down><down><enter><tab>
+directive_close	net	<down><down><down><down><down><down><enter>
+shortcut_letter	-	<esc>ag
+skeleton	gh2	-	K4_DRY_NOWAIT=1|K4_SLOW_MS=100000|K4_TEST_SLEEP=3
+slow	gh2	-	K4_DRY_NOWAIT=1|K4_SLOW_MS=200|K4_TEST_SLEEP=3
+loaded	gh2
+not_installed	docker
+view_stay	net	<down><down><down><down><down><down><down><enter><enter>
+view_alt	net	<down><down><down><down><down><down><down><enter><down><tab>

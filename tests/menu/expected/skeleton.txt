@@ -1,0 +1,9 @@
+focus Sub
+crumb KESTREL › GITHUB
+query (Search PRs…)
+count loading
+hints … Loading GitHub · ⌫ Back
+title GitHub · Fetching from GitHub…
+== REVIEW REQUESTS
+~~ 2 loading bars
+exit 1

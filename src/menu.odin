@@ -498,7 +498,7 @@ menu_directive :: proc(a: ^App, line: string) {
 		// the same title again (a new search) reuses its page
 		idx := -1
 		for s, i in m.sections do if s.kind == .Page && strings.has_prefix(s.id, "k4:") && s.name == f[1] { idx = i; break }
-		pg := Section{id = fmt.aprintf("k4:%d", m.dyn_pages), name = strings.clone(f[1]), desc = strings.clone(f[2]), kind = .Page, home = home, back = -1, load = {cmd = strings.clone(strings.join(f[3:], "\t", context.temp_allocator)), state = .Lazy}}
+		pg := Section{id = fmt.aprintf("k4:%d", m.dyn_pages), name = strings.clone(f[1]), desc = strings.clone(f[2]), desc0 = strings.clone(f[2]), kind = .Page, home = home, back = -1, load = {cmd = strings.clone(strings.join(f[3:], "\t", context.temp_allocator)), state = .Lazy}}
 		m.dyn_pages += 1
 		if idx >= 0 { if m.sections[idx].load.state != .Loading do m.sections[idx] = pg } else { append(&m.sections, pg); idx = len(m.sections) - 1 }
 		page_open(a, idx)
@@ -1165,53 +1165,8 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 
 	// ---- header: crumb · query · count
 	hh := 56 * S
-	crumb, ph, count: string
 	srch := searching(m, a)
-	switch m.focus {
-	case .Menu:
-		crumb = sc ? "SHORTCUTS" : (srch ? "SEARCH" : (m.top_crumb != "" ? m.top_crumb : "MENU"))
-		ph = sc ? "Press a letter   / to search" : (m.top_ph != "" ? m.top_ph : "Search apps and actions…")
-		count = sc ? "" : (srch ? fmt.tprintf("%d results", len(m.results)) : (m.top_count != "" ? m.top_count : fmt.tprintf("%d sections", len(m.shown_sections))))
-	case .Confirm:
-		crumb = "CONFIRM"
-	case .Sub:
-		s := &m.sections[m.open]
-		if is_page(m, m.open) {
-			pg := m.sections[m.open]
-			parent := pg.back >= 0 && pg.back < len(m.sections) ? pg.back : root(m, m.open)
-			crumb = strings.to_upper(fmt.tprintf("%s › %s", m.sections[parent].name, pg.name), context.temp_allocator)
-			noun := page_noun(pg)
-			ph = sc ? "Press a number   / to filter" : fmt.tprintf("Filter %s…", noun)
-			count = sc ? "" : fmt.tprintf("%d %s", len(m.sel_actions), page_noun(pg, len(m.sel_actions)))
-		} else {
-			top := m.top_crumb != "" ? m.top_crumb : "MENU"
-			crumb = fmt.tprintf("%s › %s", sc ? "SHORTCUTS" : top, strings.to_upper(pv_name, context.temp_allocator))
-			ph = sc ? "Press a number   / to search" : fmt.tprintf("Search %s…", pv_name)
-			count = sc ? "" : fmt.tprintf("%d actions", len(m.sel_actions))
-		}
-		if !sc {
-			if s.ph != "" do ph = s.ph
-			if s.has_d do count = s.count
-			if section_slow(m, s) do count = fmt.tprintf("waiting %d s", int(time.duration_seconds(time.tick_since(s.load.started))))
-		}
-	case .Input:
-		crumb = strings.to_upper(m.input_prompt, context.temp_allocator)
-		ph = m.input_password ? "Password" : "Type here"
-		count = "Enter to submit"
-	case .View:
-		v := m.views[m.view]
-		crumb = strings.to_upper(fmt.tprintf("%s › %s", pv_name, v.title), context.temp_allocator)
-		// a plural view name says what the items are (games); else the title (Theme -> themes)
-		plural := strings.has_suffix(v.name, "s") ? v.name : strings.to_lower(v.title, context.temp_allocator)
-		if !strings.has_suffix(plural, "s") do plural = strings.concatenate({plural, "s"}, context.temp_allocator)
-		ph = fmt.tprintf("Filter %s…", plural)
-		count = fmt.tprintf("%d %s", len(m.shown_items), plural)
-	case .Web:
-		crumb, ph = "g DUCKDUCKGO", "Search the web…"
-		count = q_of(a) != "" ? "Enter to open" : ""
-	case .Calc:
-		crumb, ph = "= CALC", "sqrt(2) * 15"
-	}
+	crumb, ph, count := menu_header(a, sc)
 	cx := x0 + 16 * S
 	cw := tw(m.f_small, crumb) + 16 * S
 	chh := 24 * S
@@ -1242,30 +1197,7 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	if m.toast != "" {
 		text_in(cv, m.f_small, m.toast, x0 + 16 * S, fy, fh, argb(acc, 0xff), x1 - 60 * S)
 	} else {
-		hints: [][2]string
-		switch {
-		case sc && m.focus == .Menu: hints = {{"a–z", "Open"}, {"j k", "Move"}, {"/", "Search"}, {"Esc", "Close"}}
-		case sc: hints = {{"1–9", "Run"}, {"j k", "Move"}, {"⌫", "Back"}, {"/", "Search"}}
-		case m.focus == .Confirm: hints = {{"y", "Yes"}, {"n Esc", "No"}, {"← →", "Choose"}}
-		case m.focus == .Input: hints = {{"↵", "Submit"}, {"Esc", "Cancel"}}
-		case m.focus == .Sub && !sc && is_page(m, m.open) && m.sections[m.open].kind == .Font: hints = {{"↑↓", "Preview"}, {"↵", "Apply font"}, {"⌫", "Back"}}
-		case m.focus == .Sub && !sc && len(m.sections[m.open].hints) > 0: hints = m.sections[m.open].hints[:]
-		case m.focus == .Menu && !sc && m.top_crumb != "":
-			keys := make([dynamic]string, 0, 8, context.temp_allocator)
-			for i in m.shown_sections do if m.sections[i].key != "" do append(&keys, strings.to_lower(m.sections[i].key, context.temp_allocator))
-			hints = {{"↑↓", "Move"}, {"→ ↵", "Open"}, {"Esc", fmt.tprintf("Shortcuts %s", strings.join(keys[:], " ", context.temp_allocator))}}
-		case m.focus == .View && view_alt_label(m) != "": hints = {{"←→↑↓", "Move"}, {"↵", "Launch"}, {"Tab", view_alt_label(m)}, {"⌫", "Back"}}
-		case srch: hints = {{"↑↓", "Move"}, {"↵", "Run"}, {"Esc", "Shortcuts"}}
-		case m.focus == .Menu: hints = {{"↑↓", "Move"}, {"→ ↵", "Open"}, {"type", "Search all"}, {"Esc", "Shortcuts"}}
-		case m.focus == .Sub && on_slider(m): hints = {{"↑↓", "Move"}, {"← →", "Adjust"}, {"⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
-		case m.focus == .Sub: hints = {{"↑↓", "Move"}, {"↵", "Run"}, {"← ⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
-		case m.focus == .Web: hints = {{"↑↓", "Bang"}, {"↵", "Open in browser"}, {"⌫", "Exit mode"}}
-		case m.focus == .Calc: hints = {{"↵", "Copy result"}, {"⌫", "Exit mode"}, {"Esc", "Back"}}
-		case m.views[m.view].name == "wall": hints = {{"←→↑↓", "Move"}, {"↵", "Set background"}, {"⌫", "Back"}}
-		case m.views[m.view].name == "theme": hints = {{"↑↓", "Move"}, {"↵", "Apply theme"}, {"⌫", "Back"}}
-		case m.views[m.view].grid: hints = {{"←→↑↓", "Move"}, {"↵", "Open"}, {"⌫", "Back"}}
-		case: hints = {{"↑↓", "Move"}, {"↵", "Open"}, {"⌫", "Back"}}
-		}
+		hints := menu_hints(a, sc)
 		hx := x0 + 16 * S
 		for h in hints {
 			hx += kbd(cv, a, h[0], hx, fy + fh / 2, S) + 6 * S
@@ -1292,6 +1224,93 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	}
 }
 
+// The header's crumb, placeholder and count for the current state (drawn, and --dump).
+menu_header :: proc(a: ^App, sc: bool) -> (crumb, ph, count: string) {
+	m := a.menu
+	pv := m.focus == .Menu ? m.cur : m.open
+	pv_name := pv < len(m.sections) ? m.sections[pv].name : ""
+	srch := searching(m, a)
+	switch m.focus {
+	case .Menu:
+		crumb = sc ? "SHORTCUTS" : (srch ? "SEARCH" : (m.top_crumb != "" ? m.top_crumb : "MENU"))
+		ph = sc ? "Press a letter   / to search" : (m.top_ph != "" ? m.top_ph : "Search apps and actions…")
+		count = sc ? "" : (srch ? fmt.tprintf("%d result%s", len(m.results), len(m.results) == 1 ? "" : "s") : (m.top_count != "" ? m.top_count : fmt.tprintf("%d sections", len(m.shown_sections))))
+	case .Confirm:
+		crumb = "CONFIRM"
+	case .Sub:
+		s := &m.sections[m.open]
+		if is_page(m, m.open) {
+			pg := m.sections[m.open]
+			parent := pg.back >= 0 && pg.back < len(m.sections) ? pg.back : root(m, m.open)
+			crumb = strings.to_upper(fmt.tprintf("%s › %s", m.sections[parent].name, pg.name), context.temp_allocator)
+			noun := page_noun(pg)
+			ph = sc ? "Press a number   / to filter" : fmt.tprintf("Filter %s…", noun)
+			count = sc ? "" : fmt.tprintf("%d %s", len(m.sel_actions), page_noun(pg, len(m.sel_actions)))
+		} else {
+			top := m.top_crumb != "" ? m.top_crumb : "MENU"
+			crumb = fmt.tprintf("%s › %s", sc ? "SHORTCUTS" : top, strings.to_upper(pv_name, context.temp_allocator))
+			ph = sc ? "Press a number   / to search" : fmt.tprintf("Search %s…", pv_name)
+			count = sc ? "" : fmt.tprintf("%d action%s", len(m.sel_actions), len(m.sel_actions) == 1 ? "" : "s")
+		}
+		if !sc {
+			if s.ph != "" do ph = s.ph
+			if s.has_d do count = s.count
+			if section_slow(m, s) do count = fmt.tprintf("waiting %d s", int(time.duration_seconds(time.tick_since(s.load.started))))
+		}
+	case .Input:
+		crumb = strings.to_upper(m.input_prompt, context.temp_allocator)
+		ph = m.input_password ? "Password" : "Type here"
+		count = "Enter to submit"
+	case .View:
+		v := m.views[m.view]
+		crumb = strings.to_upper(fmt.tprintf("%s › %s", pv_name, v.title), context.temp_allocator)
+		// a plural view name says what the items are (games); else the title (Theme -> themes)
+		plural := strings.has_suffix(v.name, "s") ? v.name : strings.to_lower(v.title, context.temp_allocator)
+		if !strings.has_suffix(plural, "s") do plural = strings.concatenate({plural, "s"}, context.temp_allocator)
+		ph = fmt.tprintf("Filter %s…", plural)
+		count = fmt.tprintf("%d %s", len(m.shown_items), plural)
+	case .Web:
+		crumb, ph = "g DUCKDUCKGO", "Search the web…"
+		count = q_of(a) != "" ? "Enter to open" : ""
+	case .Calc:
+		crumb, ph = "= CALC", "sqrt(2) * 15"
+	}
+	return
+}
+
+// The footer's key hints for the current state (drawn, and --dump).
+menu_hints :: proc(a: ^App, sc: bool) -> (hints: [][2]string) {
+	m := a.menu
+	srch := searching(m, a)
+	switch {
+	case sc && m.focus == .Menu: hints = {{"a–z", "Open"}, {"j k", "Move"}, {"/", "Search"}, {"Esc", "Close"}}
+	case sc: hints = {{"1–9", "Run"}, {"j k", "Move"}, {"⌫", "Back"}, {"/", "Search"}}
+	case m.focus == .Confirm: hints = {{"y", "Yes"}, {"n Esc", "No"}, {"← →", "Choose"}}
+	case m.focus == .Input: hints = {{"↵", "Submit"}, {"Esc", "Cancel"}}
+	case m.focus == .Sub && !sc && is_page(m, m.open) && m.sections[m.open].kind == .Font: hints = {{"↑↓", "Preview"}, {"↵", "Apply font"}, {"⌫", "Back"}}
+	case m.focus == .Sub && !sc && len(m.sections[m.open].hints) > 0: hints = m.sections[m.open].hints[:]
+	case m.focus == .Menu && !sc && m.top_crumb != "":
+		keys := make([dynamic]string, 0, 8, context.temp_allocator)
+		for i in m.shown_sections do if m.sections[i].key != "" do append(&keys, strings.to_lower(m.sections[i].key, context.temp_allocator))
+		hints = {{"↑↓", "Move"}, {"→ ↵", "Open"}, {"Esc", fmt.tprintf("Shortcuts %s", strings.join(keys[:], " ", context.temp_allocator))}}
+	case m.focus == .View && view_alt_label(m) != "": hints = {{"←→↑↓", "Move"}, {"↵", "Launch"}, {"Tab", view_alt_label(m)}, {"⌫", "Back"}}
+	case srch: hints = {{"↑↓", "Move"}, {"↵", "Run"}, {"Esc", "Shortcuts"}}
+	case m.focus == .Menu: hints = {{"↑↓", "Move"}, {"→ ↵", "Open"}, {"type", "Search all"}, {"Esc", "Shortcuts"}}
+	case m.focus == .Sub && on_slider(m): hints = {{"↑↓", "Move"}, {"← →", "Adjust"}, {"⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
+	case m.focus == .Sub: hints = {{"↑↓", "Move"}, {"↵", "Run"}, {"← ⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
+	case m.focus == .Web: hints = {{"↑↓", "Bang"}, {"↵", "Open in browser"}, {"⌫", "Exit mode"}}
+	case m.focus == .Calc: hints = {{"↵", "Copy result"}, {"⌫", "Exit mode"}, {"Esc", "Back"}}
+	case m.views[m.view].name == "wall": hints = {{"←→↑↓", "Move"}, {"↵", "Set background"}, {"⌫", "Back"}}
+	case m.views[m.view].name == "theme": hints = {{"↑↓", "Move"}, {"↵", "Apply theme"}, {"⌫", "Back"}}
+	case m.views[m.view].grid: hints = {{"←→↑↓", "Move"}, {"↵", "Open"}, {"⌫", "Back"}}
+	case: hints = {{"↑↓", "Move"}, {"↵", "Open"}, {"⌫", "Back"}}
+	}
+	// the literals above live in this frame: hand out a copy
+	out := make([][2]string, len(hints), context.temp_allocator)
+	copy(out, hints)
+	return out
+}
+
 @(private)
 on_slider :: proc(m: ^Menu) -> bool {
 	return m.focus == .Sub && m.si < len(m.sel_actions) && m.sections[m.open].actions[m.sel_actions[m.si]].slider
@@ -1309,6 +1328,11 @@ draw_panes :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
 
 	// left: sections (a group= flag starts a heading: "Not installed")
 	ry, rh := by + 6 * S, 28 * S
+	// every section stays visible (the design: nothing scrolls): rows give up a little height
+	groups := 0
+	{ g := ""; for i in m.shown_sections do if m.sections[i].group != g { g = m.sections[i].group; if g != "" do groups += 1 } }
+	need := len(m.shown_sections) * rh + groups * (18 * S + int(m.f_tiny.line_h))
+	if need > bh - 12 * S && len(m.shown_sections) > 0 do rh = max(22 * S, (bh - 12 * S - groups * (18 * S + int(m.f_tiny.line_h))) / len(m.shown_sections))
 	if len(m.shown_sections) == 0 do text_in(cv, m.f_body, "No match", x0 + 14 * S, ry + 4 * S, rh, argb(dim, 0xff))
 	group := ""
 	for i in m.shown_sections {
@@ -2063,4 +2087,90 @@ bold_font :: proc(a: ^App, px: f32) -> (^Font, bool) {
 	if !font_load(f, strings.concatenate({a.family, ":weight=bold"}, context.temp_allocator), px, true) do return nil, false
 	f.fallback = a.font.fallback
 	return f, true
+}
+
+// ---------- --dump: the state as text, for tests ----------
+
+// What the menu shows, line by line: header, footer, then the body's entries ("*" marks the
+// selection). Fonts and pixels play no part, so the tests run the same on every machine.
+menu_dump :: proc(a: ^App) -> string {
+	m := a.menu
+	b := strings.builder_make(context.temp_allocator)
+	sc := m.shortcut && (m.focus == .Menu || m.focus == .Sub)
+	crumb, ph, count := menu_header(a, sc)
+	q := string(a.query[:])
+	if m.focus == .Input && m.input_password do q = strings.repeat("•", utf8.rune_count_in_string(q), context.temp_allocator)
+	fmt.sbprintfln(&b, "focus %v%s", m.focus, sc ? " shortcuts" : "")
+	fmt.sbprintfln(&b, "crumb %s", crumb)
+	fmt.sbprintfln(&b, "query %s", q != "" ? q : fmt.tprintf("(%s)", ph))
+	fmt.sbprintfln(&b, "count %s", count)
+	if m.toast != "" do fmt.sbprintfln(&b, "toast %s", m.toast)
+	else {
+		hs := make([dynamic]string, 0, 8, context.temp_allocator)
+		for h in menu_hints(a, sc) do append(&hs, fmt.tprintf("%s %s", h[0], h[1]))
+		fmt.sbprintfln(&b, "hints %s", strings.join(hs[:], " · ", context.temp_allocator))
+	}
+	switch m.focus {
+	case .Menu:
+		if searching(m, a) {
+			for r, i in m.results {
+				sec := m.sections[r.sec]
+				label := r.act >= 0 ? sec.actions[r.act].label : sec.name
+				fmt.sbprintfln(&b, "%s %s | %s", i == m.si ? "*" : " ", label, r.act >= 0 ? sec.name : "section")
+			}
+		} else {
+			group := ""
+			for i in m.shown_sections {
+				s := m.sections[i]
+				if s.group != group { group = s.group; if group != "" do fmt.sbprintfln(&b, "== %s", strings.to_upper(group, context.temp_allocator)) }
+				fmt.sbprintfln(&b, "%s [%s] %s%s", i == m.cur ? "*" : " ", s.key, s.name, s.dim ? " (dim)" : "")
+			}
+		}
+	case .Sub:
+		s := &m.sections[m.open]
+		desc := section_slow(m, s) ? fmt.tprintf("Still waiting on %s", s.name) : s.desc
+		fmt.sbprintfln(&b, "title %s · %s", s.name, desc)
+		for e in m.shown_actions {
+			act := s.actions[e]
+			sel := m.si < len(m.sel_actions) && m.sel_actions[m.si] == e
+			switch act.kind {
+			case .Heading: fmt.sbprintfln(&b, "== %s%s", strings.to_upper(act.label, context.temp_allocator), act.count != "" ? fmt.tprintf(" [%s]", act.count) : "")
+			case .Empty: fmt.sbprintfln(&b, "-- %s", act.label)
+			case .Notice: fmt.sbprintfln(&b, "!! %s: %s · %s", act.tone, act.label, act.meta)
+			case .Bars: fmt.sbprintfln(&b, "~~ %d loading bars", act.bars)
+			case .Card: fmt.sbprintfln(&b, "[] %s %s · %s · %s", act.state, act.label, act.meta, act.line2)
+			case .Progress: fmt.sbprintfln(&b, "↓ %s %d%% · %s", act.label, act.pct, act.meta)
+			case .Row:
+				meta := act.meta
+				if len(act.choices) > 0 do meta = fmt.tprintf("‹ %s ›", act.meta)
+				if act.slider do meta = fmt.tprintf("%d%%", act.value)
+				extra := make([dynamic]string, 0, 4, context.temp_allocator)
+				if act.mark != "" do append(&extra, fmt.tprintf("mark %s", act.mark))
+				if act.sub != "" do append(&extra, fmt.tprintf("sub%s", act.sub))
+				if act.chip != "" do append(&extra, fmt.tprintf("chip %s", act.chip))
+				if act.key != "" do append(&extra, fmt.tprintf("key %s", act.key))
+				if act.dim do append(&extra, "dim")
+				fmt.sbprintf(&b, "%s %s", sel ? "*" : " ", act.label)
+				if meta != "" do fmt.sbprintf(&b, " | %s", meta)
+				if len(extra) > 0 do fmt.sbprintf(&b, " (%s)", strings.join(extra[:], ", ", context.temp_allocator))
+				fmt.sbprintln(&b)
+			}
+		}
+	case .View:
+		for j, i in m.shown_items {
+			it := m.views[m.view].items[j]
+			fmt.sbprintfln(&b, "%s %s%s%s", i == m.si ? "*" : " ", it.label, it.current ? " (current)" : "", it.sub != "" ? fmt.tprintf(" · %s", it.sub) : "")
+		}
+	case .Input:
+		fmt.sbprintfln(&b, "ask %s · %s%s", m.input_prompt, m.input_hint, m.input_password ? " (password)" : "")
+	case .Confirm:
+		act := m.sections[m.pending.sec].actions[m.pending.act]
+		fmt.sbprintfln(&b, "confirm %s · %s · %s", act.confirm_title, act.confirm_body, m.cf == 0 ? "Yes" : "No")
+	case .Web:
+		for r, i in web_rows(a) do fmt.sbprintfln(&b, "%s %s %s | %s", i == m.si ? "*" : " ", r.tag, r.label, r.meta)
+	case .Calc:
+		out, ok := logic.calc_eval(q_of(a))
+		fmt.sbprintfln(&b, "= %s", ok ? out : "…")
+	}
+	return strings.to_string(b)
 }

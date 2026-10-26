@@ -1,0 +1,10 @@
+focus Sub
+crumb NETWORK › RESULTS
+query (Filter results…)
+count 2 results
+toast Search  done
+title Results · for vim
+* pkg-a | apt
+  pkg-b | apt
+exit 1
+log: run search input=vim

@@ -1,0 +1,28 @@
+T	KESTREL	Search everything…	3 sections
+S	net	Network	N	Wi-Fi and search	x
+A	wifi	Wi-Fi	Home	wifi
+A	search	Search packages			input=Search|Names in apt
+A	reboot	Reboot			stay;confirm=Reboot now?|Unsaved work is lost.
+A	vol	Volume			slider=40;step=10
+A	status	Status	Online		choice=Online|Away|Offline;mark=●;markc=accent
+A	ask	Ask…		ask
+A	close	Close the menu			stay
+A	t	Theme	Nord	theme
+P	wifi	Wi-Fi networks	nmcli	printf 'A\tconnect-open\tCafe\t80%%\t\tstay\nA\tconnect-secure\tHome\t40%%\t\tstay;current\nH\tMore\nA\tclose\tClose\t\t\tstay\n'
+P	ask	Ask	Type a question	printf 'Q\task-q\nD\tType a question\tgemma\tAsk a question…\nN\tEnter sends to gemma\tAnswers open in a terminal.\taccent\nA\tmodel\tModel\tgemma\t\tchoice=gemma|qwen|llama\n'
+S	apps	Apps	A	Integrations first	x
+A	steam	Steam	2 d ago		stay;key=G
+A	gh	GitHub	6 unread		stay;key=R
+S	gh2	GitHub	R	Review requests	x
+L	sleep ${K4_TEST_SLEEP:-0}; printf 'D\tjon · fetched\t1 item\nH\tReview requests\t1\nA\tpr\tFix scaling\tsway#8432\t\tmark=◆;markc=accent\n'
+D	Fetching from GitHub…	loading	Search PRs…
+Y	…	Loading GitHub	⌫	Back
+N	GitHub is slow to answer	Results fill in when they arrive.	muted	slow
+A	k4:retry	Retry			slow
+H	Review requests
+K	2
+S	docker	Docker	X	Containers	x	dim;group=Not installed
+N	Docker isn't installed	Install it to manage containers.	muted
+A	install	Install Docker	opens terminal
+V	theme	Theme	Applies everywhere	printf 'I\ttheme-nord\tNord\t\tcurrent\tstay\nI\tgame\tPortal\t\t\tsub=27 h;alt=Store page|store-portal\n'
+R	@DIR@/runner.sh

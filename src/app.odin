@@ -32,6 +32,7 @@ Options :: struct {
 	no_icons:      bool,
 	menu:          bool,
 	open:          string,
+	dump:          bool, // --dump: print the state as text instead of a PNG
 }
 
 Icon :: struct { px: []u32, w, h: int, ok: bool }

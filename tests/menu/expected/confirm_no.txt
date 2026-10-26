@@ -1,0 +1,15 @@
+focus Sub
+crumb KESTREL › NETWORK
+query (Search Network…)
+count 8 actions
+toast Cancelled
+title Network · Wi-Fi and search
+  Wi-Fi | Home
+  Search packages
+* Reboot
+  Volume | 40%
+  Status | ‹ Online › (mark ●)
+  Ask…
+  Close the menu
+  Theme | Nord
+exit 1

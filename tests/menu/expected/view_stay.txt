@@ -1,0 +1,9 @@
+focus View
+crumb NETWORK › THEME
+query (Filter themes…)
+count 2 themes
+toast Ran  theme-nord
+* Nord (current)
+  Portal · 27 h
+exit 1
+log: run theme-nord
