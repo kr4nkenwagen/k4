@@ -53,6 +53,7 @@ Wl :: struct {
 	repeat_key: u32,
 	repeat_at:  time.Tick,
 	cpu:        []u32, // GPU path: the CPU frame before the shaders
+	bar_h:      int,   // the bar's requested surface height (it grows for a tooltip)
 }
 
 W: Wl
@@ -232,7 +233,10 @@ ptr_enter :: proc "c" (data: rawptr, p: ^wl.pointer, serial: uint, s: ^wl.surfac
 	ptr_xy(x, y)
 	set_cursor(serial)
 }
-ptr_leave :: proc "c" (data: rawptr, p: ^wl.pointer, serial: uint, s: ^wl.surface) {}
+ptr_leave :: proc "c" (data: rawptr, p: ^wl.pointer, serial: uint, s: ^wl.surface) {
+	context = W.ctx
+	if W.app.bar != nil && app_pointer_move(W.app, -1, -1) do W.dirty = true // no hover, no tooltip
+}
 ptr_motion :: proc "c" (data: rawptr, p: ^wl.pointer, t: uint, x, y: wl.fixed_t) {
 	context = W.ctx
 	ptr_xy(x, y)
@@ -370,6 +374,43 @@ redraw :: proc() {
 	W.dirty = false
 }
 
+// The bar grows for a tooltip and shrinks after: the exclusive zone and the input region stay
+// the strip, so windows keep their place and clicks under the tooltip reach them.
+bar_resize :: proc(b: ^Bar) {
+	W.bar_h = b.want_h
+	wlr.layer_surface_v1_set_size(W.layer, 0, u32(b.want_h))
+	r := wl.compositor_create_region(W.compositor)
+	wl.region_add(r, 0, b.bottom ? b.want_h - b.height : 0, 1 << 20, b.height)
+	wl.surface_set_input_region(W.surface, r)
+	wl.region_destroy(r)
+	wl.surface_commit(W.surface)
+}
+
+// A popup under a bar module (the bar keeps its exclusive zone, so the margin is from the bar):
+// aligned by the module's group, 8 px from the screen edges, 4 px off the bar.
+popup_place :: proc(a: ^App) {
+	TOP, BOTTOM, LEFT :: i32(1), i32(2), i32(4)
+	p := a.opts.popup
+	x := p.x
+	switch p.side {
+	case 1: x = p.x + p.w / 2 - a.width / 2
+	case 2: x = p.x + p.w - a.width
+	}
+	x = clamp(x, 8, max(p.out_w - a.width - 8, 8))
+	wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor((p.bottom ? BOTTOM : TOP) | LEFT))
+	if p.bottom do wlr.layer_surface_v1_set_margin(W.layer, 0, 0, 4, i32(x))
+	else do wlr.layer_surface_v1_set_margin(W.layer, 4, 0, 0, i32(x))
+}
+
+// The menu's size changed (a compact popup fitting its page, or leaving the frame for the
+// launcher's): ask for the new size, placed again.
+menu_resize :: proc(a: ^App) {
+	W.width, W.height = a.width, a.height
+	wlr.layer_surface_v1_set_size(W.layer, u32(a.width), u32(a.height))
+	if a.opts.popup.set do popup_place(a)
+	wl.surface_commit(W.surface)
+}
+
 // ---------- main loop ----------
 run_wayland :: proc(a: ^App) -> bool {
 	W.app = a
@@ -402,7 +443,19 @@ run_wayland :: proc(a: ^App) -> bool {
 	W.surface = wl.compositor_create_surface(W.compositor)
 	wl.surface_add_listener(W.surface, &surface_listener, nil)
 	TOP, BOTTOM, LEFT, RIGHT :: i32(1), i32(2), i32(4), i32(8)
-	if a.bar != nil {
+	if a.osd != nil {
+		// the feedback box: centred above the bottom of the focused output, no input at all
+		W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, nil, .overlay, "k4-osd")
+		wlr.layer_surface_v1_add_listener(W.layer, &layer_listener, nil)
+		W.width, W.height = a.width, a.height
+		wlr.layer_surface_v1_set_size(W.layer, u32(a.width), u32(a.height))
+		wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor(BOTTOM))
+		wlr.layer_surface_v1_set_margin(W.layer, 0, 0, 28, 0) // above a bottom bar too (exclusive zone 0 keeps clear of it)
+		r := wl.compositor_create_region(W.compositor)
+		wl.surface_set_input_region(W.surface, r)
+		wl.region_destroy(r)
+		wl.surface_commit(W.surface)
+	} else if a.bar != nil {
 		// the bar: a strip along the top of its output that windows keep clear of, no keyboard
 		out: ^wl.output
 		for o in W.outputs do if o.name == a.opts.output do out = o.wl
@@ -410,8 +463,9 @@ run_wayland :: proc(a: ^App) -> bool {
 		W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, out, .top, "k4-bar")
 		wlr.layer_surface_v1_add_listener(W.layer, &layer_listener, nil)
 		W.width, W.height = 0, a.height
+		W.bar_h = a.height
 		wlr.layer_surface_v1_set_size(W.layer, 0, u32(a.height))
-		wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor(TOP | LEFT | RIGHT))
+		wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor((a.bar.bottom ? BOTTOM : TOP) | LEFT | RIGHT))
 		wlr.layer_surface_v1_set_exclusive_zone(W.layer, i32(a.height))
 		wl.surface_commit(W.surface)
 	} else {
@@ -434,14 +488,7 @@ run_wayland :: proc(a: ^App) -> bool {
 	wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor(anchor))
 	m := i32(a.opts.margin)
 	wlr.layer_surface_v1_set_margin(W.layer, m, m, m, m)
-	if a.opts.popup_w > 0 {
-		// a popup under a bar module: below the bar (it keeps its exclusive zone), centred on
-		// the module, kept on the output
-		anchor = TOP | LEFT
-		wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor(anchor))
-		left := clamp(a.opts.popup_x - a.width / 2, 8, max(a.opts.popup_w - a.width - 8, 8))
-		wlr.layer_surface_v1_set_margin(W.layer, 6, 0, 0, i32(left))
-	}
+	if a.opts.popup.set do popup_place(a)
 	wlr.layer_surface_v1_set_keyboard_interactivity(W.layer, .exclusive)
 	wl.surface_commit(W.surface)
 	// Ghostty's shaders when it has any and EGL / OpenGL 4.3 work; else the shm path
@@ -462,14 +509,20 @@ run_wayland :: proc(a: ^App) -> bool {
 		if (W.dirty || gpu_animating()) && !W.frame_pending && W.configured do timeout = 0
 		tick := a.menu != nil ? menu_tick_ms(a.menu) : -1 // a slow loader: the waiting count and slow lines
 		if a.bar != nil do tick = bar_tick(a)               // the bar: the clock and the next module run
+		if a.osd != nil {                                   // the feedback box: gone after 1.2 s
+			left := osd_left(a.osd)
+			if left == 0 { a.done = true; break }
+			tick = left
+		}
 		if tick >= 0 && (timeout < 0 || i32(tick) < timeout) do timeout = i32(tick)
 		fds := make([dynamic]linux.Poll_Fd, 0, 8, context.temp_allocator)
 		append(&fds, linux.Poll_Fd{fd = fd, events = {.IN}})
 		if a.menu != nil do menu_poll_fds(a.menu, &fds) // background section loaders
 		if a.bar != nil do bar_poll_fds(a.bar, &fds)       // module commands, sway events
+		if a.osd != nil && a.osd.sock >= 0 do append(&fds, linux.Poll_Fd{fd = a.osd.sock, events = {.IN}})
 		n, _ := linux.poll(fds[:], timeout)
 		if n == 0 && tick >= 0 {
-			if a.bar != nil { bar_tick(a) } else do menu_on_tick(a)
+			if a.bar != nil { bar_tick(a) } else if a.menu != nil do menu_on_tick(a)
 			W.dirty = true
 		}
 		if n > 0 && .IN in fds[0].revents {
@@ -478,7 +531,8 @@ run_wayland :: proc(a: ^App) -> bool {
 			wl.display_cancel_read(W.display)
 		}
 		for pf in fds[1:] do if pf.revents != {} {
-			if a.bar != nil { if bar_on_readable(a, pf.fd) do W.dirty = true }
+			if a.osd != nil { if osd_on_readable(a.osd) do W.dirty = true }
+			else if a.bar != nil { if bar_on_readable(a, pf.fd) do W.dirty = true }
 			else if menu_on_readable(a, pf.fd) do W.dirty = true
 		}
 		free_all(context.temp_allocator)
@@ -486,6 +540,11 @@ run_wayland :: proc(a: ^App) -> bool {
 		if W.repeat_key != 0 && time.tick_diff(W.repeat_at, time.tick_now()) >= 0 {
 			handle_keycode(W.repeat_key)
 			W.repeat_at = time.tick_add(time.tick_now(), time.Second / time.Duration(max(W.repeat_rate, 1)))
+		}
+		if a.bar != nil && a.bar.want_h != W.bar_h && W.configured do bar_resize(a.bar)
+		if a.menu != nil && W.configured {
+			w, h := menu_size(a)
+			if w != a.width || h != a.height { a.width, a.height = w, h; menu_resize(a) }
 		}
 		if (W.dirty || gpu_animating()) && !a.done do redraw()
 	}

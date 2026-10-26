@@ -1,0 +1,3 @@
+launcher:net
+exit 0
+log: load apps

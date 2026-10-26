@@ -34,9 +34,17 @@ Options :: struct {
 	open:          string,
 	bar:           bool,   // --bar: the status bar
 	output:        string, // --output NAME: the bar's output
-	popup_x, popup_w: int, // --popup-x/--popup-w: open under a bar module (centre x, output width)
+	popup:         Popup, // --popup: open under a bar module
+	compact:       bool,  // --compact: the module's own page in the design's popup frame
+	osd:           string, // --osd SPEC: the on-screen display (osd.odin)
 	dump:          bool, // --dump: print the state as text instead of a PNG
 }
+
+// Where a bar module is: its left edge and width, the output's width, its group (0 left,
+// 1 centre, 2 right) and whether the bar sits at the bottom. Left-group popups align their left
+// edge with the module's, right-group ones their right edge, centred ones centre; all keep 8 px
+// from the screen edges and sit 4 px off the bar.
+Popup :: struct { x, w, out_w, side: int, bottom, set: bool }
 
 Icon :: struct { px: []u32, w, h: int, ok: bool }
 
@@ -59,6 +67,8 @@ App :: struct {
 	hits:     [dynamic]Hit, // where the last frame drew its rows (mouse)
 	menu:     ^Menu,
 	bar:      ^Bar,
+	osd:      ^Osd, // --osd: the feedback box
+	osd_font, osd_bold, osd_icon: ^Font,
 	has_icons: bool,
 	// layout in logical pixels
 	pad, row_h, prompt_h, icon_px, gap, width, height, shown: int,
@@ -172,6 +182,7 @@ draw_text_f :: proc(cv: ^Canvas, f: ^Font, text: string, x, y_top: int, color: u
 app_draw :: proc(a: ^App, cv: ^Canvas, scale: int) {
 	clear(&a.hits)
 	if a.bar != nil { bar_draw(a, cv, scale); return }
+	if a.osd != nil { osd_draw(a, cv, scale); return }
 	if a.menu != nil { menu_draw(a, cv, scale); return }
 	t := a.theme
 	S :: proc(v, scale: int) -> int { return v * scale }

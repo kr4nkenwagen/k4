@@ -73,7 +73,7 @@ ipc_query :: proc(fd: linux.Fd, kind: u32, payload: string, allocator := context
 	return body, ok
 }
 
-Ws :: struct { name: string, num: int, focused, visible, urgent: bool, output: string }
+Ws :: struct { name: string, num: int, focused, visible, urgent: bool, output: string, empty: bool } // empty: no windows (Hyprland, and the bar's own 1–5)
 
 ipc_workspaces :: proc(fd: linux.Fd) -> (out: [dynamic]Ws, ok: bool) {
 	body := ipc_query(fd, IPC_GET_WORKSPACES, "", context.temp_allocator) or_return
@@ -84,7 +84,7 @@ ws_parse :: proc(body: []u8) -> (out: [dynamic]Ws, ok: bool) {
 	J :: struct { name: string, num: int, focused, visible, urgent: bool, output: string }
 	list: []J
 	if json.unmarshal(body, &list, allocator = context.temp_allocator) != nil do return
-	for w in list do append(&out, Ws{strings.clone(w.name), w.num, w.focused, w.visible, w.urgent, strings.clone(w.output)})
+	for w in list do append(&out, Ws{strings.clone(w.name), w.num, w.focused, w.visible, w.urgent, strings.clone(w.output), false})
 	return out, true
 }
 

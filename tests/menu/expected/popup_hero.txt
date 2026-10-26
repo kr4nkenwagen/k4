@@ -1,0 +1,13 @@
+focus Sub
+popup 380x281
+crumb NETWORK › BATTERY
+query (Filter options…)
+count 78%
+hints ↑↓ Move · ↵ ␣ Run · Esc Close
+title Battery · 78% · 3 h 40 min (full width)
+## 78% · Discharging · 3 h 40 min left
+* Power draw | 8.4 W out
+== POWER PROFILE
+  Profile | ‹ Balanced ›
+exit 1
+log: load apps

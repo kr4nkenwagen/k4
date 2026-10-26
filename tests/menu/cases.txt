@@ -54,3 +54,13 @@ entry_esc_closes	net	<esc>
 entry_page_esc_back	net	<enter><esc>
 entry_bs_main_then_esc	net	<bs><esc>
 no_entry_esc_back	-	<right><esc>
+popup_section	net	-	COMPACT=1
+popup_typing_ignored	net	xyz<down>	COMPACT=1
+popup_esc_closes	net	<esc>	COMPACT=1
+popup_bs_stays	net	<bs>	COMPACT=1
+popup_launcher	net	<down><ctrl-enter>	COMPACT=1
+popup_cal	cal	-	COMPACT=1|K4_TODAY=2026-10-26
+popup_cal_keys	cal	<down><right><right>	COMPACT=1|K4_TODAY=2026-10-26
+popup_cal_today	cal	<left><left>t	COMPACT=1|K4_TODAY=2026-10-26
+popup_hero	bat	-	COMPACT=1
+popup_page_back	net	<enter>	COMPACT=1

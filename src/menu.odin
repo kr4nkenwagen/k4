@@ -1,5 +1,6 @@
 package k4
 
+import "core:c/libc"
 import "core:fmt"
 import "core:math"
 import "core:os"
@@ -70,7 +71,7 @@ import "logic"
 // alt=<label>|<id> (Tab runs it).
 // Enter prints the chosen action's or item's id; a web search prints "url:<url>".
 
-Entry_Kind :: enum { Row, Heading, Empty, Notice, Bars, Card, Progress, Day }
+Entry_Kind :: enum { Row, Heading, Empty, Notice, Bars, Card, Progress, Day, Hero }
 
 // The Weather dashboard's data (WN/WD/WH records), drawn by draw_weather.
 Wx_Hour :: struct { day: int, t, kind, temp: string, rain: int }
@@ -86,7 +87,8 @@ Action :: struct {
 	toggle, on: bool, // toggle=on|off: drawn as a switch; Space or Enter flips it
 	choices: []string,
 	// notice: label = title, meta = body, tone; card: glyph, state, label = title, meta = line,
-	// line2 = flags; progress: label, meta, pct; bars: bars
+	// line2 = flags; progress: label, meta, pct; bars: bars; hero: pct, meta = line, active =
+	// charging
 	tone, glyph, state, line2: string,
 	active: bool,
 	pct, bars: int,
@@ -139,6 +141,8 @@ Section :: struct {
 	has_d:   bool, // a D line set the count (an empty one hides it)
 	pane:    bool, // a page drawn in the right pane, next to the sections (O pane)
 	weather: bool, // O weather: the design's Weather dashboard instead of rows
+	cal:     bool, // O cal: the month grid (the bar's clock popup) instead of rows
+	popup_w: int,  // O width=N: the compact popup's width (default 420)
 	wx_now:  [6]string, // city, location note, icon kind, temperature, condition, feels/high/low
 	wx_details: [dynamic][2]string,
 	wx_hours: [dynamic]Wx_Hour,
@@ -197,7 +201,8 @@ Menu :: struct {
 	top_crumb, top_ph, top_count: string, // T record
 	sizes:    map[int]^Font, // msize: more sizes of the UI font
 	slow_ms: int,
-	f_body, f_small, f_tiny, f_big, f_title, f_row, f_huge, f_confirm, f_bold13, f_bold12, f_bold11, f_bold10, f_glyph: ^Font,
+	cal_y, cal_m, cal_d: int, // the month grid's cursor (month 1–12)
+	f_body, f_small, f_tiny, f_big, f_title, f_row, f_huge, f_confirm, f_bold13, f_bold12, f_bold11, f_bold10, f_glyph, f_hero: ^Font,
 }
 
 MENU_W :: 760
@@ -273,7 +278,12 @@ section_line :: proc(s: ^Section, f: []string) {
 		for flag in strings.split(get(f, 1), ";", context.temp_allocator) {
 			if flag == "pane" do s.pane = true
 			if flag == "weather" do s.weather = true
+			if flag == "cal" do s.cal = true
+			if strings.has_prefix(flag, "width=") do s.popup_w, _ = strconv.parse_int(flag[6:])
 		}
+	case "X": // the battery popup's charge: X <percent> <line> [charging]
+		p, _ := strconv.parse_int(get(f, 1))
+		append(&s.actions, Action{kind = .Hero, heading = true, pct = clamp(p, 0, 100), meta = strings.clone(get(f, 2)), active = get(f, 3) == "charging"})
 	case "WN":
 		for i in 0 ..< 6 do s.wx_now[i] = strings.clone(get(f, i + 1))
 	case "WD":
@@ -729,6 +739,7 @@ menu_enter :: proc(a: ^App, idx: int) {
 	m := a.menu
 	if idx < 0 || idx >= len(m.sections) do return
 	m.focus, m.open, m.cur, m.si, m.scroll, m.toast = .Sub, idx, root(m, idx), 0, 0, ""
+	m.cal_m = 0 // the month grid starts at today (cal_ready)
 	refresh_if_stale(m, &m.sections[idx].load)
 	loader_start(m, &m.sections[idx].load)
 	clear_query(a)
@@ -1140,6 +1151,8 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 		}
 		return true
 	}
+	if compact_now(a) && m.focus == .Sub && compact_key(a, k, ctrl, ch, text) do return true
+	if m.focus == .Sub && m.sections[m.open].cal && !ctrl && !alt do return cal_key(a, k, text)
 	if alt && ch != 0 {
 		up := strings.to_upper(utf8.runes_to_string({ch}, context.temp_allocator), context.temp_allocator)
 		for s, i in m.sections do if s.key == up { menu_enter(a, i); return true }
@@ -1280,6 +1293,7 @@ badge :: proc(cv: ^Canvas, f: ^Font, label: string, x_right, y, h, S: int, bg_c,
 }
 
 menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
+	if compact_now(a) { menu_draw_compact(a, cv, S); return }
 	m := a.menu
 	t := a.theme
 	bg, fg, fgb, dim, acc := t.bg, t.fg, t.fg_bright, t.fg_dim, t.accent
@@ -1345,6 +1359,7 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		case srch: draw_results(a, cv, S, body)
 		case m.focus == .Sub && is_page(m, m.open) && m.sections[m.open].kind == .Font: draw_font(a, cv, S, body)
 		case m.focus == .Sub && m.sections[m.open].weather: draw_weather(a, cv, S, body)
+		case m.focus == .Sub && m.sections[m.open].cal: draw_cal(a, cv, S, {body[0] + (body[2] - 340 * S) / 2, body[1] + 16 * S, 340 * S, body[3] - 16 * S})
 		case m.focus == .Sub && is_page(m, m.open) && !m.sections[m.open].pane: draw_page(a, cv, S, body, sc)
 		case: draw_panes(a, cv, S, body, sc)
 		}
@@ -1353,6 +1368,295 @@ menu_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	case .View: draw_view(a, cv, S, body)
 	case .Web: draw_web(a, cv, S, body)
 	case .Calc: draw_calc(a, cv, S, body)
+	}
+}
+
+// ---------- the bar's popup (--compact): the module's own page in the design's frame ----------
+// 2 px accent border, a 40 px header (crumb chip · title · ⌃↵ launcher), the page's rows, a 30 px
+// key-hint footer; as tall as the page, at most 640 px. Views, the font page and the weather
+// dashboard need the launcher's room: they draw in the full frame.
+
+COMPACT_W :: 420
+COMPACT_MAX_H :: 640
+
+compact_now :: proc(a: ^App) -> bool {
+	m := a.menu
+	if !a.opts.compact || m == nil || m.open < 0 || m.open >= len(m.sections) do return false
+	if m.focus != .Sub && m.focus != .Confirm && m.focus != .Input do return false
+	s := &m.sections[m.open]
+	return !s.weather && s.kind != .Font
+}
+
+// The menu's surface size: the launcher's, or the popup fitted to its page.
+menu_size :: proc(a: ^App) -> (int, int) {
+	if !compact_now(a) do return MENU_W, MENU_H
+	m := a.menu
+	s := &m.sections[m.open]
+	w := s.popup_w > 0 ? s.popup_w : COMPACT_W
+	body := 0
+	switch {
+	case m.focus == .Confirm: body = 200
+	case m.focus == .Input: body = 130
+	case s.cal: body = cal_h(m)
+	case len(m.shown_actions) == 0: body = 30
+	case:
+		for e in m.shown_actions do body += entry_h(m, s.actions[e], 1, true)
+	}
+	return w, min(2 + 40 + 1 + 6 + body + 6 + 1 + 30 + 2, COMPACT_MAX_H)
+}
+
+// ⌃↵: the same page in the full launcher (the caller opens it: k4 prints launcher:ID).
+@(private)
+to_launcher :: proc(a: ^App) {
+	m := a.menu
+	id := m.sections[m.open].id
+	if strings.has_prefix(id, "k4:") && m.entry >= 0 do id = m.sections[m.entry].id
+	a.result = fmt.aprintf("launcher:%s", id)
+	a.exit = 0
+	a.done = true
+}
+
+// Keys in the popup: no filter (typing does nothing), Esc closes at its own page.
+@(private)
+compact_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> bool {
+	m := a.menu
+	s := &m.sections[m.open]
+	if ctrl && k == .Enter { to_launcher(a); return true }
+	if ctrl && (ch == 'c' || ch == 'g') { a.exit = 1; a.done = true; return true }
+	if s.cal do return cal_key(a, k, text)
+	switch {
+	case k == .Escape:
+		if at_entry(m) { a.exit = 1; a.done = true } else do menu_back(a)
+	case (k == .Left || k == .Right) && slide(a, k == .Left ? -1 : 1):
+	case k == .Backspace || k == .Left:
+		if !at_entry(m) do menu_back(a)
+	case k == .Down || k == .Tab || ctrl && (ch == 'j' || ch == 'n'): menu_move(a, 1)
+	case k == .Up || k == .Back_Tab || ctrl && (ch == 'k' || ch == 'p'): menu_move(a, -1)
+	case k == .Page_Down: menu_move(a, 8)
+	case k == .Page_Up: menu_move(a, -8)
+	case k == .Enter || k == .Right || text == " ": menu_run(a)
+	case len(text) == 1 && action_by_key(m, text) >= 0:
+		m.si = action_by_key(m, text)
+		menu_run(a)
+	}
+	return true
+}
+
+menu_draw_compact :: proc(a: ^App, cv: ^Canvas, S: int) {
+	m := a.menu
+	t := a.theme
+	bg, fgb, dim, acc := t.bg, t.fg_bright, t.fg_dim, t.accent
+	sel := argb(t.selection, 0xff)
+	s := &m.sections[m.open]
+	B := 2 * S
+	canvas_clear(cv)
+	fill_rect(cv, 0, 0, cv.w, cv.h, argb(bg, 0xff))
+	rounded_rect(cv, 0, 0, cv.w, cv.h, 0, 0, f32(B), argb(acc, 0xff))
+	x0, x1 := B, cv.w - B
+	y := B
+	// header: crumb chip · title (the query while typing into an input step) · ⌃↵ launcher
+	hh := 40 * S
+	crumb := strings.to_upper(s.name, context.temp_allocator)
+	cw := tw(m.f_bold11, crumb) + 12 * S
+	chh := int(m.f_bold11.line_h) + 6 * S
+	cx := x0 + 12 * S
+	fill_rect(cv, cx, y + (hh - chh) / 2, cw, chh, argb(acc, 0xff))
+	text_in(cv, m.f_bold11, crumb, cx + 6 * S, y + (hh - chh) / 2, chh, argb(bg, 0xff))
+	hint := "⌃↵ launcher"
+	hw := tw(m.f_tiny, hint)
+	text_in(cv, m.f_tiny, hint, x1 - 12 * S - hw, y, hh, argb(dim, 0xff))
+	tx := cx + cw + 10 * S
+	tclip := x1 - 12 * S - hw - 10 * S
+	a.caret = {}
+	if m.focus == .Input {
+		q := string(a.query[:])
+		if m.input_password do q = strings.repeat("•", utf8.rune_count_in_string(q), context.temp_allocator)
+		if q == "" do text_in(cv, m.f_bold13, m.input_label != "" ? m.input_label : m.input_prompt, tx, y, hh, argb(dim, 0xff), tclip)
+		else do text_in(cv, m.f_bold13, q, tx, y, hh, argb(fgb, 0xff), tclip)
+		qs := shape(m.f_bold13, q)
+		cur := utf8.rune_count_in_string(string(a.query[:a.cursor]))
+		caret := tx + int(qs.cp_x[min(cur, len(qs.cp_x) - 1)])
+		fill_rect(cv, caret, y + (hh - int(m.f_bold13.line_h)) / 2, max(S, 2), int(m.f_bold13.line_h), argb(acc, 0xff))
+	} else {
+		title := s.desc
+		if s.cal do title = cal_title()
+		text_in(cv, m.f_bold13, ellipsize(m.f_bold13, title, tclip - tx), tx, y, hh, argb(fgb, 0xff))
+	}
+	y += hh
+	fill_rect(cv, x0, y, x1 - x0, S, sel)
+	y += S
+	// footer: key hints, or what the last action said
+	fh := 30 * S
+	fy := cv.h - B - fh
+	fill_rect(cv, x0, fy, x1 - x0, S, sel)
+	if m.toast != "" {
+		text_in(cv, m.f_small, m.toast, x0 + 12 * S, fy, fh, argb(acc, 0xff), x1 - 12 * S)
+	} else {
+		hints := menu_hints(a, false)
+		hx := x0 + 12 * S
+		for h in hints {
+			w := tw(m.f_tiny, h[0]) + 10 * S
+			if hx + w > x1 - 12 * S do break
+			kh := int(m.f_tiny.line_h) + 2 * S
+			fill_rect(cv, hx, fy + (fh - kh) / 2, w, kh, sel)
+			text_in(cv, m.f_tiny, h[0], hx + 5 * S, fy + (fh - kh) / 2, kh, argb(t.fg, 0xff))
+			hx += w + 5 * S
+			text_in(cv, m.f_tiny, h[1], hx, fy, fh, argb(dim, 0xff), x1 - 12 * S)
+			hx += tw(m.f_tiny, h[1]) + 14 * S
+		}
+	}
+	body := [4]int{x0, y + 6 * S, x1 - x0, fy - y - 12 * S}
+	switch {
+	case m.focus == .Confirm: draw_confirm(a, cv, S, body)
+	case m.focus == .Input: draw_input(a, cv, S, body)
+	case s.cal: draw_cal(a, cv, S, body)
+	case: draw_actions(a, cv, S, s, x0, body[1], x1, body[1] + body[3], false, true)
+	}
+}
+
+// ---------- the month grid (O cal): Monday first, ISO weeks, today and a cursor ----------
+
+@(private)
+days_from_civil :: proc(y, m, d: int) -> int { // days since 1970-01-01
+	yy := m <= 2 ? y - 1 : y
+	era := (yy >= 0 ? yy : yy - 399) / 400
+	yoe := yy - era * 400
+	mp := (m + 9) % 12
+	doy := (153 * mp + 2) / 5 + d - 1
+	doe := yoe * 365 + yoe / 4 - yoe / 100 + doy
+	return era * 146097 + doe - 719468
+}
+@(private)
+civil_from_days :: proc(z_: int) -> (y, m, d: int) {
+	z := z_ + 719468
+	era := (z >= 0 ? z : z - 146096) / 146097
+	doe := z - era * 146097
+	yoe := (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365
+	doy := doe - (365 * yoe + yoe / 4 - yoe / 100)
+	mp := (5 * doy + 2) / 153
+	d = doy - (153 * mp + 2) / 5 + 1
+	m = mp < 10 ? mp + 3 : mp - 9
+	y = yoe + era * 400 + (m <= 2 ? 1 : 0)
+	return
+}
+@(private) weekday :: proc(days: int) -> int { return ((days % 7) + 7 + 3) % 7 } // 0 Monday
+@(private)
+iso_week :: proc(days: int) -> int {
+	thu := days - weekday(days) + 3 // the Thursday of this week decides the year
+	y, _, _ := civil_from_days(thu)
+	return (thu - days_from_civil(y, 1, 1)) / 7 + 1
+}
+@(private)
+days_in_month :: proc(y, m: int) -> int {
+	ny, nm := m == 12 ? y + 1 : y, m == 12 ? 1 : m + 1
+	return days_from_civil(ny, nm, 1) - days_from_civil(y, m, 1)
+}
+today :: proc() -> (y, m, d: int) {
+	if v := os.get_env("K4_TODAY", context.temp_allocator); len(v) == 10 { // tests: YYYY-MM-DD
+		y, _ = strconv.parse_int(v[:4]); m, _ = strconv.parse_int(v[5:7]); d, _ = strconv.parse_int(v[8:])
+		return
+	}
+	t := libc.time(nil)
+	tm := libc.localtime(&t)
+	return int(tm.tm_year) + 1900, int(tm.tm_mon) + 1, int(tm.tm_mday)
+}
+MONTHS := [12]string{"January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"}
+DAYS := [7]string{"Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"}
+@(private)
+cal_title :: proc() -> string {
+	y, mo, d := today()
+	return fmt.tprintf("%s %d %s", DAYS[weekday(days_from_civil(y, mo, d))], d, MONTHS[mo - 1])
+}
+// The weeks shown: from the Monday on or before the 1st, while a week starts in the month (at
+// least four).
+@(private)
+cal_weeks :: proc(y, mo: int) -> (first, n: int) {
+	d1 := days_from_civil(y, mo, 1)
+	first = d1 - weekday(d1)
+	n = 4
+	for n < 6 {
+		_, m2, _ := civil_from_days(first + n * 7)
+		if m2 != mo do break
+		n += 1
+	}
+	return
+}
+// O cal comes with the page's lines, after it opened: the cursor starts at today on first use.
+@(private)
+cal_ready :: proc(m: ^Menu) { if m.cal_m < 1 || m.cal_m > 12 do m.cal_y, m.cal_m, m.cal_d = today() }
+
+@(private)
+cal_h :: proc(m: ^Menu) -> int {
+	cal_ready(m)
+	_, n := cal_weeks(m.cal_y, m.cal_m)
+	return 6 + 26 + 4 + 22 + n * (4 + 30) + 10
+}
+@(private)
+cal_key :: proc(a: ^App, k: Key, text: string) -> bool {
+	m := a.menu
+	cal_ready(m)
+	cur := days_from_civil(m.cal_y, m.cal_m, m.cal_d)
+	switch {
+	case k == .Escape:
+		if at_entry(m) { a.exit = 1; a.done = true } else do menu_back(a)
+		return true
+	case k == .Left || k == .Right:
+		y, mo := m.cal_y, m.cal_m + (k == .Left ? -1 : 1)
+		if mo < 1 { mo = 12; y -= 1 }
+		if mo > 12 { mo = 1; y += 1 }
+		m.cal_y, m.cal_m, m.cal_d = y, mo, min(m.cal_d, days_in_month(y, mo))
+		return true
+	case k == .Up || k == .Down:
+		m.cal_y, m.cal_m, m.cal_d = civil_from_days(cur + (k == .Up ? -7 : 7))
+		return true
+	case text == "t":
+		m.cal_y, m.cal_m, m.cal_d = today()
+		return true
+	case k == .Backspace:
+		if !at_entry(m) do menu_back(a)
+		return true
+	}
+	return true
+}
+draw_cal :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
+	m := a.menu
+	t := a.theme
+	cal_ready(m)
+	x0 := body[0] + 14 * S
+	x1 := body[0] + body[2] - 14 * S
+	y := body[1]
+	// month row: ‹ October 2026 ›
+	text_in(cv, m.f_body, "‹", x0, y, 26 * S, argb(t.fg_dim, 0xff))
+	text_in(cv, m.f_body, "›", x1 - tw(m.f_body, "›"), y, 26 * S, argb(t.fg_dim, 0xff))
+	title := fmt.tprintf("%s %d", MONTHS[m.cal_m - 1], m.cal_y)
+	text_in(cv, m.f_bold13, title, x0 + (x1 - x0 - tw(m.f_bold13, title)) / 2, y, 26 * S, argb(t.fg_bright, 0xff))
+	y += 26 * S + 4 * S
+	colw := (x1 - x0) / 8
+	heads := [8]string{"wk", "Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"}
+	for h, i in heads do text_in(cv, m.f_tiny, h, x0 + i * colw + (colw - tw(m.f_tiny, h)) / 2, y, 22 * S, argb(t.fg_dim, 0xff))
+	y += 22 * S
+	ty, tm, td := today()
+	tday := days_from_civil(ty, tm, td)
+	cur := days_from_civil(m.cal_y, m.cal_m, m.cal_d)
+	first, n := cal_weeks(m.cal_y, m.cal_m)
+	for w in 0 ..< n {
+		y += 4 * S
+		d0 := first + w * 7
+		wk := fmt.tprintf("%d", iso_week(d0))
+		text_in(cv, m.f_tiny, wk, x0 + (colw - tw(m.f_tiny, wk)) / 2, y, 30 * S, argb(t.fg_dim, 0xff))
+		fill_rect(cv, x0 + colw - S, y, S, 30 * S, argb(t.selection, 0xff))
+		for i in 0 ..< 7 {
+			day := d0 + i
+			_, mo, d := civil_from_days(day)
+			cx := x0 + (i + 1) * colw
+			lbl := fmt.tprintf("%d", d)
+			c := mo == m.cal_m ? t.fg : t.fg_dim
+			f := m.f_small
+			if day == tday { fill_rect(cv, cx, y, colw, 30 * S, argb(t.accent, 0xff)); c, f = t.bg, m.f_bold12 }
+			if day == cur && mo == m.cal_m do rounded_rect(cv, cx, y, colw, 30 * S, 0, 0, f32(S), argb(t.accent, 0xff))
+			text_in(cv, f, lbl, cx + (colw - tw(f, lbl)) / 2, y, 30 * S, argb(c, 0xff))
+		}
+		y += 30 * S
 	}
 }
 
@@ -1422,6 +1726,7 @@ menu_hints :: proc(a: ^App, sc: bool) -> (hints: [][2]string) {
 	case sc && m.focus == .Menu: hints = {{"a–z", "Open"}, {"j k", "Move"}, {"/", "Search"}, {"Esc", "Close"}}
 	case sc: hints = {{"1–9", "Run"}, {"j k", "Move"}, {"⌫", "Back"}, {"/", "Search"}}
 	case m.focus == .Confirm: hints = {{"y", "Yes"}, {"n Esc", "No"}, {"← →", "Choose"}}
+	case m.focus == .Sub && !sc && m.sections[m.open].cal: hints = {{"← →", "Month"}, {"↑↓", "Week"}, {"t", "Today"}, {"⌫", "Back"}}
 	case m.focus == .Input: hints = {{"↵", "Submit"}, {"Esc", "Cancel"}}
 	case m.focus == .Sub && !sc && is_page(m, m.open) && m.sections[m.open].kind == .Font: hints = {{"↑↓", "Preview"}, {"↵", "Apply font"}, {"⌫", "Back"}}
 	case m.focus == .Sub && !sc && len(m.sections[m.open].hints) > 0: hints = m.sections[m.open].hints[:]
@@ -1445,6 +1750,16 @@ menu_hints :: proc(a: ^App, sc: bool) -> (hints: [][2]string) {
 	// the literals above live in this frame: hand out a copy
 	out := make([dynamic][2]string, 0, len(hints) + 1, context.temp_allocator)
 	append(&out, ..hints)
+	if a.opts.compact && compact_now(a) {
+		kept := make([dynamic][2]string, 0, len(out), context.temp_allocator)
+		for h in out {
+			if h[0] == "⌃J ⌃K" do continue
+			if at_entry(m) && h[1] == "Back" do continue
+			if h[1] == "Run / toggle" do append(&kept, [2]string{"↵ ␣", "Run"})
+			else do append(&kept, h)
+		}
+		out = kept
+	}
 	if at_entry(m) { // Esc closes here: say so, in place of the Vim hint
 		if n := len(out); n > 0 && out[n - 1][0] == "⌃J ⌃K" do out[n - 1] = {"Esc", "Close"}
 		else do append(&out, [2]string{"Esc", "Close"})
@@ -1552,8 +1867,10 @@ tone_color :: proc(t: logic.Theme, tone: string, def: u32) -> u32 {
 
 // Height of one entry of a section's body.
 @(private)
-entry_h :: proc(m: ^Menu, act: Action, S: int) -> int {
+entry_h :: proc(m: ^Menu, act: Action, S: int, compact := false) -> int {
+	if compact && act.kind == .Row && act.slider do return 34 * S
 	switch act.kind {
+	case .Hero: return 10 * S + int(m.f_hero.line_h) + 8 * S + 12 * S + 8 * S + int(m.f_small.line_h) + 12 * S
 	case .Row, .Empty, .Day: return 30 * S
 	case .Heading: return 10 * S + int(m.f_tiny.line_h) + 4 * S
 	case .Notice: return 8 * S + 12 * S + int(m.f_bold13.line_h) + 4 * S + int(m.f_small.line_h) + 12 * S + 8 * S
@@ -1575,7 +1892,7 @@ card_inner_h :: proc(m: ^Menu, S: int) -> int {
 // text, chip and meta (or a slider / ‹ choice ›); notices, cards, progress and loading bars
 // sit between them.
 @(private)
-draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bottom: int, sc: bool) {
+draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bottom: int, sc: bool, compact := false) {
 	m := a.menu
 	t := a.theme
 	bg, fg, fgb, dim, acc := t.bg, t.fg, t.fg_bright, t.fg_dim, t.accent
@@ -1604,24 +1921,24 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 		for m.scroll > 0 && sel_entry == m.scroll && s.actions[m.shown_actions[m.scroll - 1]].heading {
 			// keep the heading (and a notice above it) with the first row
 			h := 0
-			for e in m.scroll - 1 ..= sel_entry do h += entry_h(m, s.actions[m.shown_actions[e]], S)
+			for e in m.scroll - 1 ..= sel_entry do h += entry_h(m, s.actions[m.shown_actions[e]], S, compact)
 			if py + h > bottom do break
 			m.scroll -= 1
 		}
 		for {
 			h := 0
-			for e in m.scroll ..= sel_entry do h += entry_h(m, s.actions[m.shown_actions[e]], S)
+			for e in m.scroll ..= sel_entry do h += entry_h(m, s.actions[m.shown_actions[e]], S, compact)
 			if py + h <= bottom || m.scroll >= sel_entry do break
 			m.scroll += 1
 		}
 	}
-	mx := px + 20 * S
+	mx := px + (compact ? 16 : 20) * S
 	row := 0
 	for e in 0 ..< len(m.shown_actions) {
 		act := s.actions[m.shown_actions[e]]
 		if !act.heading do row += 1
 		if e < m.scroll do continue
-		h := entry_h(m, act, S)
+		h := entry_h(m, act, S, compact)
 		if py + h > bottom do break
 		switch act.kind {
 		case .Heading:
@@ -1643,6 +1960,17 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			text_in(cv, m.f_body, act.label, mx + 28 * S, py, ah, argb(on ? bg : fgb, 0xff))
 			r := fmt.tprintf("%s – %s", act.meta, act.line2)
 			text_in(cv, m.f_small, r, x1 - 20 * S - tw(m.f_small, r), py, ah, argb(on ? bg : dim, 0xff))
+		case .Hero: // the battery popup: the charge large, a bar, the line under it
+			c := act.active ? acc : (act.pct <= 10 ? t.red : (act.pct <= 25 ? t.yellow : fgb))
+			y := py + 10 * S
+			big := fmt.tprintf("%d%%", act.pct)
+			draw_text_f(cv, m.f_hero, big, mx, y, argb(c, 0xff))
+			y += int(m.f_hero.line_h) + 8 * S
+			bw := x1 - (compact ? 16 : 20) * S - mx
+			rounded_rect(cv, mx, y, bw, 12 * S, 0, 0, f32(S), argb(fg, 0xff))
+			fill_rect(cv, mx + 3 * S, y + 3 * S, (bw - 6 * S) * act.pct / 100, 6 * S, argb(c, 0xff))
+			y += 12 * S + 8 * S
+			draw_text_f(cv, m.f_small, act.meta, mx, y, argb(dim, 0xff), nil, 0, x1 - 16 * S)
 		case .Empty:
 			text_in(cv, m.f_body, "–", mx + 4 * S, py, ah, argb(faint, 0xff))
 			text_in(cv, m.f_body, act.label, mx + 28 * S, py, ah, argb(dim, 0xff), x1 - 20 * S)
@@ -1715,13 +2043,32 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 				if act.key != "" do badge_label = strings.to_lower(act.key, context.temp_allocator)
 				else if j < 9 do badge_label = fmt.tprintf("%d", j + 1)
 			}
+			bare := compact && badge_label == "" && act.mark == "" // the popup's rows: no mark column
 			if badge_label != "" do badge(cv, m.f_tiny, badge_label, mx + 16 * S, py, ah, S, on ? bg : acc, on ? acc : bg, true)
-			else {
+			else if !bare {
 				mark := act.mark != "" ? act.mark : (act.view != "" || act.jump != "" ? "»" : "›")
 				text_in(cv, m.f_body, mark, mx + (16 * S - tw(m.f_body, mark)) / 2, py, ah, argb(markc, 0xff))
 			}
-			lx := mx + 16 * S + 12 * S
-			right := x1 - 20 * S
+			lx := bare ? mx : mx + 16 * S + 12 * S
+			right := x1 - (compact ? 16 : 20) * S
+			if act.slider && compact { // the popup's slider: label 88 px, the track, the value 44 px
+				sh := h
+				hit_add(a, px, py, x1 - px, sh, .Action, sec_index(m, s), m.shown_actions[e])
+				if on do fill_rect(cv, px, py, x1 - px, sh, argb(acc, 0xff))
+				text_in(cv, m.f_body, ellipsize(m.f_body, act.label, 88 * S), lx, py, sh, argb(lc, 0xff))
+				val := fmt.tprintf("%d%%", act.value)
+				text_in(cv, m.f_bold13, val, right - tw(m.f_bold13, val), py, sh, argb(on ? bg : (act.dim ? dim : fgb), 0xff))
+				tx := lx + 88 * S + 12 * S
+				tw_ := right - 44 * S - 12 * S - tx
+				ty := py + (sh - 4 * S) / 2
+				vm := max(act.vmax, 1)
+				fill_rect(cv, tx, ty, tw_, 4 * S, on ? argb(0, 0x38) : argb(t.selection, 0xff))
+				fill_rect(cv, tx, ty, tw_ * min(act.value, 100) / vm, 4 * S, argb(on ? bg : (act.dim ? faint : acc), 0xff))
+				if act.value > 100 do fill_rect(cv, tx + tw_ * 100 / vm, ty, tw_ * (min(act.value, vm) - 100) / vm, 4 * S, argb(t.red, 0xff))
+				if vm > 100 do fill_rect(cv, tx + tw_ * 100 / vm, ty - 4 * S, S, 12 * S, argb(on ? bg : dim, 0xff))
+				hit_add(a, tx - 4 * S, py, tw_ + 8 * S, sh, .Slider, sec_index(m, s), m.shown_actions[e], tx, tw_)
+				break
+			}
 			if act.slider {
 				sw := draw_slider(a, cv, S, act.value, right, py, ah, on, act.vmax, act.dim)
 				hit_add(a, right - sw - 4 * S, py, 120 * S + 8 * S, ah, .Slider, sec_index(m, s), m.shown_actions[e], right - sw, 120 * S)
@@ -1846,7 +2193,7 @@ draw_confirm :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	bg, fg, fgb, acc := t.bg, t.fg, t.fg_bright, t.accent
 	act := m.sections[m.pending.sec].actions[m.pending.act]
 	title_f := m.f_confirm
-	w := 380 * S
+	w := min(380 * S, body[2] - 16 * S)
 	pad_x, pad_y, gap := 28 * S, 26 * S, 18 * S
 	bh_ := 40 * S
 	h := 2 * pad_y + int(title_f.line_h) + gap + int(m.f_body.line_h) + gap + bh_
@@ -2009,7 +2356,7 @@ draw_page :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
 draw_input :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	m := a.menu
 	t := a.theme
-	w := 420 * S
+	w := min(420 * S, body[2] - 16 * S)
 	pad_x, pad_y, gap := 28 * S, 26 * S, 12 * S
 	hint := m.input_hint != "" ? m.input_hint : (m.input_password ? "Typed characters are hidden." : "Type in the field above, then press Enter.")
 	h := 2 * pad_y + int(m.f_confirm.line_h) + gap + int(m.f_body.line_h)
@@ -2225,6 +2572,7 @@ menu_fonts :: proc(a: ^App) {
 	m.f_confirm = font_sized(base, 20)
 	m.f_glyph = font_sized(base, 26)
 	m.f_bold13, m.f_bold12, m.f_bold11, m.f_bold10 = m.f_body, m.f_small, m.f_tiny, font_sized(base, 10)
+	m.f_hero = font_sized(base, 34)
 	if bold, ok := bold_font(a, 18); ok {
 		m.f_title = bold
 		m.f_confirm = font_sized(bold, 20)
@@ -2232,8 +2580,9 @@ menu_fonts :: proc(a: ^App) {
 		m.f_bold12 = font_sized(bold, 12)
 		m.f_bold11 = font_sized(bold, 11)
 		m.f_bold10 = font_sized(bold, 10)
+		m.f_hero = font_sized(bold, 34)
 	}
-	append(&a.fonts, m.f_body, m.f_small, m.f_tiny, m.f_big, m.f_row, m.f_huge, m.f_title, m.f_confirm, m.f_bold13, m.f_bold12, m.f_bold11, m.f_bold10, m.f_glyph)
+	append(&a.fonts, m.f_body, m.f_small, m.f_tiny, m.f_big, m.f_row, m.f_huge, m.f_title, m.f_confirm, m.f_bold13, m.f_bold12, m.f_bold11, m.f_bold10, m.f_glyph, m.f_hero)
 	if a.scale > 1 do for f in a.fonts do font_resize(f, f.base_px * f32(a.scale))
 }
 
@@ -2268,6 +2617,11 @@ menu_dump :: proc(a: ^App) -> string {
 	q := string(a.query[:])
 	if m.focus == .Input && m.input_password do q = strings.repeat("•", utf8.rune_count_in_string(q), context.temp_allocator)
 	fmt.sbprintfln(&b, "focus %v%s", m.focus, sc ? " shortcuts" : "")
+	if compact_now(a) {
+		w, h := menu_size(a)
+		fmt.sbprintfln(&b, "popup %dx%d", w, h)
+		if m.sections[m.open].cal && m.focus == .Sub { cal_ready(m); fmt.sbprintfln(&b, "cal %d-%02d cursor %d", m.cal_y, m.cal_m, m.cal_d) }
+	}
 	fmt.sbprintfln(&b, "crumb %s", crumb)
 	fmt.sbprintfln(&b, "query %s", q != "" ? q : fmt.tprintf("(%s)", ph))
 	fmt.sbprintfln(&b, "count %s", count)
@@ -2315,6 +2669,7 @@ menu_dump :: proc(a: ^App) -> string {
 			case .Bars: fmt.sbprintfln(&b, "~~ %d loading bars", act.bars)
 			case .Card: fmt.sbprintfln(&b, "[] %s %s · %s · %s", act.state, act.label, act.meta, act.line2)
 			case .Progress: fmt.sbprintfln(&b, "↓ %s %d%% · %s", act.label, act.pct, act.meta)
+			case .Hero: fmt.sbprintfln(&b, "## %d%%%s · %s", act.pct, act.active ? " charging" : "", act.meta)
 			case .Day: fmt.sbprintfln(&b, "%s day %s %s rain %d%% %s–%s", sel ? "*" : " ", act.label, act.glyph, act.pct, act.meta, act.line2)
 			case .Row:
 				meta := act.meta

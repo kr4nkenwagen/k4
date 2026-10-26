@@ -65,7 +65,7 @@ hypr_workspaces :: proc() -> (out: [dynamic]Ws, ok: bool) {
 		if w.id < 0 do continue // special workspaces
 		vis, foc := false, false
 		for m in mons do if m.activeWorkspace.id == w.id { vis = true; foc = m.focused }
-		append(&out, Ws{strings.clone(w.name), w.id, foc, vis, false, strings.clone(w.monitor)})
+		append(&out, Ws{strings.clone(w.name), w.id, foc, vis, false, strings.clone(w.monitor), w.windows == 0})
 	}
 	return out, true
 }

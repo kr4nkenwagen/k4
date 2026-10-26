@@ -1,0 +1,10 @@
+focus Sub
+popup 340x326
+cal 2026-10 cursor 26
+crumb NETWORK › CALENDAR
+query (Filter options…)
+count 
+hints ← → Month · ↑↓ Week · t Today · Esc Close
+title Calendar · Monday 26 October (full width)
+exit 1
+log: load apps

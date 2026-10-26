@@ -30,15 +30,19 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --no-icons              ignore icon fields
   --menu                  two-pane launcher (sections, actions, views); input format in menu.odin
   --open ID               menu mode: start inside the section with this id; Esc there closes k4
-  --popup-x X, --popup-w W   open as a popup under a bar module: its centre x, the output width
+  --popup X,W,OUT_W,SIDE[,bottom]   open under a bar module: its left x and width, the output's
+                          width, its group (left center right); bottom when the bar is there
+  --compact               menu mode: the opened page alone in the popup frame (420 px, no
+                          sections or search; ⌃↵ prints launcher:ID for the full launcher)
   --bar                   the status bar (modules on stdin; format in bar.odin)
+  --osd SPEC              the on-screen display for 1.2 s; a second call updates it (osd.odin)
   --output NAME           the bar's output (default: the compositor's choice)
   --config FILE           accepted and ignored (fuzzel compatibility)
   --dry-run FILE.png      render one frame to a PNG without Wayland, then print the selection
   --dump                  like --dry-run without the PNG: print the menu state as text (tests)
   --keys KEYS, --select N keys pressed before the first frame: text plus <down> <up> <left>
                           <right> <enter> <esc> <tab> <bs> <alt-x> <ctrl-x>, and the pointer:
-                          <move:x,y> <click:x,y> <rclick:x,y> <wheel:n>; then move the selection
+                          <move:x,y> <click:x,y> <rclick:x,y> <mclick:x,y> <wheel:n>; then move the selection
   --scale N               dry runs: buffer scale
 
 Ghostty's custom shaders (the custom-shader lines of ~/.config/ghostty/config and the files
@@ -104,8 +108,18 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--open": o.open = value(args, &i, inline, has_inline)
 		case "--bar": o.bar = true
 		case "--output": o.output = value(args, &i, inline, has_inline)
-		case "--popup-x": o.popup_x, _ = strconv.parse_int(value(args, &i, inline, has_inline))
-		case "--popup-w": o.popup_w, _ = strconv.parse_int(value(args, &i, inline, has_inline))
+		case "--popup":
+			f := strings.split(value(args, &i, inline, has_inline), ",", context.temp_allocator)
+			if len(f) >= 3 {
+				o.popup.x, _ = strconv.parse_int(f[0])
+				o.popup.w, _ = strconv.parse_int(f[1])
+				o.popup.out_w, _ = strconv.parse_int(f[2])
+				if len(f) > 3 do switch f[3] { case "center", "centre": o.popup.side = 1; case "right": o.popup.side = 2 }
+				o.popup.bottom = len(f) > 4 && f[4] == "bottom"
+				o.popup.set = o.popup.out_w > 0
+			}
+		case "--compact": o.compact = true
+		case "--osd": o.osd = value(args, &i, inline, has_inline)
 		case "--config": _ = value(args, &i, inline, has_inline)
 		case "--dry-run": o.dry_run = value(args, &i, inline, has_inline)
 		case "--dump": o.dump = true
@@ -143,7 +157,18 @@ main :: proc() {
 	}
 
 	// rows, or the menu tree
-	if opts.bar {
+	if opts.osd != "" {
+		if opts.dry_run == "" && opts.dump == false && osd_send(opts.osd) do os.exit(0) // one already shows: it took the update
+		a.osd = new(Osd)
+		osd_set(a.osd, opts.osd)
+		a.osd.sock = -1
+		a.osd_font = font_sized(&a.font, 13)
+		a.osd_bold = a.osd_font
+		if bold, ok := bold_font(a, 13); ok do a.osd_bold = bold
+		a.osd_icon = font_sized(&a.font, 18)
+		append(&a.fonts, a.osd_font, a.osd_bold, a.osd_icon)
+		a.width, a.height = 300, 48
+	} else if opts.bar {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		bar_setup(a, string(data))
 		a.bar.output = opts.output
@@ -152,6 +177,7 @@ main :: proc() {
 		menu_setup(a, string(data))
 		if v, ok := strconv.parse_int(os.get_env("K4_SLOW_MS", context.temp_allocator)); ok do a.menu.slow_ms = max(v, 1)
 		if opts.open != "" do for s, i in a.menu.sections do if s.id == opts.open { menu_enter(a, i); a.menu.entry = i; break }
+		if opts.compact && a.menu.entry < 0 do a.opts.compact = false // nothing to show compact: the launcher
 	} else if !prompt_only {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		a.rows = logic.parse_dmenu(string(data))
@@ -173,7 +199,8 @@ main :: proc() {
 		press_keys(a, opts.keys)
 		if a.menu != nil && wait do menu_load_all(a) // a stay action started by the keys, and the reload after it
 		if a.menu != nil && !wait { time.sleep(time.Duration(clamp(a.menu.slow_ms, 0, 2000) + 50) * time.Millisecond); menu_on_tick(a) }
-		if a.menu == nil && a.bar == nil do app_move(a, opts.select)
+		if a.menu == nil && a.bar == nil && a.osd == nil do app_move(a, opts.select)
+		if a.menu != nil do a.width, a.height = menu_size(a)
 		s := opts.scale
 		a.scale = s
 		if s != 1 {
@@ -202,13 +229,18 @@ main :: proc() {
 				for h in a.hits do fmt.printfln("hit %v %d:%d at %d,%d %dx%d", h.kind, h.a, h.b, h.x, h.y, h.w, h.h)
 			}
 		}
-		if a.menu == nil && a.bar == nil && !a.done do app_accept(a)
+		if opts.dump && a.osd != nil do fmt.printfln("osd %s %d/%d %s %s", a.osd.icon, a.osd.pct, a.osd.vmax, a.osd.value, a.osd.label)
+		if a.menu == nil && a.bar == nil && a.osd == nil && !a.done do app_accept(a)
 		if (a.menu != nil || a.bar != nil) && !a.done do a.exit = 1
+		if a.osd != nil do a.exit = 0
 	} else {
-		if a.menu == nil && a.bar == nil do app_layout(a)
+		if a.menu == nil && a.bar == nil && a.osd == nil do app_layout(a)
 		press_keys(a, opts.keys)
-		if a.menu == nil && a.bar == nil do app_move(a, opts.select)
+		if a.menu == nil && a.bar == nil && a.osd == nil do app_move(a, opts.select)
+		if a.menu != nil do a.width, a.height = menu_size(a)
+		if a.osd != nil do osd_listen(a.osd)
 		if !run_wayland(a) do os.exit(2)
+		if a.osd != nil { osd_close(a.osd); os.exit(0) }
 	}
 	if a.exit == 0 do fmt.println(a.result)
 	os.exit(a.exit)
@@ -261,8 +293,8 @@ press_keys :: proc(a: ^App, keys: string) {
 			if end := strings.index_byte(s, '>'); end > 0 {
 				tok := s[1:end]
 				s = s[end + 1:]
-				// pointer tokens (tests): <move:x,y> <click:x,y> <rclick:x,y> <wheel:n>, logical pixels
-				if c := strings.index_byte(tok, ':'); c > 0 && (tok[:c] == "move" || tok[:c] == "click" || tok[:c] == "rclick" || tok[:c] == "wheel") {
+				// pointer tokens (tests): <move:x,y> <click:x,y> <rclick:x,y> <mclick:x,y> <wheel:n>, logical pixels
+				if c := strings.index_byte(tok, ':'); c > 0 && (tok[:c] == "move" || tok[:c] == "click" || tok[:c] == "rclick" || tok[:c] == "mclick" || tok[:c] == "wheel") {
 					hits_refresh(a)
 					xy := strings.split(tok[c + 1:], ",", context.temp_allocator)
 					x, _ := strconv.parse_int(xy[0])
@@ -272,6 +304,7 @@ press_keys :: proc(a: ^App, keys: string) {
 					case "move": app_pointer_move(a, x, y)
 					case "click": app_pointer_click(a, x, y, 1)
 					case "rclick": app_pointer_click(a, x, y, 3)
+					case "mclick": app_pointer_click(a, x, y, 2)
 					case "wheel": app_pointer_scroll(a, x)
 					}
 					if a.menu != nil && (a.opts.dry_run != "" || a.opts.dump) && os.get_env("K4_DRY_NOWAIT", context.temp_allocator) == "" do menu_load_all(a)

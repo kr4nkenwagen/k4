@@ -49,13 +49,28 @@ Everything happens inside the launcher:
 
 ## Bar mode
 
-`k4 --bar --output NAME` is a status bar along the top of one output (Waybar's job): modules
-from stdin (format at the top of `src/bar.odin`). Workspaces and the focused window come live
-from sway's IPC socket or Hyprland's sockets (when `HYPRLAND_INSTANCE_SIGNATURE` is set), the clock is built in, every other module is a command that prints
-plain text or Waybar's JSON (`text`, `tooltip`, `class`), either every N seconds or as a
-running follower. Hovering highlights, clicks and the wheel run the module's commands with
-`K4_BAR_X`, `K4_BAR_WIDTH` and `K4_BAR_OUTPUT` set, so a `k4 --menu --popup-x X --popup-w W`
-opens under the module. Not yet: the system tray and tooltips.
+`k4 --bar --output NAME` is a status bar along one output (Waybar's job), drawn as the Kestrel
+design's strip: 26 px with a 2 px accent rule (dim on an output without focus), at the top or
+the bottom, opaque or transparent. Modules come from stdin (format at the top of `src/bar.odin`):
+workspaces (live from sway's IPC or Hyprland's sockets; 1–5 always there on a single output,
+focused an accent block, visible elsewhere outlined, urgent red), the focused window's title
+(dim, cut at 420 px, the first to give way), a clock (time bold, date dim; right click switches
+format, middle click shows UTC), and commands that print plain text or Waybar's JSON plus k4's
+`icon`, `text2`, tones, a `level` bar and a `battery` glyph. Hover fills the module and shows its
+tooltip after 500 ms; a left click's command is watched, so the module stays an accent block
+while its popup is up. Clicks and the wheel get `K4_BAR_X`, `K4_BAR_MX`, `K4_BAR_MW`,
+`K4_BAR_SIDE`, `K4_BAR_WIDTH`, `K4_BAR_OUTPUT`, `K4_BAR_POS` and `K4_BAR_H`.
+
+`k4 --menu --open PAGE --popup X,W,OUT_W,SIDE[,bottom] --compact` is a module's popup: the
+page alone in the design's 420 px frame (crumb, title, rows, key hints), fitted to its rows and
+placed by the module's group, 4 px off the bar and 8 px from the screen edges. Esc closes it;
+⌃↵ prints `launcher:PAGE` so the caller opens the same page in the full launcher. Pages can
+ask for the month grid (`O cal`: ISO weeks, ← → months, ↑↓ weeks, t today), a width
+(`O width=N`) and a large charge row (`X percent line [charging]`).
+
+`k4 --osd 'ICON|PERCENT|MAX|VALUE|…'` is the on-screen display: 300×48 above the bottom of the
+focused output for 1.2 s; another call while it shows updates it in place.
+Not yet: the system tray.
 
 ## Build
 
@@ -90,5 +105,4 @@ directives, steppers, skeletons and slow loads with it and compares the result w
 
 ## Not yet
 
-Popups anchored to a bar module, clipboard paste, app-launcher
-mode, fractional scaling.
+The bar's system tray, clipboard paste, app-launcher mode, fractional scaling.
