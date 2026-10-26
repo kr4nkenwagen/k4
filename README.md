@@ -51,7 +51,7 @@ Everything happens inside the launcher:
 
 `k4 --bar --output NAME` is a status bar along the top of one output (Waybar's job): modules
 from stdin (format at the top of `src/bar.odin`). Workspaces and the focused window come live
-from sway's IPC socket, the clock is built in, every other module is a command that prints
+from sway's IPC socket or Hyprland's sockets (when `HYPRLAND_INSTANCE_SIGNATURE` is set), the clock is built in, every other module is a command that prints
 plain text or Waybar's JSON (`text`, `tooltip`, `class`), either every N seconds or as a
 running follower. Hovering highlights, clicks and the wheel run the module's commands with
 `K4_BAR_X`, `K4_BAR_WIDTH` and `K4_BAR_OUTPUT` set, so a `k4 --menu --popup-x X --popup-w W`

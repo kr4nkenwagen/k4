@@ -52,6 +52,8 @@ Bar :: struct {
 	ws: [dynamic]Ws,
 	title: string,
 	ipc_q, ipc_ev: linux.Fd,
+	hypr: bool, // Hyprland: requests per call, events from socket2 (ipc_ev)
+	ev_buf: [dynamic]u8,
 	hover: int, // module under the pointer, -1
 	f_text, f_bold: ^Font,
 	width: int, // logical width of the output strip (from configure)
@@ -95,7 +97,11 @@ bar_setup :: proc(a: ^App, data: string) {
 	// sway: workspaces and the focused window, live
 	need_ipc := false
 	for m in b.mods do if m.kind == .Workspaces || m.kind == .Window do need_ipc = true
-	if need_ipc {
+	if need_ipc && hypr_dir() != "" {
+		b.hypr = true
+		if ev, ok := hypr_events(); ok do b.ipc_ev = ev
+		bar_ipc_refresh(b)
+	} else if need_ipc {
 		if fd, ok := ipc_connect(); ok {
 			b.ipc_q = fd
 			if ev, ok2 := ipc_connect(); ok2 {
@@ -116,9 +122,20 @@ bar_setup :: proc(a: ^App, data: string) {
 
 @(private)
 bar_ipc_refresh :: proc(b: ^Bar) {
+	set_ws :: proc(b: ^Bar, list: [dynamic]Ws) {
+		for w in b.ws { delete(w.name); delete(w.output) }
+		delete(b.ws)
+		b.ws = list
+	}
+	set_title :: proc(b: ^Bar, t: string) { if len(b.title) > 0 do delete(b.title); b.title = t } // non-empty titles are clones
+	if b.hypr {
+		if list, ok := hypr_workspaces(); ok do set_ws(b, list)
+		for m in b.mods do if m.kind == .Window { set_title(b, hypr_title()); break }
+		return
+	}
 	if b.ipc_q < 0 do return
-	if list, ok := ipc_workspaces(b.ipc_q); ok { b.ws = list }
-	for m in b.mods do if m.kind == .Window { b.title = ipc_focused_title(b.ipc_q); break }
+	if list, ok := ipc_workspaces(b.ipc_q); ok do set_ws(b, list)
+	for m in b.mods do if m.kind == .Window { set_title(b, ipc_focused_title(b.ipc_q)); break }
 }
 
 // ---------- modules that run commands ----------
@@ -197,7 +214,8 @@ bar_tick :: proc(a: ^App) -> int {
 			if !m.running && time.tick_diff(m.next, now) >= 0 do mod_start(&m)
 			if !m.running do wait = min(wait, max(int(time.duration_milliseconds(time.tick_diff(now, m.next))), 0) + 1)
 		case .Clock:
-			m.text = clock_text(m.alt ? second_field(m.arg) : first_field(m.arg))
+			// m.text outlives this frame's temp allocator: keep a heap copy
+			if t := clock_text(m.alt ? second_field(m.arg) : first_field(m.arg)); t != m.text { if len(m.text) > 0 do delete(m.text); m.text = strings.clone(t) }
 			wait = min(wait, 1000 - int(time.to_unix_nanoseconds(time.now()) / 1_000_000 % 1000) + 5)
 		case .Workspaces, .Window, .Text:
 		}
@@ -225,6 +243,26 @@ bar_poll_fds :: proc(b: ^Bar, out: ^[dynamic]linux.Poll_Fd) {
 
 bar_on_readable :: proc(a: ^App, fd: linux.Fd) -> bool {
 	b := a.bar
+	if fd == b.ipc_ev && b.hypr {
+		// lines "event>>data": refresh on what changes workspaces or the focused window
+		chunk: [4096]u8
+		n, err := linux.read(b.ipc_ev, chunk[:])
+		if err != .NONE || n <= 0 { linux.close(b.ipc_ev); b.ipc_ev = -1; return false }
+		append(&b.ev_buf, ..chunk[:n])
+		changed := false
+		for {
+			nl := -1
+			for c, i in b.ev_buf do if c == '\n' { nl = i; break }
+			if nl < 0 do break
+			line := string(b.ev_buf[:nl])
+			for ev in ([]string{"workspace", "focusedmon", "activewindow", "createworkspace", "destroyworkspace", "moveworkspace", "openwindow", "closewindow", "movewindow", "monitoradded", "monitorremoved", "renameworkspace"}) {
+				if strings.has_prefix(line, ev) && strings.has_prefix(line[len(ev):], ">>") { changed = true; break }
+			}
+			remove_range(&b.ev_buf, 0, nl + 1)
+		}
+		if changed do bar_ipc_refresh(b)
+		return changed
+	}
 	if fd == b.ipc_ev {
 		if _, _, ok := ipc_recv(b.ipc_ev, context.temp_allocator); !ok { linux.close(b.ipc_ev); b.ipc_ev = -1; return false }
 		bar_ipc_refresh(b)
@@ -353,7 +391,8 @@ bar_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 	h := hit_at(a, x, y) or_return
 	m := &b.mods[h.a]
 	if m.kind == .Workspaces && button == 1 && h.b >= 0 && h.b < len(b.ws) {
-		if b.ipc_q >= 0 do ipc_query(b.ipc_q, IPC_RUN_COMMAND, fmt.tprintf("workspace \"%s\"", b.ws[h.b].name), context.temp_allocator)
+		if b.hypr do hypr_focus_workspace(b.ws[h.b].name)
+		else if b.ipc_q >= 0 do ipc_query(b.ipc_q, IPC_RUN_COMMAND, fmt.tprintf("workspace \"%s\"", b.ws[h.b].name), context.temp_allocator)
 		bar_ipc_refresh(b)
 		return true
 	}
@@ -369,8 +408,9 @@ bar_pointer_scroll :: proc(a: ^App, n: int) -> bool {
 	b := a.bar
 	if b.hover < 0 || b.hover >= len(b.mods) do return false
 	m := &b.mods[b.hover]
-	if m.kind == .Workspaces && b.ipc_q >= 0 {
-		ipc_query(b.ipc_q, IPC_RUN_COMMAND, n > 0 ? "workspace next_on_output" : "workspace prev_on_output", context.temp_allocator)
+	if m.kind == .Workspaces && (b.ipc_q >= 0 || b.hypr) {
+		if b.hypr do hypr_focus_workspace(n > 0 ? "m+1" : "m-1")
+		else do ipc_query(b.ipc_q, IPC_RUN_COMMAND, n > 0 ? "workspace next_on_output" : "workspace prev_on_output", context.temp_allocator)
 		bar_ipc_refresh(b)
 		return true
 	}
