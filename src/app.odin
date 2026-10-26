@@ -65,6 +65,7 @@ App :: struct {
 	family:   string,
 	scale:    int, // buffer scale of the output (fonts are sized for it)
 	caret:    [4]int, // the text caret as last drawn (buffer pixels: x, y top, w, h; w 0 = none), for shaders
+	sel:      [4]int, // the highlighted selection as last drawn (same units): the shaders' cursor when set
 	hits:     [dynamic]Hit, // where the last frame drew its rows (mouse)
 	menu:     ^Menu,
 	bar:      ^Bar,
@@ -184,6 +185,7 @@ draw_text_f :: proc(cv: ^Canvas, f: ^Font, text: string, x, y_top: int, color: u
 
 app_draw :: proc(a: ^App, cv: ^Canvas, scale: int) {
 	clear(&a.hits)
+	a.sel = {}
 	if a.bar != nil { bar_draw(a, cv, scale); return }
 	if a.osd != nil { osd_draw(a, cv, scale); return }
 	if a.ov != nil { ov_draw(a, cv, scale); return }
@@ -221,7 +223,7 @@ app_draw :: proc(a: ^App, cv: ^Canvas, scale: int) {
 		row := a.rows[m.row]
 		sel := i == a.selected
 		hit_add(a, inner - S(4, scale), y, right - inner + S(8, scale), rh, .Row, i, 0)
-		if sel do rounded_rect(cv, inner - S(4, scale), y, right - inner + S(8, scale), rh, f32(S(4, scale)), argb(t.selection, 0xff))
+		if sel { rounded_rect(cv, inner - S(4, scale), y, right - inner + S(8, scale), rh, f32(S(4, scale)), argb(t.selection, 0xff)); mark_sel(a, inner - S(4, scale), y, right - inner + S(8, scale), rh) }
 		tx := inner
 		if a.has_icons {
 			isz := S(a.icon_px, scale)
@@ -364,3 +366,10 @@ app_pointer_scroll :: proc(a: ^App, n: int) -> bool {
 	app_move(a, n)
 	return true
 }
+
+// Where the selection's highlight went this frame: Ghostty's cursor shaders follow it (a smear
+// from the last row, card or tile to this one); the last one drawn wins.
+mark_sel :: proc(a: ^App, x, y, w, h: int) { a.sel = {x, y, w, h} }
+
+// The cursor the shaders get: the selection when there is one, else the text caret.
+shader_cursor :: proc(a: ^App) -> [4]int { return a.sel.z > 0 ? a.sel : a.caret }

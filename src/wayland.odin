@@ -367,7 +367,8 @@ redraw :: proc() {
 			gpu_upload(&cv)
 		}
 		now := gpu_time()
-		c := W.app.caret
+		c := shader_cursor(W.app)
+		gpu_cursor_color(W.app.theme.accent)
 		gpu_set_cursor(c.x, c.y, c.z, c.w, h, now)
 		wl.surface_set_buffer_scale(W.surface, W.scale)
 		cb := wl.surface_frame(W.surface)

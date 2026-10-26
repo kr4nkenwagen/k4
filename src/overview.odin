@@ -473,7 +473,10 @@ ov_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		any_hit := q == ""
 		for wv in c.wins do if ov_match(wv, q) { any_hit = true; break }
 		cut := 16 * S
-		if on do for k in 1 ..= 4 do cut_rect(cv, cx - k * 2 * S, cy - k * 2 * S, cardw + k * 4 * S, cardh + k * 4 * S, cut + k * S, argb(H.acc, u8(0x12 / k + 2)))
+		if on {
+			for k in 1 ..= 4 do cut_rect(cv, cx - k * 2 * S, cy - k * 2 * S, cardw + k * 4 * S, cardh + k * 4 * S, cut + k * S, argb(H.acc, u8(0x12 / k + 2)))
+			mark_sel(a, cx, cy, cardw, cardh) // the card; a window row picked in it below takes over
+		}
 		edge := on ? argb(H.acc, 0xff) : (ws.urgent ? argb(H.hot, 0x88) : (ws.focused ? argb(H.acc, 0x80) : argb(H.line, 0xff)))
 		cut_rect(cv, cx, cy, cardw, cardh, cut, edge)
 		cut_rect(cv, cx + S, cy + S, cardw - 2 * S, cardh - 2 * S, cut - S, argb(on ? H.card_sel : H.card, 0xff))
@@ -539,7 +542,7 @@ ov_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		for wv, wi in c.wins {
 			if wi >= 3 || ry2 + rh > cy + cardh - 6 * S do break
 			ron := on && o.win == wi
-			if ron do fill_rect(cv, cx + S, ry2, cardw - 2 * S, rh, argb(H.acc, 0xff))
+			if ron { fill_rect(cv, cx + S, ry2, cardw - 2 * S, rh, argb(H.acc, 0xff)); mark_sel(a, cx + S, ry2, cardw - 2 * S, rh) }
 			else if wv.focused do fill_rect(cv, cx + S, ry2, 2 * S, rh, argb(H.acc, 0x99))
 			rx2 := cx + 12 * S
 			mc := ron ? H.bg : (wv.urgent ? H.hot : (wv.focused ? H.acc : H.dim))

@@ -616,7 +616,7 @@ cal_event_row :: proc(a: ^App, cv: ^Canvas, S: int, d: ^Cal_Data, o: Cal_Occ, da
 	past := cal_past(e, day)
 	fg := on ? t.bg : (past ? t.fg_dim : t.fg)
 	dc := on ? t.bg : t.fg_dim
-	if on do fill_rect(cv, x, y, w, h, argb(t.accent, 0xff))
+	if on { fill_rect(cv, x, y, w, h, argb(t.accent, 0xff)); mark_sel(a, x, y, w, h) }
 	px := x + (two_line ? 14 : 16) * S
 	right := x + w - (two_line ? 14 : 16) * S
 	ty := two_line ? y + 6 * S : y
@@ -688,7 +688,7 @@ cal_draw_month :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 			if is_t { fill_rect(cv, x, ly, colw, 36 * S, argb(acc, 0xff)); c = bg }
 			else if is_c do fill_rect(cv, x, ly, colw, 36 * S, argb(sel, 0xff))
 			if is_t || is_c do f = m.f_bold12
-			if is_c && u.view == .Month && !u.list do rounded_rect(cv, x, ly, colw, 36 * S, 0, 0, f32(S), argb(is_t ? fg : acc, 0xff))
+			if is_c && u.view == .Month && !u.list { rounded_rect(cv, x, ly, colw, 36 * S, 0, 0, f32(S), argb(is_t ? fg : acc, 0xff)); mark_sel(a, x, ly, colw, 36 * S) }
 			lbl := fmt.tprintf("%d", dd)
 			draw_text_f(cv, f, lbl, x + (colw - tw(f, lbl)) / 2, ly + 5 * S, argb(c, 0xff))
 			// up to three dots, one per calendar
@@ -979,7 +979,7 @@ cal_draw_detail :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, f17b: ^Font)
 		case .Delete: l, mt = e.org != "" ? "Remove from my calendar" : "Delete event", u.arm ? "press ↵ again" : "asks first"
 		}
 		fc := on ? t.bg : (act == .Delete && u.arm ? t.red : t.fg)
-		if on do fill_rect(cv, body[0], y, body[2], 30 * S, argb(t.accent, 0xff))
+		if on { fill_rect(cv, body[0], y, body[2], 30 * S, argb(t.accent, 0xff)); mark_sel(a, body[0], y, body[2], 30 * S) }
 		text_in(cv, m.f_body, l, x, y, 30 * S, argb(fc, 0xff))
 		text_in(cv, m.f_small, mt, x1 - tw(m.f_small, mt), y, 30 * S, argb(on ? t.bg : t.fg_dim, 0xff))
 		chit(a, body[0], y, body[2], 30 * S, .Act, i)
@@ -1048,7 +1048,7 @@ cal_draw_cals :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		if i == len(d.cals) do y += head(cv, m, t, "GOOGLE ACCOUNT", x, y + 6 * S, S) + 6 * S
 		on := i == u.ci
 		fc := on ? t.bg : t.fg
-		if on do fill_rect(cv, body[0], y, body[2], 30 * S, argb(t.accent, 0xff))
+		if on { fill_rect(cv, body[0], y, body[2], 30 * S, argb(t.accent, 0xff)); mark_sel(a, body[0], y, body[2], 30 * S) }
 		lx := x
 		right := x1
 		switch {

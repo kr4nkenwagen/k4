@@ -301,6 +301,12 @@ gpu_set_cursor :: proc(x, y, w, h, buf_h: int, now: f32) {
 	}
 }
 
+// The cursor shaders' colour: the theme's accent (the selection's colour), as Ghostty gives them
+// its cursor colour.
+gpu_cursor_color :: proc(rgb: u32) {
+	G.cursor_color = {f32(rgb >> 16 & 0xff) / 255, f32(rgb >> 8 & 0xff) / 255, f32(rgb & 0xff) / 255, 1}
+}
+
 gpu_time :: proc() -> f32 { return f32(time.duration_seconds(time.tick_since(G.start))) }
 
 // Draw again next frame without a content change: an animated shader, or a smear in progress.

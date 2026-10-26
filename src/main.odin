@@ -201,6 +201,16 @@ main :: proc() {
 			a.bar.width = a.width
 		} else if a.menu != nil { if wait || nowait == "keys" do menu_load_all(a) }
 		else if a.ov == nil do app_layout(a)
+		// shaders: where the selection was before the keys, so a cursor shader shows the move
+		pre: [4]int
+		if opts.dry_run != "" && os.get_env("K4_DRY_SHADERS", context.temp_allocator) != "" && opts.keys != "" {
+			if a.menu != nil do a.width, a.height = menu_size(a)
+			if a.width > 0 && a.height > 0 {
+				tmp := Canvas{make([]u32, a.width * a.height, context.temp_allocator), a.width, a.height}
+				app_draw(a, &tmp, 1)
+				pre = shader_cursor(a)
+			}
+		}
 		press_keys(a, opts.keys)
 		if a.menu != nil && wait do menu_load_all(a) // a stay action started by the keys, and the reload after it
 		if a.menu != nil && !wait { time.sleep(time.Duration(clamp(a.menu.slow_ms, 0, 2000) + 50) * time.Millisecond); menu_on_tick(a) }
@@ -217,7 +227,10 @@ main :: proc() {
 			cv := Canvas{make([]u32, a.width * a.height * s * s), a.width * s, a.height * s}
 			app_draw(a, &cv, s)
 			if os.get_env("K4_DRY_SHADERS", context.temp_allocator) != "" {   // the shaders too, offscreen
-				gpu_set_cursor(a.caret.x, a.caret.y, a.caret.z, a.caret.w, cv.h, 0)
+				c := shader_cursor(a)
+				gpu_cursor_color(a.theme.accent)
+				if pre.z > 0 do gpu_set_cursor(pre.x * s, pre.y * s, pre.z * s, pre.w * s, cv.h, 0) // the move starts here
+				gpu_set_cursor(c.x, c.y, c.z, c.w, cv.h, 0)
 				if !gpu_dry_run(&cv) do fmt.eprintln("k4: no OpenGL 4.3 through EGL: drawn without shaders")
 			}
 			rgba := canvas_rgba(&cv)

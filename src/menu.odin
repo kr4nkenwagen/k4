@@ -1868,7 +1868,7 @@ draw_panes :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
 		hit_add(a, x0, ry, lw, rh, .Section, i, 0)
 		strong := on && m.focus == .Menu
 		col := s.dim ? mix(bg, fg, 0.3) : fg
-		if strong { fill_rect(cv, x0, ry, lw, rh, argb(acc, 0xff)); col = bg }
+		if strong { fill_rect(cv, x0, ry, lw, rh, argb(acc, 0xff)); mark_sel(a, x0, ry, lw, rh); col = bg }
 		else if on { fill_rect(cv, x0, ry, lw, rh, argb(t.selection, 0xff)); col = s.dim ? mix(bg, fg, 0.45) : fgb }
 		tx := x0 + 14 * S
 		if s.icon != "" do text_in(cv, m.f_body, s.icon, tx, ry, rh, argb(col, 0xff))
@@ -2035,7 +2035,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 		case .Day: // outside the dashboard: a plain row
 			on := m.focus == .Sub && e == sel_entry
 			hit_add(a, px, py, x1 - px, ah, .Action, sec_index(m, s), m.shown_actions[e])
-			if on do fill_rect(cv, px, py, x1 - px, ah, argb(acc, 0xff))
+			if on { fill_rect(cv, px, py, x1 - px, ah, argb(acc, 0xff)); mark_sel(a, px, py, x1 - px, ah) }
 			text_in(cv, m.f_body, act.label, mx + 28 * S, py, ah, argb(on ? bg : fgb, 0xff))
 			r := fmt.tprintf("%s – %s", act.meta, act.line2)
 			text_in(cv, m.f_small, r, x1 - 20 * S - tw(m.f_small, r), py, ah, argb(on ? bg : dim, 0xff))
@@ -2164,7 +2164,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			markc := tone_color(t, act.markc, act.mark != "" ? faint : mix(bg, fg, 0.35))
 			subc, chipc := dim, tone_color(t, act.chipc, dim)
 			if on {
-				fill_rect(cv, px, py, x1 - px, h, argb(acc, 0xff))
+				fill_rect(cv, px, py, x1 - px, h, argb(acc, 0xff)); mark_sel(a, px, py, x1 - px, h)
 				lc, mc, markc, subc, chipc = bg, bg, bg, bg, bg
 			}
 			// mark column: shortcut letter or number, a status glyph, or › / »
@@ -2184,7 +2184,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			if act.slider && compact { // the popup's slider: label 88 px, the track, the value 44 px
 				sh := h
 				hit_add(a, px, py, x1 - px, sh, .Action, sec_index(m, s), m.shown_actions[e])
-				if on do fill_rect(cv, px, py, x1 - px, sh, argb(acc, 0xff))
+				if on { fill_rect(cv, px, py, x1 - px, sh, argb(acc, 0xff)); mark_sel(a, px, py, x1 - px, sh) }
 				text_in(cv, m.f_body, ellipsize(m.f_body, act.label, 88 * S), lx, py, sh, argb(lc, 0xff))
 				val := fmt.tprintf("%d%%", act.value)
 				text_in(cv, m.f_bold13, val, right - tw(m.f_bold13, val), py, sh, argb(on ? bg : (act.dim ? dim : fgb), 0xff))
@@ -2358,7 +2358,7 @@ draw_results :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		on := n == m.si
 		hit_add(a, x0, py, bw, rh, .Result, n, 0)
 		lc, mc, tc := fgb, dim, acc
-		if on { fill_rect(cv, x0, py, bw, rh, argb(acc, 0xff)); lc, mc, tc = bg, bg, bg }
+		if on { fill_rect(cv, x0, py, bw, rh, argb(acc, 0xff)); mark_sel(a, x0, py, bw, rh); lc, mc, tc = bg, bg, bg }
 		label, meta, tag := sec.name, "", "section"
 		if r.act >= 0 {
 			act := sec.actions[r.act]
@@ -2457,7 +2457,7 @@ draw_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 			ty := py + r * cell_h
 			on := j == m.si
 			hit_add(a, tx - 4 * S, ty - 4 * S, tile_w + 8 * S, cell_h - 4 * S, .Item, j, 0)
-			if on do rounded_rect(cv, tx - 4 * S, ty - 4 * S, tile_w + 8 * S, tile_h + 8 * S, 0, 0, f32(2 * S), argb(acc, 0xff))
+			if on { rounded_rect(cv, tx - 4 * S, ty - 4 * S, tile_w + 8 * S, tile_h + 8 * S, 0, 0, f32(2 * S), argb(acc, 0xff)); mark_sel(a, tx - 4 * S, ty - 4 * S, tile_w + 8 * S, tile_h + 8 * S) }
 			fill_rect(cv, tx, ty, tile_w, tile_h, argb(mix(bg, fg, 0.08), 0xff))
 			if it.image != "" {
 				img := image_cover(a, it.image, tile_w, tile_h)
@@ -2483,7 +2483,7 @@ draw_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		on := j == m.si
 		hit_add(a, x0, py, bw, rh, .Item, j, 0)
 		lc, mc := fgb, dim
-		if on { fill_rect(cv, x0, py, bw, rh, argb(acc, 0xff)); lc, mc = bg, bg }
+		if on { fill_rect(cv, x0, py, bw, rh, argb(acc, 0xff)); mark_sel(a, x0, py, bw, rh); lc, mc = bg, bg }
 		if swatches {
 			// the design's theme row: name · "Aa" in the theme's colours · six swatches · tag (56 px)
 			tag_x := x1 - pad - 56 * S
@@ -2587,7 +2587,7 @@ draw_web :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		on := j == m.si
 		hit_add(a, x0, py, bw, h, .Web, j, 0)
 		lc, tc, mc := fgb, acc, dim
-		if on { fill_rect(cv, x0, py, bw, h, argb(acc, 0xff)); lc, tc, mc = bg, bg, bg }
+		if on { fill_rect(cv, x0, py, bw, h, argb(acc, 0xff)); mark_sel(a, x0, py, bw, h); lc, tc, mc = bg, bg, bg }
 		text_in(cv, m.f_small, r.tag, x0 + 20 * S, py, h, argb(tc, 0xff))
 		mw := tw(m.f_small, r.meta)
 		text_in(cv, m.f_row, r.label, x0 + 20 * S + 40 * S + 14 * S, py, h, argb(lc, 0xff), x1 - 20 * S - mw - 14 * S)
@@ -2701,7 +2701,7 @@ draw_font :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		on := j == m.si
 		hit_add(a, x0, py, lw, rh, .Action, m.open, m.sel_actions[j])
 		lc, mc := fgb, dim
-		if on { fill_rect(cv, x0, py, lw, rh, argb(acc, 0xff)); lc, mc = bg, bg }
+		if on { fill_rect(cv, x0, py, lw, rh, argb(acc, 0xff)); mark_sel(a, x0, py, lw, rh); lc, mc = bg, bg }
 		ff := family_fonts(a, act.label, false)
 		nf, sf := m.f_row, m.f_small
 		if ff.ok do nf, sf = at_scale(ff.name, S), at_scale(ff.sample, S)
@@ -3065,7 +3065,7 @@ draw_weather :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		if act.kind == .Day {
 			hit_add(a, px, y, x1 - px, ah, .Action, m.open, i)
 			lc, sc := fg, dim
-			if on { fill_rect(cv, px, y, x1 - px, ah, argb(acc, 0xff)); lc, sc = bg, bg }
+			if on { fill_rect(cv, px, y, x1 - px, ah, argb(acc, 0xff)); mark_sel(a, px, y, x1 - px, ah); lc, sc = bg, bg }
 			x := px + 20 * S
 			text_in(cv, m.f_body, act.label, x, y, ah, argb(on ? bg : fgb, 0xff))
 			x += 60 * S
@@ -3097,7 +3097,7 @@ draw_weather :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		}
 		if y + ah > fy do break
 		hit_add(a, px, y, x1 - px, ah, .Action, m.open, i)
-		if on do fill_rect(cv, px, y, x1 - px, ah, argb(acc, 0xff))
+		if on { fill_rect(cv, px, y, x1 - px, ah, argb(acc, 0xff)); mark_sel(a, px, y, x1 - px, ah) }
 		meta := len(act.choices) > 0 ? fmt.tprintf("‹ %s ›", act.meta) : act.meta
 		mw := tw(m.f_small, meta)
 		text_in(cv, m.f_small, meta, pr - mw, y, ah, argb(on ? bg : dim, 0xff))
@@ -3161,7 +3161,7 @@ draw_theme_view :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		on := j == m.si
 		hit_add(a, x0, y, lw, rh, .Item, j, 0)
 		lc, mc := fg, dim
-		if on { fill_rect(cv, x0, y, lw, rh, argb(acc, 0xff)); lc, mc = bg, bg }
+		if on { fill_rect(cv, x0, y, lw, rh, argb(acc, 0xff)); mark_sel(a, x0, y, lw, rh); lc, mc = bg, bg }
 		// right to left: the ● column (12 px), the swatch strip, then the name
 		xr := x0 + lw - 16 * S
 		if it.current do text_in(cv, m.f_small, "●", xr - 12 * S + (12 * S - tw(m.f_small, "●")) / 2, y, rh, argb(on ? bg : acc, 0xff))
