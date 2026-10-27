@@ -1,0 +1,6 @@
+S	ok	snapper · root · number 5	212 GB	6 snapshots	230 GB	0.44	0.07	0	
+N	48	today 14:02	pacman -Syu · 14 packages	post	47		0	0
+N	47	today 14:01	pacman -Syu · 14 packages	pre	48		0	0
+N	46	today 09:00	timeline	single	0		1	0
+N	45	yesterday 18:40	Before trying the new hypr config	single	0		0	1
+N	12	2 Sep 20:31	Fresh install, everything working	single	0		0	1

@@ -1,0 +1,1 @@
+S	noperm	snapper · root				0	0	0	snapper list says “No permissions.” for your user. Allowing your user once (ALLOW_USERS, SYNC_ACL) lets k4 list, take and compare snapshots without sudo.

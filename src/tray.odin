@@ -17,12 +17,14 @@ import "core:unicode/utf8"
 //   L <command>: the list again     X <command>: "ITEM [PARENT]" prints the menu as M lines:
 //   M <id> <depth> <item|sep|sub> <label> <enabled 1|0> <toggle: checkmark|radio|""> <state>
 //   A <item> <id> <title> <Active|Passive|NeedsAttention> <mono> <glyph> <pinned 1|0> <tooltip>
+//     [unread: the count tag on its tile and NEEDS YOU row, summed in the head]
 
 TRAY_W, TRAY_H :: 424, 524
 
 Tray_App :: struct {
 	item, id, title, status, mono, glyph, tip: string,
 	pinned: bool,
+	count: int, // unread messages (the count tag), 0 none
 }
 
 Tray_Row :: struct {
@@ -80,6 +82,7 @@ tray_parse :: proc(t: ^Tray, data: string) {
 		case "X": t.menu_cmd = get(f, 1)
 		case "A":
 			append(&t.apps, Tray_App{item = get(f, 1), id = get(f, 2), title = get(f, 3), status = get(f, 4), mono = get(f, 5), glyph = get(f, 6), pinned = len(f) > 7 && f[7] == "1", tip = get(f, 8)})
+			if len(f) > 9 do t.apps[len(t.apps) - 1].count, _ = strconv.parse_int(f[9])
 		}
 	}
 }
@@ -93,6 +96,7 @@ tray_attn :: proc(x: Tray_App) -> bool { return x.status == "NeedsAttention" }
 @(private = "file")
 tray_status_line :: proc(x: Tray_App) -> string {
 	if x.tip != "" do return x.tip
+	if x.count > 0 do return fmt.tprintf("%d unread", x.count)
 	switch x.status {
 	case "NeedsAttention": return "Needs you"
 	case "Passive": return "Idle"
@@ -361,8 +365,8 @@ tray_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	w, h := cv.w, cv.h
 	fill_rect(cv, 0, 0, w, h, argb(H.bg, a.bg_alpha))
 	sel, has := tray_sel(t)
-	attn_n := 0
-	for x in t.apps do if tray_attn(x) do attn_n += 1
+	attn_n, unread := 0, 0
+	for x in t.apps { if tray_attn(x) do attn_n += 1; unread += max(x.count, 0) }
 	hh := 40 * S
 	fh := 30 * S
 	fy := h - fh
@@ -395,8 +399,16 @@ tray_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		if len(t.path) > 0 do title = t.path[len(t.path) - 1][1]
 	} else if attn_n > 0 do right, rc = fmt.tprintf("%d need you", attn_n), H.hot
 	else do right = "all quiet"
+	if t.view == 0 && unread > 0 { // "2 need you · 7 unread": the unread part dim
+		if attn_n == 0 do right, rc = "", H.dim
+		u := fmt.tprintf("%s%d unread", right != "" ? " · " : "", unread)
+		uw := tw(t.f10, u)
+		text_in(cv, t.f10, u, w - 12 * S - uw, 0, hh, argb(H.dim, 0xff))
+		rw0 := tw(t.f10, right)
+		text_in(cv, t.f10, right, w - 12 * S - uw - rw0, 0, hh, argb(rc, 0xff))
+		right = strings.concatenate({right, u}, context.temp_allocator)
+	} else do text_in(cv, t.f10, right, w - 12 * S - tw(t.f10, right), 0, hh, argb(rc, 0xff))
 	rw := tw(t.f10, right)
-	text_in(cv, t.f10, right, w - 12 * S - rw, 0, hh, argb(rc, 0xff))
 	text_in(cv, t.f13b, ellipsize(t.f13b, title, w - 24 * S - rw - hx), hx, 0, hh, argb(H.fg, 0xff))
 	fill_rect(cv, 0, hh, w, S, argb(H.line, 0xff))
 	// the foot
@@ -526,7 +538,13 @@ tray_draw_grid :: proc(a: ^App, cv: ^Canvas, S, top, fy: int, H: HUD, soft: u32)
 			tx := p.x + 12 * S + 28 * S + 10 * S
 			cta := "Open ␣"
 			cw2 := tw(t.f10b, cta) + 12 * S
-			text_in(&list, t.f12b, ellipsize(t.f12b, x.title, p.x + p.w - 20 * S - cw2 - tx), tx, py + 7 * S, int(t.f12b.line_h), argb(H.fg, 0xff))
+			tag_w := x.count > 0 ? count_tag_w(t.f9b, x.count, S) + 7 * S : 0
+			nm := ellipsize(t.f12b, x.title, p.x + p.w - 20 * S - cw2 - tx - tag_w)
+			text_in(&list, t.f12b, nm, tx, py + 7 * S, int(t.f12b.line_h), argb(H.fg, 0xff))
+			if x.count > 0 { // the tag right after the name
+				bgc := on ? mix(H.bg, H.acc, 0.08) : mix(H.bg, H.hot, 0.05)
+				count_tag(&list, t.f9b, tx + tw(t.f12b, nm) + 7 * S, py + 7 * S + (int(t.f12b.line_h) - 11 * S) / 2, x.count, S, H.hot, H.bg, bgc)
+			}
 			text_in(&list, t.f10, ellipsize(t.f10, tray_status_line(x), p.x + p.w - 20 * S - cw2 - tx), tx, py + 7 * S + int(t.f12b.line_h) + 3 * S, int(t.f10.line_h), argb(H.hot, 0xff))
 			rounded_rect(&list, p.x + p.w - 10 * S - cw2, py + (p.h - 18 * S) / 2, cw2, 18 * S, 0, 0, f32(S), argb(H.hot, 0xff))
 			text_in(&list, t.f10b, cta, p.x + p.w - 10 * S - cw2 + 6 * S, py + (p.h - 18 * S) / 2, 18 * S, argb(H.hot, 0xff))
@@ -540,6 +558,7 @@ tray_draw_grid :: proc(a: ^App, cv: ^Canvas, S, top, fy: int, H: HUD, soft: u32)
 			tray_box(a, &list, S, bxx, py + 10 * S, x, t.f11b)
 			dot := x.status == "Passive" ? H.faint : th.green
 			fill_rect(&list, bxx + 28 * S - 3 * S, py + 10 * S + 28 * S - 3 * S, 6 * S, 6 * S, argb(dot, 0xff))
+			if x.count > 0 do count_tag(&list, t.f9b, bxx + 28 * S - 7 * S, py + 10 * S - 5 * S, x.count, S, tray_attn(x) ? H.hot : H.acc, H.bg, on ? mix(H.bg, H.acc, 0.08) : H.bg)
 			f := on ? t.f10b : t.f10
 			nm := ellipsize(f, x.title, p.w - 8 * S)
 			text_in(&list, f, nm, p.x + (p.w - tw(f, nm)) / 2, py + 10 * S + 28 * S + 6 * S, int(t.f10.line_h), argb(on ? H.fg : soft, 0xff))
@@ -692,7 +711,7 @@ tray_dump :: proc(a: ^App) -> string {
 		for v, i in t.flat {
 			x := t.apps[v]
 			g := tray_attn(x) ? 0 : (x.pinned ? 1 : 2)
-			fmt.sbprintfln(&sb, "%s %s · %s", i == t.cur ? "*" : " ", x.title, heads[g])
+			fmt.sbprintfln(&sb, "%s %s · %s%s", i == t.cur ? "*" : " ", x.title, heads[g], x.count > 0 ? fmt.tprintf(" · %d unread", x.count) : "")
 		}
 	}
 	if t.toast != "" do fmt.sbprintfln(&sb, "toast %s", t.toast)

@@ -47,6 +47,14 @@ Options :: struct {
 	perf:          bool,   // --perf
 	send:          bool,   // --send
 	ssh:           bool,   // --ssh
+	router:        bool,   // --router
+	displays:      bool,   // --displays
+	pass:          bool,   // --pass
+	keyring:       bool,   // --keyring
+	media:         bool,   // --media
+	drives:        bool,   // --drives
+	snap:          bool,   // --snap
+	bus:           bool,   // --bus
 	dump:          bool, // --dump: print the state as text instead of a PNG
 }
 
@@ -89,8 +97,11 @@ App :: struct {
 	perf:     ^Perf, // --perf: performance and utilities (perf.odin)
 	send:     ^Send, // --send: Send to, over LocalSend (send.odin)
 	ssh:      ^Ssh,  // --ssh: SSH hosts, server and keys (ssh.odin)
+	router:   ^Router, // --router: the OpenWrt router (router.odin)
+	displays: ^Displays, // --displays: screens to drag into place (displays.odin)
+	pn:       ^Panel, // --pass --keyring --media --drives --snap: a script-fed window (panel.odin)
 	shift:    bool, // Shift is held (the key being handled)
-	osd_font, osd_bold, osd_icon: ^Font,
+	osd_font, osd_bold, osd_icon, osd_small: ^Font,
 	has_icons: bool,
 	// layout in logical pixels
 	pad, row_h, prompt_h, icon_px, gap, width, height, shown: int,
@@ -98,6 +109,11 @@ App :: struct {
 	done:     bool,
 	exit:     int,
 	result:   string,
+}
+
+// dmenu mode: none of the menus, bars, services or windows.
+app_plain :: proc(a: ^App) -> bool {
+	return a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil && a.perf == nil && a.send == nil && a.ssh == nil && a.router == nil && a.displays == nil && a.pn == nil
 }
 
 app_rematch :: proc(a: ^App) {
@@ -215,6 +231,9 @@ app_draw :: proc(a: ^App, cv: ^Canvas, scale: int) {
 	if a.perf != nil { perf_draw(a, cv, scale); return }
 	if a.send != nil { send_draw(a, cv, scale); return }
 	if a.ssh != nil { ssh_draw(a, cv, scale); return }
+	if a.router != nil { router_draw(a, cv, scale); return }
+	if a.displays != nil { displays_draw(a, cv, scale); return }
+	if a.pn != nil { a.pn.mode.draw(a, cv, scale); return }
 	if a.menu != nil { menu_draw(a, cv, scale); return }
 	t := a.theme
 	S :: proc(v, scale: int) -> int { return v * scale }
@@ -323,6 +342,9 @@ app_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string, alt := fals
 	if a.perf != nil do return perf_key(a, k, ctrl, ch, text)
 	if a.send != nil do return send_key(a, k, ctrl, ch, text)
 	if a.ssh != nil do return ssh_key(a, k, ctrl, alt, ch, text)
+	if a.router != nil do return router_key(a, k, ctrl, alt, ch, text)
+	if a.displays != nil do return displays_key(a, k, ctrl, alt, ch, text)
+	if a.pn != nil do return a.pn.mode.key(a, k, ctrl, alt, ch, text)
 	if a.nd != nil do return false
 	if a.menu != nil do return menu_key(a, k, ctrl, alt, ch, text)
 	return app_edit_key(a, k, ctrl, ch, text)
@@ -381,12 +403,18 @@ app_pointer_move :: proc(a: ^App, x, y: int) -> bool {
 	if a.nc != nil do return nc_pointer_move(a, x, y)
 	if a.clip != nil do return false
 	if a.tray != nil do return tray_pointer_move(a, x, y)
-	if a.perf != nil || a.send != nil || a.ssh != nil do return false
+	if a.displays != nil do return displays_drag(a, x, y)
+	if a.perf != nil || a.send != nil || a.ssh != nil || a.router != nil || a.pn != nil do return false
 	if a.menu != nil do return menu_pointer_move(a, x, y)
 	h, ok := hit_at(a, x, y)
 	if !ok || h.kind != .Row || h.a == a.selected do return false
 	a.selected = h.a
 	return true
+}
+// A button let go: only the screens window drags.
+app_pointer_release :: proc(a: ^App, x, y, button: int) -> bool {
+	if a.displays != nil do return displays_release(a, x, y)
+	return false
 }
 app_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 	if a.bar != nil do return bar_pointer_click(a, x, y, button)
@@ -399,6 +427,9 @@ app_pointer_click :: proc(a: ^App, x, y, button: int) -> bool {
 	if a.perf != nil do return perf_click(a, x, y, button)
 	if a.send != nil do return send_click(a, x, y, button)
 	if a.ssh != nil do return ssh_click(a, x, y, button)
+	if a.router != nil do return router_click(a, x, y, button)
+	if a.displays != nil do return displays_click(a, x, y, button)
+	if a.pn != nil do return a.pn.mode.click(a, x, y, button)
 	if a.menu != nil do return menu_pointer_click(a, x, y, button)
 	if button == 3 { a.exit = 1; a.done = true; return true }
 	h, ok := hit_at(a, x, y)
@@ -412,7 +443,8 @@ app_pointer_scroll :: proc(a: ^App, n: int) -> bool {
 	if a.ov != nil || a.pw != nil || a.nd != nil do return false
 	if a.nc != nil do return nc_scroll(a, n)
 	if a.clip != nil do return clip_scroll(a, n)
-	if a.tray != nil || a.perf != nil || a.send != nil || a.ssh != nil do return false
+	if a.tray != nil || a.perf != nil || a.send != nil || a.ssh != nil || a.router != nil || a.displays != nil do return false
+	if a.pn != nil do return a.pn.mode.scroll != nil ? a.pn.mode.scroll(a, n) : false
 	if a.menu != nil do return menu_pointer_scroll(a, n)
 	app_move(a, n)
 	return true

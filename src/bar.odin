@@ -24,8 +24,13 @@ import "logic"
 //      (strftime; the time bold, the date dim); right click switches, middle shows UTC for 3 s.
 //      An exec line is plain text or Waybar's JSON {"text","tooltip","class","percentage"}
 //      plus k4's "icon", "icon_tone", "text_tone", "text2" (dim, after the text), "text2_tone",
-//      "level" (a 4 px level bar, 0–100) and "battery" (the battery glyph, 0–100). An empty
-//      text, icon and battery hide the module. class critical/urgent: a red block;
+//      "level" (a 4 px level bar, 0–100), "battery" (the battery glyph, 0–100) and "badge"
+//      (a count tag over the content's end, 99+ at most; "badge_tone": red when the app needs
+//      you, dnd quiet, else the accent), "pill" (the same tag with a short text: "?", "!") and
+//      "outline" (true: an accent ring round the module, the visible-workspace look, for news),
+//      "box" (a short label in an outlined box after the icon: a bus line; "box_tone", default the
+//      accent) and "text2_bold".
+//      An empty text, icon and battery hide the module. class critical/urgent: a red block;
 //      warning: yellow; dim/muted/off/disconnected/stale/empty: the dim colour.
 //      tone: the icon's colour unless the line names one (accent fg dim red orange yellow
 //      green cyan blue magenta). left/right/middle/up/down: shell commands for the buttons
@@ -34,7 +39,7 @@ import "logic"
 //      K4_BAR_POS (top|bottom) and K4_BAR_H, and the module runs again right after. While a
 //      click's command runs the module is drawn open, so a popup's module stays an accent block.
 //      flags (k=v;…): px=N (inner padding, default 7), maxw=N / maxw2=N (text caps),
-//      compact (text hidden below 1440 px), flash (the wheel shows the percentage for 1.2 s),
+//      compact (text hidden below 1440 px), slim (only the first text hidden below 1440 px), flash (the wheel shows the percentage for 1.2 s),
 //      tip=TEXT (a tooltip for modules that print none), next=PATH (the clock: a meeting from
 //      that TSV of today's "start end title video" replaces the date: "Review in 8 min" in
 //      yellow 10 min before, "Review · j join" in the accent while it runs).
@@ -50,12 +55,18 @@ Module :: struct {
 	interval: f64,
 	on: [5]string, // left right middle up down
 	px, maxw, maxw2: int, // flags
-	compact, flash: bool,
+	compact, slim, flash: bool,
 	tip: string, // flags' tip=: the tooltip when the module prints none
 	next_file: string, // clock flag next=PATH: today's meetings (start end title video, TSV)
 	// what it shows
 	text, tooltip, class, icon, icon_tone, text_tone, text2, text2_tone: string,
 	level, battery, pct: int, // -1: none
+	badge: int, // the count tag; 0 or less: none
+	badge_tone: string, // red (the app needs you), dnd (quiet), else the accent
+	pill: string, // the tag with a short text instead of a count
+	outline: bool, // an accent ring round the module
+	box, box_tone: string, // a short label in an outlined box after the icon (a bus line)
+	text2_bold: bool,
 	lines: int, // lines read so far
 	alt: bool,
 	utc_until, flash_until: time.Tick,
@@ -90,7 +101,7 @@ Bar :: struct {
 	want_region: [4]int, // the preview card's rect (logical; zero: none), for the input region
 	prev: Prev, // the workspace preview (wspreview.odin)
 	ws_x: [dynamic]int, // each workspace cell's left edge as last drawn (logical)
-	f_text, f_bold: ^Font,
+	f_text, f_bold, f_badge, f_box: ^Font,
 	width: int, // logical width of the output strip (from configure)
 }
 
@@ -137,6 +148,7 @@ bar_setup :: proc(a: ^App, data: string) {
 				case "maxw": m.maxw = n
 				case "maxw2": m.maxw2 = n
 				case "compact": m.compact = true
+				case "slim": m.slim = true
 				case "flash": m.flash = true
 				case "tip": m.tip = strings.clone(v)
 				case "next":
@@ -151,6 +163,10 @@ bar_setup :: proc(a: ^App, data: string) {
 	b.f_text = font_sized(&a.font, 12)
 	b.f_bold = b.f_text
 	if bold, ok := bold_font(a, 12); ok do b.f_bold = bold
+	b.f_badge = font_sized(&a.font, 9)
+	if bold, ok := bold_font(a, 9); ok do b.f_badge = bold
+	b.f_box = font_sized(&a.font, 11)
+	if bold, ok := bold_font(a, 11); ok do b.f_box = bold
 	append(&a.fonts, b.f_text, b.f_bold)
 	a.width, a.height = 0, b.height
 	b.want_h = b.height
@@ -215,21 +231,24 @@ mod_start :: proc(m: ^Module) {
 // A line of module output: plain text, or Waybar's JSON with k4's fields.
 @(private)
 mod_line :: proc(m: ^Module, line: string) {
-	for p in ([]^string{&m.text, &m.tooltip, &m.class, &m.icon, &m.icon_tone, &m.text_tone, &m.text2, &m.text2_tone}) {
+	for p in ([]^string{&m.text, &m.tooltip, &m.class, &m.icon, &m.icon_tone, &m.text_tone, &m.text2, &m.text2_tone, &m.badge_tone, &m.pill, &m.box, &m.box_tone}) {
 		if len(p^) > 0 do delete(p^)
 		p^ = ""
 	}
-	m.level, m.battery, m.pct = -1, -1, -1
+	m.level, m.battery, m.pct, m.badge, m.outline, m.text2_bold = -1, -1, -1, 0, false, false
 	m.lines += 1
 	l := strings.trim_space(line)
 	if strings.has_prefix(l, "{") {
-		J :: struct { text, tooltip, class, icon, icon_tone, text_tone, text2, text2_tone: string, percentage, level, battery: int }
+		J :: struct { text, tooltip, class, icon, icon_tone, text_tone, text2, text2_tone, badge_tone, pill, box, box_tone: string, percentage, level, battery, badge: int, outline, text2_bold: bool }
 		j := J{percentage = -1, level = -1, battery = -1}
 		if json.unmarshal(transmute([]u8)l, &j, allocator = context.temp_allocator) == nil {
 			m.text, m.tooltip, m.class = strings.clone(j.text), strings.clone(j.tooltip), strings.clone(j.class)
 			m.icon, m.icon_tone, m.text_tone = strings.clone(j.icon), strings.clone(j.icon_tone), strings.clone(j.text_tone)
 			m.text2, m.text2_tone = strings.clone(j.text2), strings.clone(j.text2_tone)
 			m.level, m.battery, m.pct = j.level, j.battery, j.percentage
+			m.badge, m.badge_tone = j.badge, strings.clone(j.badge_tone)
+			m.pill, m.outline = strings.clone(j.pill), j.outline
+			m.box, m.box_tone, m.text2_bold = strings.clone(j.box), strings.clone(j.box_tone), j.text2_bold
 			return
 		}
 	}
@@ -456,6 +475,11 @@ mod_state :: proc(b: ^Bar, i: int) -> Mod_State {
 Chip :: struct {
 	icon, text, text2: string,
 	battery, level: int,
+	badge: int, // the count tag over the end of the content (the Kestrel design's chat badge)
+	pill: string, // the tag with a short text
+	outline: bool,
+	box: string, box_c: u32, bold2: bool,
+	badge_bg, badge_fg: u32,
 	bold: bool,
 	bg, fg, icon_c, text_c, text2_c, line_c: u32,
 	filled: bool,
@@ -468,10 +492,11 @@ mod_chip :: proc(a: ^App, i: int, S: int, narrow: bool) -> (c: Chip, shown: bool
 	t := a.theme
 	m := &b.mods[i]
 	st := mod_state(b, i)
-	c = {icon = m.icon, text = m.text, text2 = m.text2, battery = m.battery, level = m.level, px = m.px * S, maxw = m.maxw * S, maxw2 = m.maxw2 * S}
+	c = {icon = m.icon, text = m.text, text2 = m.text2, battery = m.battery, level = m.level, badge = m.badge, pill = m.pill, outline = m.outline, box = m.box, bold2 = m.text2_bold, px = m.px * S, maxw = m.maxw * S, maxw2 = m.maxw2 * S}
 	if m.kind == .Clock do c.bold = true
 	flashing := m.flash && m.flash_until != {} && time.tick_diff(time.tick_now(), m.flash_until) > 0 && m.pct >= 0
 	if narrow && m.compact do c.text, c.text2 = "", ""
+	if narrow && m.slim do c.text = ""
 	if c.icon == "" && c.text == "" && c.text2 == "" && c.battery < 0 do return c, false
 	fg := t.fg
 	#partial switch st {
@@ -493,6 +518,12 @@ mod_chip :: proc(a: ^App, i: int, S: int, narrow: bool) -> (c: Chip, shown: bool
 		c.text2_c = token(t, m.text2_tone, t.fg_dim)
 		c.line_c = c.battery >= 0 && c.battery <= 25 ? t.yellow : fg
 	}
+	switch m.badge_tone { // accent for unread, red when the app needs you, faint under do not disturb
+	case "red": c.badge_bg, c.badge_fg = t.red, t.bg
+	case "dnd": c.badge_bg, c.badge_fg = mix(t.bg, t.fg_dim, 0.45), t.fg_dim
+	case: c.badge_bg, c.badge_fg = t.accent, t.bg
+	}
+	c.box_c = st == .Dim ? t.fg_dim : token(t, m.box_tone, t.accent)
 	if flashing {
 		c.level = m.pct
 		c.text2 = fmt.tprintf("%d%%", m.pct)
@@ -507,11 +538,15 @@ chip_w :: proc(b: ^Bar, c: Chip, S: int) -> int {
 	n := 0
 	f := c.bold ? b.f_bold : b.f_text
 	if c.icon != "" { w += tw(b.f_text, c.icon); n += 1 }
+	if c.box != "" { w += tw(b.f_box, c.box) + 8 * S; n += 1 }
 	if c.battery >= 0 { w += 22 * S; n += 1 }
 	if c.level >= 0 { w += 4 * S; n += 1 }
 	if c.text != "" { w += c.maxw > 0 ? min(tw(f, c.text), c.maxw) : tw(f, c.text); n += 1 }
-	if c.text2 != "" { w += c.maxw2 > 0 ? min(tw(b.f_text, c.text2), c.maxw2) : tw(b.f_text, c.text2); n += 1 }
-	return w + 6 * S * max(n - 1, 0) + 2 * c.px
+	if c.text2 != "" { f2 := c.bold2 ? b.f_bold : b.f_text; w += c.maxw2 > 0 ? min(tw(f2, c.text2), c.maxw2) : tw(f2, c.text2); n += 1 }
+	w += 6 * S * max(n - 1, 0) + 2 * c.px
+	if c.badge > 0 do w += max(0, count_tag_w(b.f_badge, c.badge, S) - 5 * S - c.px + S) // the tag overhangs the end, into the padding
+	else if c.pill != "" do w += max(0, pill_tag_w(b.f_badge, c.pill, S) - 5 * S - c.px + S)
+	return w
 }
 
 @(private)
@@ -525,6 +560,14 @@ chip_draw :: proc(a: ^App, cv: ^Canvas, c: Chip, x, w, h, S: int) {
 	if c.icon != "" {
 		text_in(cv, b.f_text, c.icon, xx, 0, h, argb(c.icon_c, 0xff))
 		xx += tw(b.f_text, c.icon) + 6 * S
+	}
+	if c.box != "" { // the outlined label: a bus line's number
+		bw, bh := tw(b.f_box, c.box) + 8 * S, 16 * S
+		by := (h - bh) / 2
+		if !c.filled do fill_rect(cv, xx, by, bw, bh, argb(c.box_c, 0x1a))
+		rounded_rect(cv, xx, by, bw, bh, 0, 0, f32(S), argb(c.filled ? c.fg : mix(t.bg, c.box_c, 0.55), 0xff))
+		text_in(cv, b.f_box, c.box, xx + 4 * S, by, bh, argb(c.filled ? c.fg : c.box_c, 0xff))
+		xx += bw + 6 * S
 	}
 	if c.battery >= 0 { // a 20×10 outline with the charge inside, a 2×4 nub
 		by := (h - 10 * S) / 2
@@ -546,9 +589,21 @@ chip_draw :: proc(a: ^App, cv: ^Canvas, c: Chip, x, w, h, S: int) {
 		xx += tw(f, s) + 6 * S
 	}
 	if c.text2 != "" && xx < right {
-		s := ellipsize(b.f_text, c.text2, c.maxw2 > 0 ? min(c.maxw2, right - xx) : right - xx)
-		text_in(cv, b.f_text, s, xx, 0, h, argb(c.text2_c, 0xff))
+		f2 := c.bold2 ? b.f_bold : b.f_text
+		s := ellipsize(f2, c.text2, c.maxw2 > 0 ? min(c.maxw2, right - xx) : right - xx)
+		text_in(cv, f2, s, xx, 0, h, argb(c.text2_c, 0xff))
+		xx += tw(f2, s) + 6 * S
 	}
+	if c.badge > 0 { // its left edge 5 px inside the content's end, 2 px under the strip's top
+		end := xx - 6 * S
+		ring := c.bg != 0 ? c.bg : argb(t.bg, 0xff)
+		count_tag(cv, b.f_badge, end - 5 * S, 2 * S, c.badge, S, c.badge_bg, c.badge_fg, ring)
+	} else if c.pill != "" {
+		end := xx - 6 * S
+		ring := c.bg != 0 ? c.bg : argb(t.bg, 0xff)
+		pill_tag(cv, b.f_badge, end - 5 * S, 2 * S, c.pill, S, c.badge_bg, c.badge_fg, ring)
+	}
+	if c.outline && !c.filled do rounded_rect(cv, x, 0, w, h, 0, 0, f32(S), argb(t.accent, 0xff))
 }
 
 // The workspaces of this output (all of them when the bar has none), with 1–5 always there
@@ -831,6 +886,10 @@ bar_dump :: proc(a: ^App) -> string {
 				if m.level >= 0 do append(&parts, fmt.tprintf("lvl:%d", m.level))
 				if m.text != "" do append(&parts, m.text)
 				if m.text2 != "" do append(&parts, fmt.tprintf("· %s", m.text2))
+				if m.pill != "" do append(&parts, fmt.tprintf("pill:%s", m.pill))
+				if m.outline do append(&parts, "outline")
+				if m.box != "" do append(&parts, fmt.tprintf("box:%s", m.box))
+				if m.badge > 0 do append(&parts, fmt.tprintf("badge:%d%s", m.badge, m.badge_tone != "" ? fmt.tprintf("/%s", m.badge_tone) : ""))
 				fmt.sbprintf(&sb, " [%s%s%s]", strings.join(parts[:], " ", context.temp_allocator), m.class != "" ? fmt.tprintf(" (%s)", m.class) : "", m.clicking ? " open" : "")
 			}
 		}
@@ -841,3 +900,16 @@ bar_dump :: proc(a: ^App) -> string {
 }
 
 _ :: c
+
+// The same tag with a short text ("?", "!").
+@(private)
+pill_tag_w :: proc(f: ^Font, l: string, S: int) -> int { return max(11 * S, tw(f, l) + 6 * S) }
+@(private)
+pill_tag :: proc(cv: ^Canvas, f: ^Font, x, y: int, l: string, S: int, bg, fg, ring: u32) -> int {
+	w := pill_tag_w(f, l, S)
+	h := 11 * S
+	fill_rect(cv, x - 2 * S, y - 2 * S, w + 4 * S, h + 4 * S, argb(ring, 0xff))
+	fill_rect(cv, x, y, w, h, argb(bg, 0xff))
+	text_in(cv, f, l, x + (w - tw(f, l)) / 2, y, h, argb(fg, 0xff))
+	return w
+}

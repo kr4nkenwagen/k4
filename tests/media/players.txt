@@ -1,0 +1,3 @@
+P	org.mpris.MediaPlayer2.spotify	Spotify	Sp	Playing	Teardrop
+P	org.mpris.MediaPlayer2.firefox.instance_1_9	Firefox	Ff	Paused	Building a status bar for sway
+N	org.mpris.MediaPlayer2.spotify	Playing	Teardrop	Massive Attack	Mezzanine	330000000	84000000	80	0	None		1	1

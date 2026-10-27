@@ -1,0 +1,2 @@
+P	org.mpris.MediaPlayer2.mpv	mpv	mp	Playing	P3 Morgon (live)
+N	org.mpris.MediaPlayer2.mpv	Playing	P3 Morgon (live)	Sveriges Radio	stream	-1	0	60	-	-		0	0

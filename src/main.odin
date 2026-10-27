@@ -40,19 +40,27 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --power                 the system menu: lock, suspend, … shut down (Super+Esc; tiles on stdin, power.odin)
   --notifyd               the notification service: popups, history, do not disturb (notifyd.odin)
   --notify-center         the notification centre (Super+N; notify_center.odin)
-  --notify-ctl CMD        a command to the service: list status clear dnd on|off|toggle … (prints its reply)
+  --notify-ctl CMD        a command to the service: list status counts clear dnd on|off|toggle … (prints its reply)
   --clip                  the clipboard history: search, preview, paste (Super+Ctrl+V; entries on stdin, clip.odin)
   --tray                  the system tray's apps and their menus (Super+.; k4-tray list on stdin, tray.odin)
   --perf                  performance, processes and utilities (Super+Shift+Esc; utilities on stdin, perf.odin)
   --send                  Send to a nearby device over LocalSend (what is sent on stdin, send.odin)
   --ssh                   SSH: hosts, this machine's server, keys (k4-ssh data on stdin, ssh.odin)
+  --router                The OpenWrt router (k4-router data on stdin, router.odin)
+  --displays              Screens to drag into place (sway-menu displays on stdin, displays.odin)
+  --pass                  Passwords: the pass store, copy, new, generate, git (pass-menu data, pass.odin)
+  --keyring               the passwords k4 keeps in the keyring: use, forget (k4-secret data, keyring.odin)
+  --media                 any MPRIS player: now playing, controls, players (media-menu data, media.odin)
+  --drives                removable drives: mount, open, eject, unlock (k4-drives data, drives.odin)
+  --snap                  btrfs snapshots: take, compare, keep, delete, restore (k4-snap data, snap.odin)
+  --bus                   bus departures at a remembered stop, the stop picker, the Trafiklab key (k4-bus data, bus.odin)
   --output NAME           the bar's output (default: the compositor's choice)
   --config FILE           accepted and ignored (fuzzel compatibility)
   --dry-run FILE.png      render one frame to a PNG without Wayland, then print the selection
   --dump                  like --dry-run without the PNG: print the menu state as text (tests)
   --keys KEYS, --select N keys pressed before the first frame: text plus <down> <up> <left>
                           <right> <enter> <esc> <tab> <bs> <pgup> <pgdn> <alt-x> <ctrl-x> <shift-enter>, and the pointer:
-                          <move:x,y> <click:x,y> <rclick:x,y> <mclick:x,y> <wheel:n>; then move the selection
+                          <move:x,y> <click:x,y> <rclick:x,y> <mclick:x,y> <wheel:n> <press:x,y> <release:x,y>; then move the selection
   --scale N               dry runs: buffer scale
 
 Ghostty's custom shaders (the custom-shader lines of ~/.config/ghostty/config and the files
@@ -137,6 +145,14 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--perf": o.perf = true
 		case "--send": o.send = true
 		case "--ssh": o.ssh = true
+		case "--router": o.router = true
+		case "--displays": o.displays = true
+		case "--pass": o.pass = true
+		case "--keyring": o.keyring = true
+		case "--media": o.media = true
+		case "--drives": o.drives = true
+		case "--snap": o.snap = true
+		case "--bus": o.bus = true
 		case "--notify-center": o.notify_center = true
 		case "--notify-ctl": o.notify_ctl = value(args, &i, inline, has_inline)
 		case "--osd": o.osd = value(args, &i, inline, has_inline)
@@ -199,10 +215,28 @@ main :: proc() {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		send_setup(a, string(data))
 		a.width, a.height = a.opts.popup.set ? SEND_PW : SEND_W, a.opts.popup.set ? SEND_PH : SEND_H
+	} else if opts.displays {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		displays_setup(a, string(data))
+		a.width, a.height = DISPLAYS_W, DISPLAYS_H
+	} else if opts.router {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		router_setup(a, string(data))
+		a.width, a.height = a.opts.popup.set ? ROUTER_PW : ROUTER_W, a.opts.popup.set ? ROUTER_PH : ROUTER_H
 	} else if opts.ssh {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		ssh_setup(a, string(data))
 		a.width, a.height = SSH_W, SSH_H
+	} else if opts.pass || opts.keyring || opts.media || opts.drives || opts.snap || opts.bus {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		switch {
+		case opts.pass: pass_setup(a, string(data))
+		case opts.keyring: keyring_setup(a, string(data))
+		case opts.media: media_setup(a, string(data))
+		case opts.drives: drives_setup(a, string(data))
+		case opts.snap: snap_setup(a, string(data))
+		case opts.bus: bus_setup(a, string(data))
+		}
 	} else if opts.perf {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		perf_setup(a, string(data))
@@ -231,7 +265,8 @@ main :: proc() {
 		a.osd_bold = a.osd_font
 		if bold, ok := bold_font(a, 13); ok do a.osd_bold = bold
 		a.osd_icon = font_sized(&a.font, 18)
-		append(&a.fonts, a.osd_font, a.osd_bold, a.osd_icon)
+		a.osd_small = font_sized(&a.font, 10)
+		append(&a.fonts, a.osd_font, a.osd_bold, a.osd_icon, a.osd_small)
 		a.width, a.height = 300, 48
 	} else if opts.bar {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
@@ -260,7 +295,7 @@ main :: proc() {
 			a.width = a.opts.width_chars > 0 ? a.opts.width_chars : 1280 // dry runs: a 1280 px strip unless -w
 			a.bar.width = a.width
 		} else if a.menu != nil { if wait || nowait == "keys" do menu_load_all(a) }
-		else if a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil && a.perf == nil && a.send == nil && a.ssh == nil do app_layout(a)
+		else if app_plain(a) || a.osd != nil do app_layout(a)
 		// shaders: where the selection was before the keys, so a cursor shader shows the move
 		pre: [4]int
 		if opts.dry_run != "" && os.get_env("K4_DRY_SHADERS", context.temp_allocator) != "" && opts.keys != "" {
@@ -274,7 +309,7 @@ main :: proc() {
 		press_keys(a, opts.keys)
 		if a.menu != nil && wait do menu_load_all(a) // a stay action started by the keys, and the reload after it
 		if a.menu != nil && !wait { time.sleep(time.Duration(clamp(a.menu.slow_ms, 0, 2000) + 50) * time.Millisecond); menu_on_tick(a) }
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil && a.perf == nil && a.send == nil && a.ssh == nil do app_move(a, opts.select)
+		if app_plain(a) do app_move(a, opts.select)
 		if a.menu != nil do a.width, a.height = menu_size(a)
 		if a.bar != nil { bar_tick(a); a.height = a.bar.want_h } // a tooltip or the preview grows it
 		s := opts.scale
@@ -317,15 +352,18 @@ main :: proc() {
 		if opts.dump && a.perf != nil && !a.done do fmt.print(perf_dump(a))
 		if opts.dump && a.send != nil && !a.done do fmt.print(send_dump(a))
 		if opts.dump && a.ssh != nil && !a.done do fmt.print(ssh_dump(a))
+		if opts.dump && a.router != nil && !a.done do fmt.print(router_dump(a))
+		if opts.dump && a.displays != nil && !a.done do fmt.print(displays_dump(a))
+		if opts.dump && a.pn != nil && !a.done do fmt.print(a.pn.mode.dump(a))
 		if a.nd != nil do a.exit = 0
 		if opts.dump && a.osd != nil do fmt.printfln("osd %s %d/%d %s %s", a.osd.icon, a.osd.pct, a.osd.vmax, a.osd.value, a.osd.label)
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil && a.perf == nil && a.send == nil && a.ssh == nil && !a.done do app_accept(a)
-		if (a.menu != nil || a.bar != nil || a.ov != nil || a.pw != nil || a.nc != nil || a.clip != nil || a.tray != nil || a.perf != nil || a.send != nil || a.ssh != nil) && !a.done do a.exit = 1
+		if app_plain(a) && !a.done do app_accept(a)
+		if (a.menu != nil || a.bar != nil || a.ov != nil || a.pw != nil || a.nc != nil || a.clip != nil || a.tray != nil || a.perf != nil || a.send != nil || a.ssh != nil || a.router != nil || a.displays != nil || a.pn != nil) && !a.done do a.exit = 1
 		if a.osd != nil do a.exit = 0
 	} else {
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil && a.perf == nil && a.send == nil && a.ssh == nil do app_layout(a)
+		if app_plain(a) do app_layout(a)
 		press_keys(a, opts.keys)
-		if a.menu == nil && a.bar == nil && a.osd == nil && a.ov == nil && a.pw == nil && a.nd == nil && a.nc == nil && a.clip == nil && a.tray == nil && a.perf == nil && a.send == nil && a.ssh == nil do app_move(a, opts.select)
+		if app_plain(a) do app_move(a, opts.select)
 		if a.menu != nil do a.width, a.height = menu_size(a)
 		if a.osd != nil do osd_listen(a.osd)
 		menu_like := a.bar == nil && a.osd == nil && a.nd == nil // the service is not a menu
@@ -390,7 +428,7 @@ press_keys :: proc(a: ^App, keys: string) {
 				tok := s[1:end]
 				s = s[end + 1:]
 				// pointer tokens (tests): <move:x,y> <click:x,y> <rclick:x,y> <mclick:x,y> <wheel:n>, logical pixels
-				if c := strings.index_byte(tok, ':'); c > 0 && (tok[:c] == "move" || tok[:c] == "click" || tok[:c] == "rclick" || tok[:c] == "mclick" || tok[:c] == "wheel") {
+				if c := strings.index_byte(tok, ':'); c > 0 && (tok[:c] == "move" || tok[:c] == "click" || tok[:c] == "rclick" || tok[:c] == "mclick" || tok[:c] == "wheel" || tok[:c] == "press" || tok[:c] == "release") {
 					hits_refresh(a)
 					xy := strings.split(tok[c + 1:], ",", context.temp_allocator)
 					x, _ := strconv.parse_int(xy[0])
@@ -402,6 +440,8 @@ press_keys :: proc(a: ^App, keys: string) {
 					case "rclick": app_pointer_click(a, x, y, 3)
 					case "mclick": app_pointer_click(a, x, y, 2)
 					case "wheel": app_pointer_scroll(a, x)
+					case "press": app_pointer_click(a, x, y, 1) // a drag: press, move, release
+					case "release": app_pointer_release(a, x, y, 1)
 					}
 					if a.menu != nil && (a.opts.dry_run != "" || a.opts.dump) && os.get_env("K4_DRY_NOWAIT", context.temp_allocator) == "" do menu_load_all(a)
 					continue

@@ -14,12 +14,15 @@ import "logic"
 // socket, $XDG_RUNTIME_DIR/k4-osd.sock) and starts its 1.2 s again.
 // SPEC, '|'-separated: icon | percent (-1: no track) | max (100, or 150: a tick at 100 and red
 // past it) | value | value tone | icon tone | label (drawn instead of the track) | muted
-// e.g. "󰕾|62|150|62%", "󰝟|62|150|muted|dim|red||muted", "󰍭|-1||muted|red|red|Microphone"
+// | sub | picture. With a sub it is a track (the Kestrel design's media OSD): a 28 px square
+// (the picture, else the icon), the label bold over the sub, the value (a glyph) at the right.
+// e.g. "󰕾|62|150|62%", "󰝟|62|150|muted|dim|red||muted", "󰍭|-1||muted|red|red|Microphone",
+// "󰝚|-1||󰒭|accent||Angel||Massive Attack|/tmp/cover.jpg"
 
 OSD_MS :: 1200
 
 Osd :: struct {
-	icon, value, value_tone, icon_tone, label: string,
+	icon, value, value_tone, icon_tone, label, sub, image: string,
 	pct, vmax: int,
 	muted: bool,
 	until: time.Tick,
@@ -35,6 +38,7 @@ osd_set :: proc(o: ^Osd, spec: string) {
 	if o.pct, ok = strconv.parse_int(get(f, 1)); !ok do o.pct = -1
 	if o.vmax, ok = strconv.parse_int(get(f, 2)); !ok || o.vmax <= 0 do o.vmax = 100
 	o.muted = get(f, 7) == "muted"
+	o.sub, o.image = strings.clone(get(f, 8)), strings.clone(get(f, 9))
 	o.until = time.tick_add(time.tick_now(), OSD_MS * time.Millisecond)
 }
 
@@ -114,6 +118,29 @@ osd_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	fb := a.osd_bold
 	x := 16 * S
 	right := cv.w - 16 * S
+	if o.sub != "" { // a track: the cover, the title over the artist, the glyph
+		x = 12 * S
+		sq := 28 * S
+		sy := (cv.h - sq) / 2
+		fill_rect(cv, x, sy, sq, sq, argb(t.fg, 0x0d))
+		drawn := false
+		if o.image != "" {
+			img := image_cover(a, o.image, sq, sq)
+			if img.ok { blit_image(cv, img.px, img.w, img.h, x, sy); drawn = true }
+		}
+		if !drawn do text_in(cv, a.osd_font, o.icon, x + (sq - tw(a.osd_font, o.icon)) / 2, sy, sq, argb(tone(t, o.icon_tone, t.fg_dim), 0xff))
+		rounded_rect(cv, x, sy, sq, sq, 0, 0, f32(S), argb(mix(t.bg, t.accent, 0.17), 0xff))
+		x += sq + 12 * S
+		right = cv.w - 12 * S
+		vw := tw(fb, o.value)
+		text_in(cv, fb, o.value, right - vw, 0, cv.h, argb(tone(t, o.value_tone, t.accent), 0xff))
+		end := right - vw - 12 * S
+		lh := int(a.osd_small.line_h)
+		ty := (cv.h - int(fb.line_h) - 2 * S - lh) / 2
+		text_in(cv, fb, ellipsize(fb, o.label, end - x), x, ty, int(fb.line_h), argb(t.fg, 0xff))
+		text_in(cv, a.osd_small, ellipsize(a.osd_small, o.sub, end - x), x, ty + int(fb.line_h) + 2 * S, lh, argb(t.fg_dim, 0xff))
+		return
+	}
 	if o.icon != "" {
 		text_in(cv, a.osd_icon, o.icon, x, 0, cv.h, argb(tone(t, o.icon_tone, t.fg), 0xff))
 		x += tw(a.osd_icon, o.icon) + 12 * S

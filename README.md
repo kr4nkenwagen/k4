@@ -57,7 +57,9 @@ focused an accent block, visible elsewhere outlined, urgent red), the focused wi
 (dim, cut at 420 px, the first to give way), a clock (time bold, date dim; right click switches
 format, middle click shows UTC; with `next=FILE` a meeting replaces the date 10 minutes before
 and while it runs), and commands that print plain text or Waybar's JSON plus k4's
-`icon`, `text2`, tones, a `level` bar and a `battery` glyph. Hover fills the module and shows its
+`icon`, `text2`, tones, a `level` bar, a `battery` glyph and a `badge` (the design's count tag
+over the content's end: accent for unread, `badge_tone` red when the app needs you, `dnd` quiet;
+the tray's chat apps use it). Hover fills the module and shows its
 tooltip after 500 ms; 300 ms on a workspace shows a preview of its windows (a miniature in their
 real places and a row per window; a click jumps to one, `src/wspreview.odin`); a left click's command is watched, so the module stays an accent block
 while its popup is up. Clicks and the wheel get `K4_BAR_X`, `K4_BAR_MX`, `K4_BAR_MW`,
@@ -91,8 +93,26 @@ the accent, red for alarms); `K4_OVERVIEW_ACCENT=#RRGGBB` picks another accent.
 The bar, popups and the overview run Ghostty's shaders as the launcher does.
 
 `k4 --osd 'ICON|PERCENT|MAX|VALUE|…'` is the on-screen display: 300×48 above the bottom of the
-focused output for 1.2 s; another call while it shows updates it in place.
-Not yet: the system tray.
+focused output for 1.2 s; another call while it shows updates it in place. With a sub line and a
+picture it is a track: the cover, the title over the artist, a glyph (media keys, `media-menu`).
+
+## Windows fed by scripts
+
+Six windows share `src/panel.odin`: the data comes on stdin, `R` names the script that runs
+their actions in the background (its last line is the footer's message; `k4:` lines steer the
+window) and `L` the one that loads the data again. Each file's header has its format.
+
+| mode | what | script (dotfiles) |
+|---|---|---|
+| `--pass` | Passwords: the pass store, copy (cleared after 45 s), new, generate, git; a locked key asks for its passphrase in the window | `pass-menu`, Super+Ctrl+P |
+| `--keyring` | the Wi-Fi and VPN passwords k4 keeps in the keyring, and its sign-in tokens: use, forget | `k4-secret` |
+| `--media` | any MPRIS player: cover, position, controls, volume, the players | `media-menu`, the bar's media module |
+| `--drives` | removable drives: mount, open, eject (busy: what holds it), unlock LUKS in the card | `k4-drives`, the bar's drives module |
+| `--snap` | btrfs snapshots: take, compare, keep, delete, restore | `k4-snap`, Perf › Utilities |
+| `--bus` | the next hour of departures at a remembered stop (Trafiklab Realtime API, key in the keyring), a stop search | `k4-bus`, the bar's bus module |
+
+The tray popup takes an unread count per app (the count tag on its tile and NEEDS YOU row), and
+the notification service answers `counts` (notes per app) for the bar's chat badges.
 
 ## Build
 
@@ -127,4 +147,4 @@ directives, steppers, skeletons and slow loads with it and compares the result w
 
 ## Not yet
 
-The bar's system tray, clipboard paste, app-launcher mode, fractional scaling.
+App-launcher mode, fractional scaling.

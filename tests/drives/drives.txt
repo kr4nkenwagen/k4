@@ -1,0 +1,4 @@
+D	/dev/sdb1	USB	STICK	SanDisk Ultra · 64 GB · exFAT	/run/media/kr4nk/STICK	0.38	24 of 64 GB	mounted	
+D	/dev/sdc1	SSD	Backup	Samsung T7 · 1 TB · ext4	/run/media/kr4nk/Backup	0.71	712 of 1000 GB	busy	Can’t eject: mpv has a file open and a foot window is in /run/media/kr4nk/Backup.
+D	/dev/sdd1	SD	EOS_DIGITAL	SD card · 128 GB · FAT32		-1		unmounted	
+D	/dev/sde1	USB	Encrypted · 32 GB	Kingston DataTraveler · LUKS2		-1		locked	

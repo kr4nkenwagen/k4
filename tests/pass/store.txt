@@ -1,0 +1,8 @@
+S	ok	0	2 1	git@github.com:jonfelix/pass.git	
+E	email/fastmail	3 w ago
+E	email/gmail-old	2025
+E	web/github	5 d ago
+E	web/hetzner	2 m ago
+E	web/nordea	1 y ago
+E	work/aws-root	6 m ago
+E	work/vpn	2 w ago

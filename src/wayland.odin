@@ -255,7 +255,10 @@ ptr_motion :: proc "c" (data: rawptr, p: ^wl.pointer, t: uint, x, y: wl.fixed_t)
 }
 ptr_button :: proc "c" (data: rawptr, p: ^wl.pointer, serial, t, button: uint, state: wl.pointer_button_state) {
 	context = W.ctx
-	if state != .pressed do return
+	if state != .pressed { // let go: ends a drag
+		if u(button) == 0x110 && app_pointer_release(W.app, W.ptr_x, W.ptr_y, 1) do W.dirty = true
+		return
+	}
 	if W.ptr_surf == W.catcher && W.catcher != nil { W.app.exit = 1; W.app.done = true; return } // a click outside closes
 	// Hyprland hands the pointer to a keyboard-exclusive layer even off it (negative or past
 	// its size): that is a click outside too
@@ -601,6 +604,8 @@ run_wayland :: proc(a: ^App) -> bool {
 		if a.perf != nil do tick = 1000                     // the numbers move once a second
 		if a.send != nil do tick = time.tick_diff(time.tick_now(), a.send.scan_until) > 0 ? 80 : 500 // devices and the transfer
 		if a.ssh != nil do tick = a.ssh.check.running ? 100 : 500 // the connect steps, the data in the background
+		if a.router != nil do tick = 500                    // the data every 3 s, the reboot count
+		if a.pn != nil do tick = panel_tick_ms(a)           // the script's runs and loads, the refresh
 		if a.osd != nil {                                   // the feedback box: gone after 1.2 s
 			left := osd_left(a.osd)
 			if left == 0 { a.done = true; break }
@@ -618,7 +623,7 @@ run_wayland :: proc(a: ^App) -> bool {
 		}
 		n, _ := linux.poll(fds[:], timeout)
 		if n == 0 && tick >= 0 {
-			if a.bar != nil { bar_tick(a) } else if a.menu != nil { menu_on_tick(a) } else if a.nc != nil { nc_load(a) } else if a.perf != nil { perf_sample(a.perf) } else if a.send != nil { send_refresh(a) } else if a.ssh != nil do ssh_tick(a)
+			if a.bar != nil { bar_tick(a) } else if a.menu != nil { menu_on_tick(a) } else if a.nc != nil { nc_load(a) } else if a.perf != nil { perf_sample(a.perf) } else if a.send != nil { send_refresh(a) } else if a.ssh != nil { ssh_tick(a) } else if a.router != nil { router_tick(a) } else if a.pn != nil do panel_on_tick(a)
 			W.dirty = true
 		}
 		if n > 0 && .IN in fds[0].revents {

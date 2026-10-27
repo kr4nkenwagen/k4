@@ -20,8 +20,8 @@ import "logic"
 // the buttons run their actions, "+N more" opens the centre. Everything stays in the history
 // for the centre (k4 --notify-center) until dismissed. Do not disturb holds popups back except
 // critical ones. The centre, the bar and scripts reach it through $XDG_RUNTIME_DIR/k4-notify.sock
-// (k4 --notify-ctl CMD): list, status, dismiss ID, dismiss-app APP, dismiss-popups, clear,
-// act ID KEY, invoke-last, dnd on|off|toggle.
+// (k4 --notify-ctl CMD): list, status, counts (APP<TAB>N per app, for the bar's count tags),
+// dismiss ID, dismiss-app APP, dismiss-popups, clear, act ID KEY, invoke-last, dnd on|off|toggle.
 
 ND_W :: 380
 ND_MAX :: 3
@@ -564,6 +564,16 @@ nd_command :: proc(a: ^App, line: string) -> (reply: string, changed: bool) {
 	switch f[0] {
 	case "status":
 		return fmt.tprintf("%d\t%d\n", nd_unread(n), n.dnd ? 1 : 0), false
+	case "counts": // how many notes each app has in the history, oldest app first
+		order := make([dynamic]string, 0, 8, context.temp_allocator)
+		count := make(map[string]int, 8, context.temp_allocator)
+		for x in n.notes {
+			if x.app not_in count do append(&order, x.app)
+			count[x.app] += 1
+		}
+		sb := strings.builder_make(context.temp_allocator)
+		for app in order do fmt.sbprintf(&sb, "%s\t%d\n", nd_field(app), count[app])
+		return strings.to_string(sb), false
 	case "list":
 		sb := strings.builder_make(context.temp_allocator)
 		fmt.sbprintf(&sb, "S\t%d\t%d\n", n.dnd ? 1 : 0, nd_unread(n))
@@ -664,7 +674,8 @@ unix_ctl :: proc(path, cmd: string) -> (string, bool) {
 
 // An app's colour: one of the theme's, picked by its name; red for critical.
 note_app_color :: proc(t: logic.Theme, app: string) -> u32 {
-	if app == "LocalSend" || app == "Capture" do return t.accent // as the design draws them
+	if app == "LocalSend" || app == "Capture" || app == "Drives" do return t.accent // as the design draws them
+	if app == "Snapshots" do return t.green
 	cs := [6]u32{t.blue, t.magenta, t.yellow, t.green, t.cyan, t.orange}
 	return cs[hash.fnv32a(transmute([]u8)app) % 6]
 }
