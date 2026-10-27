@@ -1,5 +1,5 @@
 focus Sub
-popup 420x332
+popup 420xfit
 crumb KESTREL › NETWORK
 query (Search Network…)
 count 8 actions

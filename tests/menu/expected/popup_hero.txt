@@ -1,5 +1,5 @@
 focus Sub
-popup 380x281
+popup 380xfit
 crumb NETWORK › BATTERY
 query (Filter options…)
 count 78%

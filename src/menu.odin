@@ -1478,6 +1478,18 @@ menu_size :: proc(a: ^App) -> (int, int) {
 	return w, min(2 + 40 + 1 + 6 + body + 6 + 1 + 30 + 2, COMPACT_MAX_H)
 }
 
+// True when menu_size measured the height from the rows (so it follows the font's metrics).
+menu_size_measured :: proc(a: ^App) -> bool {
+	m := a.menu
+	s := &m.sections[m.open]
+	if s.popup_h > 0 || s.cal || m.focus == .Confirm || m.focus == .Input do return false
+	if m.focus != .Sub && m.open >= 0 {
+		home := m.sections[m.open].home
+		if home >= 0 && home < len(m.sections) && m.sections[home].popup_h > 0 do return false
+	}
+	return len(m.shown_actions) > 0
+}
+
 // The popup's device tabs: the page of another tab takes this one's place (Esc still closes).
 tab_switch :: proc(a: ^App, id: string) {
 	m := a.menu
@@ -2820,9 +2832,10 @@ menu_dump :: proc(a: ^App) -> string {
 	q := string(a.query[:])
 	if m.focus == .Input && m.input_password && !m.input_reveal do q = strings.repeat("•", utf8.rune_count_in_string(q), context.temp_allocator)
 	fmt.sbprintfln(&b, "focus %v%s", m.focus, sc ? " shortcuts" : "")
-	if compact_now(a) {
+	if compact_now(a) { // a height measured from the rows depends on the font: "fit", or "max" when capped
 		w, h := menu_size(a)
-		fmt.sbprintfln(&b, "popup %dx%d", w, h)
+		if menu_size_measured(a) do fmt.sbprintfln(&b, "popup %dx%s", w, h >= COMPACT_MAX_H ? "max" : "fit")
+		else do fmt.sbprintfln(&b, "popup %dx%d", w, h)
 	}
 	if m.focus == .Sub && m.sections[m.open].cal { // the calendar: its own state, then the footer's message
 		cal_dump(a, &b)

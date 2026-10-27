@@ -1,5 +1,5 @@
 focus Sub
-popup 420x205
+popup 420xfit
 crumb NETWORK › WI-FI NETWORKS
 query (Filter networks…)
 count 3 networks
