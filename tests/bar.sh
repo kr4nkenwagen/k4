@@ -186,5 +186,12 @@ check "calc: shift+enter pastes into the window below" "paste:360" "$(mt --keys 
 check "calc: up recalls the history" "query 2 GiB in MB" "$(hist=$tmp/calc-hist; K4_CALC_HISTORY=$hist mt --keys "=2 GiB in MB<enter>" >/dev/null; K4_CALC_HISTORY=$hist mt --keys "=<up>" | grep '^query')"
 check "web: alt+2 searches Wikipedia" "url:https://duckduckgo.com/?q=%21w+arch+linux" "$(mt --keys "g arch linux<alt-2>" | tail -1)"
 check "web: ctrl+enter copies the URL" "toast Copied  https://duckduckgo.com/?q=arch+linux" "$(mt --keys "g arch linux<ctrl-enter>" | grep toast)"
+# the launcher: > settings, ⌃1–9, ⇧↵, the Files group (K4_FILES_CMD stands in for fd)
+lt() { printf 'S\tA\tApps\tA\t\nA\tterm\tTerminal\t\t\tapp\nA\twifi\tWi-Fi power\t\t\tstay;toggle=on\nA\tvol\tVolume\t\t\tslider=50;step=5\nA\tdocs\tOpen docs\t\t\t\nR\techo ran\n' | env -u WAYLAND_DISPLAY K4_FILES_CMD='printf "%s\n" /home/u/Documents/invoice.pdf /home/u/inv/x.txt' "$K4" --menu --dump "$@" 2>&1; }
+check "launcher: > lists only switches, sliders and choices" "crumb > SETTINGS|count 2 settings|* Wi-Fi power | Apps|  Volume | Apps" "$(lt --keys ">" | grep -v -E '^(focus|query|hints)' | paste -sd'|')"
+check "launcher: > then ⌫ goes back to the menu" "crumb MENU" "$(lt --keys "><bs>" | sed -n 2p)"
+check "launcher: ⌃3 runs the third result in place" "toast ran vol" "$(lt --keys "o<ctrl-3>" | grep '^toast')"
+check "launcher: ⇧↵ opens an app and keeps the launcher" "focus Menu|toast ran term" "$(lt --keys "term<shift-enter>" | grep -E '^(focus|toast)' | paste -sd'|')"
+check "launcher: files after the rest, ↵ opens, ⇧↵ shows the folder" "* /home/u/Documents/invoice.pdf | file|file:/home/u/Documents/invoice.pdf|reveal:/home/u/Documents/invoice.pdf" "$( (lt --keys "invoice" | grep '| file'; lt --keys "invoice<enter>" | tail -1; lt --keys "invoice<shift-enter>" | tail -1) | paste -sd'|')"
 echo "bar tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

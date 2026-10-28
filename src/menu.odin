@@ -219,6 +219,15 @@ Menu :: struct {
 	sug_run:  bool,
 	sug_out:  string,
 	sug_off:  bool,               // tests and dry runs: no network
+	// the search's Files group: fd (or plocate) over $HOME, in the background
+	files:    [dynamic]string,
+	files_q, files_want: string,  // the query they are for; the one to look up once typing settles
+	files_at: time.Tick,
+	files_proc: os.Process,
+	files_run: bool,
+	files_out, files_cmd: string,
+	files_off, files_sync: bool,  // tests and dry runs: none unless K4_FILES_CMD gives them, then at once
+	settings: bool,               // "> ": the search lists only switches, sliders and choices
 	// text input (input= flag, k4:input)
 	input_id, input_label, input_prompt, input_hint: string,
 	input_password: bool,
@@ -452,6 +461,7 @@ section_slow :: proc(m: ^Menu, s: ^Section) -> bool {
 // count), or -1.
 menu_tick_ms :: proc(m: ^Menu) -> int {
 	if m.focus == .Web && (m.sug_run || m.sug_want != "") do return 60 // suggestions: settle, then fetch and poll
+	if m.focus == .Menu && (m.files_run || m.files_want != "") do return 60 // the Files group, the same way
 	if m.focus != .Sub || m.open < 0 || m.open >= len(m.sections) do return -1
 	s := &m.sections[m.open]
 	if s.refresh > 0 && s.load.state == .Ready do return max(s.refresh * 1000 - int(time.duration_milliseconds(time.tick_since(s.load.started))), 0) + 1
@@ -464,6 +474,7 @@ menu_tick_ms :: proc(m: ^Menu) -> int {
 menu_on_tick :: proc(a: ^App) {
 	m := a.menu
 	if m.focus == .Web do web_suggest_tick(a)
+	if m.focus == .Menu do files_tick(m)
 	if m.focus == .Sub && m.open >= 0 && m.open < len(m.sections) {
 		s := &m.sections[m.open]
 		if s.refresh > 0 && s.load.state == .Ready && m.runner.state != .Loading && time.duration_seconds(time.tick_since(s.load.started)) >= f64(s.refresh) {
@@ -727,7 +738,10 @@ has_fold :: proc(hay, needle: string) -> bool {
 
 @(private) q_of :: proc(a: ^App) -> string { return strings.trim_space(string(a.query[:])) }
 
-@(private) searching :: proc(m: ^Menu, a: ^App) -> bool { return m.focus == .Menu && !m.shortcut && q_of(a) != "" }
+@(private) searching :: proc(m: ^Menu, a: ^App) -> bool { return m.focus == .Menu && !m.shortcut && (q_of(a) != "" || m.settings) }
+
+FILES_MAX :: 8
+FILE_SEC :: -2 // Result.sec of a file: Result.act indexes m.files
 
 menu_refilter :: proc(a: ^App) {
 	m := a.menu
@@ -760,7 +774,8 @@ menu_refilter :: proc(a: ^App) {
 menu_search :: proc(m: ^Menu, q: string) {
 	toks := strings.fields(strings.to_lower(q, context.temp_allocator), context.temp_allocator)
 	all_in :: proc(text: string, toks: []string) -> bool { for t in toks do if !strings.contains(text, t) do return false; return true }
-	for s, i in m.sections do if s.kind == .Section && all_in(strings.to_lower(s.name, context.temp_allocator), toks) do append(&m.results, Result{i, -1})
+	if !m.settings do for s, i in m.sections do if s.kind == .Section && all_in(strings.to_lower(s.name, context.temp_allocator), toks) do append(&m.results, Result{i, -1})
+	seen := make(map[string]bool, 16, context.temp_allocator) // > lists a setting shown in two sections once
 	Scored :: struct { r: Result, score: int }
 	items := make([dynamic]Scored, 0, 64, context.temp_allocator)
 	ql := strings.to_lower(q, context.temp_allocator)
@@ -770,6 +785,11 @@ menu_search :: proc(m: ^Menu, q: string) {
 		for act, ai in s.actions {
 			if act.kind == .Heading { hdr = act.label; if bar := strings.index(hdr, " · "); bar >= 0 do hdr = hdr[:bar]; continue }
 			if act.heading || act.slow do continue
+			if m.settings {
+				if !act.toggle && !act.slider && len(act.choices) == 0 do continue
+				if act.id in seen do continue
+				seen[act.id] = true
+			}
 			text := strings.to_lower(strings.concatenate({act.label, " ", hdr, " ", s.name}, context.temp_allocator), context.temp_allocator)
 			if !all_in(text, toks) do continue
 			score := (strings.has_prefix(strings.to_lower(act.label, context.temp_allocator), ql) ? 2 : 0) + (act.app ? 1 : 0)
@@ -782,7 +802,87 @@ menu_search :: proc(m: ^Menu, q: string) {
 		for j > 0 && items[j - 1].score < items[j].score { items[j - 1], items[j] = items[j], items[j - 1]; j -= 1 }
 	}
 	for it in items { if len(m.results) >= 60 do break; append(&m.results, it.r) }
+	if m.settings || len(strings.trim_space(q)) < 2 do return
+	// the files the last lookup found that still hold every word, after everything else
+	n := 0
+	for f, i in m.files {
+		if n >= FILES_MAX do break
+		base := f[strings.last_index_byte(f, '/') + 1:]
+		if !all_in(strings.to_lower(base, context.temp_allocator), toks) do continue
+		append(&m.results, Result{FILE_SEC, i})
+		n += 1
+	}
 }
+
+// The Files group: once typing has settled for 150 ms, a lookup for the query's first word (the
+// rest filters what comes back); the next keystroke stops one still running.
+@(private)
+files_tick :: proc(m: ^Menu) {
+	if m.files_run {
+		st, _ := os.process_wait(m.files_proc, 0)
+		if !st.exited do return
+		files_read(m)
+	}
+	if m.files_want == "" || m.files_run || time.duration_milliseconds(time.tick_since(m.files_at)) < 150 do return
+	w := m.files_want
+	m.files_want = ""
+	if w == m.files_q do return
+	delete(m.files_q)
+	m.files_q = strings.clone(w)
+	run := os.get_env("XDG_RUNTIME_DIR", context.temp_allocator)
+	if m.files_out == "" do m.files_out = fmt.aprintf("%s/k4-files-%d.txt", run != "" ? run : "/tmp", os.get_pid())
+	p, err := os.process_start({command = {"sh", "-c", fmt.tprintf("%s > %s 2>/dev/null", m.files_cmd, sh_quote(m.files_out)), "k4-files", w}})
+	if err == nil do m.files_proc, m.files_run = p, true
+}
+
+@(private)
+files_read :: proc(m: ^Menu) {
+		m.files_run = false
+		data, err := os.read_entire_file(m.files_out, context.temp_allocator)
+		for f in m.files do delete(f)
+		clear(&m.files)
+		if err == nil {
+			text := string(data)
+			for l in strings.split_lines_iterator(&text) do if l != "" && len(m.files) < 40 do append(&m.files, strings.clone(strings.trim_suffix(l, "/")))
+			// names that start with the word first, then the shallower paths
+			w := strings.to_lower(m.files_q, context.temp_allocator)
+			rank :: proc(f, w: string) -> int {
+				base := strings.to_lower(f[strings.last_index_byte(f, '/') + 1:], context.temp_allocator)
+				return (strings.has_prefix(base, w) ? 0 : 1000) + strings.count(f, "/") * 10 + min(len(base), 9)
+			}
+			for i in 1 ..< len(m.files) {
+				j := i
+				for j > 0 && rank(m.files[j - 1], w) > rank(m.files[j], w) { m.files[j - 1], m.files[j] = m.files[j], m.files[j - 1]; j -= 1 }
+			}
+		}
+}
+
+// A keystroke in the search: the Files lookup for its first word, unless that one is running
+// or done already.
+@(private)
+files_want :: proc(m: ^Menu, q: string) {
+	if m.files_off || m.settings do return
+	w := strings.to_lower(strings.trim_space(q), context.temp_allocator)
+	if sp := strings.index_byte(w, ' '); sp >= 0 do w = w[:sp]
+	if len(w) < 2 || w == m.files_q do return
+	if m.files_run { // its answer is for an older word
+		_ = os.process_kill(m.files_proc)
+		_, _ = os.process_wait(m.files_proc, 100 * time.Millisecond)
+		m.files_run = false
+	}
+	delete(m.files_want)
+	m.files_want, m.files_at = strings.clone(w), time.tick_now()
+	if m.files_sync { // tests and dry runs: the answer before the next key
+		m.files_at = {}
+		files_tick(m)
+		if m.files_run { _, _ = os.process_wait(m.files_proc); files_read(m) }
+	}
+}
+
+// The lookup ($1: the word): fd (fdfind on Debian) over $HOME, else plocate's index of it.
+FILES_CMD :: `if command -v fd >/dev/null; then fd -i -F --max-results 40 -E node_modules -E go -- "$1" "$HOME"; ` +
+	`elif command -v fdfind >/dev/null; then fdfind -i -F --max-results 40 -E node_modules -E go -- "$1" "$HOME"; ` +
+	`elif command -v plocate >/dev/null; then plocate -i -b -l 400 -- "$1" | grep "^$HOME/" | grep -v '/\.' | head -40; fi`
 
 menu_list_len :: proc(a: ^App) -> int {
 	m := a.menu
@@ -815,6 +915,10 @@ menu_on_query :: proc(a: ^App) {
 		if len(q) >= 1 && q[0] == '=' {
 			set_query(a, q[1:]); m.focus, m.si = .Calc, 0; menu_refilter(a); return
 		}
+		if len(q) >= 1 && q[0] == '>' && !m.settings {
+			set_query(a, strings.trim_left_space(q[1:])); m.settings, m.si, m.scroll = true, 0, 0; menu_refilter(a); return
+		}
+		files_want(m, q)
 	}
 	if m.focus == .Web && !m.sug_off && q != "" && q[0] != '!' {
 		delete(m.sug_want)
@@ -850,6 +954,7 @@ menu_enter :: proc(a: ^App, idx: int) {
 	m := a.menu
 	if idx < 0 || idx >= len(m.sections) do return
 	m.focus, m.open, m.cur, m.si, m.scroll, m.toast = .Sub, idx, root(m, idx), 0, 0, ""
+	m.settings = false
 	{ // a calendar opens at today, in the month view
 		rs := m.calu.rsvp
 		m.calu = {rsvp = rs}
@@ -1015,6 +1120,7 @@ menu_run :: proc(a: ^App) {
 		if searching(m, a) {
 			if m.si >= len(m.results) do return
 			r := m.results[m.si]
+			if r.sec == FILE_SEC { finish(a, strings.concatenate({a.shift ? "reveal:" : "file:", m.files[r.act]})); return } // ⇧↵ shows it in its folder
 			if r.act < 0 do menu_enter(a, r.sec)
 			else do run_action(a, r.sec, r.act)
 		} else do menu_enter(a, m.cur)
@@ -1108,6 +1214,10 @@ execute :: proc(a: ^App, sec, idx: int, level := false) { // level: ← → move
 		}
 		return
 	}
+	if !act.stay && act.app && a.shift && m.run_cmd != "" { // ⇧↵: start it and keep the launcher
+		start_runner(a, act.id, "", "", strings.concatenate({"Opening ", act.label}))
+		return
+	}
 	if !act.stay || m.run_cmd == "" { finish(a, act.id); return }
 	if act.input { enter_input(a, act.id, act.label, act.input_prompt, act.input_hint, act.input_password); return }
 	if act.toggle && !level {
@@ -1173,7 +1283,7 @@ slide :: proc(a: ^App, d: int) -> bool {
 	m := a.menu
 	sec, idx := -1, -1
 	if m.focus == .Sub && m.si < len(m.sel_actions) do sec, idx = m.open, m.sel_actions[m.si]
-	else if searching(m, a) && m.si < len(m.results) && m.results[m.si].act >= 0 do sec, idx = m.results[m.si].sec, m.results[m.si].act
+	else if searching(m, a) && m.si < len(m.results) && m.results[m.si].sec >= 0 && m.results[m.si].act >= 0 do sec, idx = m.results[m.si].sec, m.results[m.si].act
 	if sec < 0 do return false
 	act := &m.sections[sec].actions[idx]
 	if len(act.choices) > 0 {
@@ -1373,11 +1483,19 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 		case 'j', 'n': menu_move(a, m.focus == .View && m.views[m.view].grid ? 4 : 1); return true
 		case 'k', 'p': menu_move(a, m.focus == .View && m.views[m.view].grid ? -4 : -1); return true
 		case 'c', 'g': a.exit = 1; a.done = true; return true
+		case '1' ..= '9': // the nth result
+			if searching(m, a) && int(ch - '1') < len(m.results) { m.si = int(ch - '1'); menu_run(a) }
+			return true
 		}
 		return app_edit_key(a, k, ctrl, ch, text)
 	}
 	// the Weather dashboard has no filter: text keys do nothing there
 	if m.focus == .Sub && m.sections[m.open].weather && k == .None && !ctrl do return true
+	// > with nothing typed: Space flips the picked switch
+	if text == " " && empty && m.settings && searching(m, a) && m.si < len(m.results) {
+		r := m.results[m.si]
+		if r.sec >= 0 && r.act >= 0 && m.sections[r.sec].actions[r.act].toggle { menu_run(a); return true }
+	}
 	// Space on a switch row toggles it (only with nothing typed: then it is part of the filter)
 	if text == " " && empty && m.focus == .Sub && m.si < len(m.sel_actions) && m.sections[m.open].actions[m.sel_actions[m.si]].toggle && m.sections[m.open].query_id == "" {
 		menu_run(a)
@@ -1407,7 +1525,8 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 	case .Page_Up: menu_move(a, -8)
 	case .Enter: menu_run(a)
 	case .Escape:
-		if m.focus == .Menu { m.shortcut = true; clear_query(a); m.toast = ""; m.si = 0; menu_refilter(a) }
+		if m.focus == .Menu && m.settings { m.settings = false; clear_query(a); m.toast = ""; m.si = 0; menu_refilter(a) }
+		else if m.focus == .Menu { m.shortcut = true; clear_query(a); m.toast = ""; m.si = 0; menu_refilter(a) }
 		else if at_entry(m) { a.exit = 1; a.done = true } // opened here from outside (a bar popup, a key): Esc closes
 		else do menu_back(a)
 	case .Right:
@@ -1418,6 +1537,7 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 		return app_edit_key(a, k, ctrl, ch, text)
 	case .Backspace:
 		if m.focus != .Menu && empty { menu_back(a); return true }
+		if m.focus == .Menu && m.settings && empty { m.settings = false; m.si = 0; menu_refilter(a); return true }
 		return app_edit_key(a, k, ctrl, ch, text)
 	case .Home, .End, .Delete, .None:
 		return app_edit_key(a, k, ctrl, ch, text)
@@ -1857,9 +1977,10 @@ menu_header :: proc(a: ^App, sc: bool) -> (crumb, ph, count: string) {
 	srch := searching(m, a)
 	switch m.focus {
 	case .Menu:
-		crumb = sc ? "SHORTCUTS" : (srch ? "SEARCH" : (m.top_crumb != "" ? m.top_crumb : "MENU"))
+		crumb = sc ? "SHORTCUTS" : (srch ? (m.settings ? "> SETTINGS" : "SEARCH") : (m.top_crumb != "" ? m.top_crumb : "MENU"))
 		ph = sc ? "Press a letter   / to search" : (m.top_ph != "" ? m.top_ph : "Search apps and actions…")
 		count = sc ? "" : (srch ? fmt.tprintf("%d result%s", len(m.results), len(m.results) == 1 ? "" : "s") : (m.top_count != "" ? m.top_count : fmt.tprintf("%d sections", len(m.shown_sections))))
+		if m.settings && !sc do ph, count = "Filter settings…", fmt.tprintf("%d setting%s", len(m.results), len(m.results) == 1 ? "" : "s")
 	case .Confirm:
 		crumb = "CONFIRM"
 	case .Sub:
@@ -1925,7 +2046,14 @@ menu_hints :: proc(a: ^App, sc: bool) -> (hints: [][2]string) {
 		for i in m.shown_sections do if m.sections[i].key != "" do append(&keys, strings.to_lower(m.sections[i].key, context.temp_allocator))
 		hints = {{"↑↓", "Move"}, {"→ ↵", "Open"}, {"Esc", fmt.tprintf("Shortcuts %s", strings.join(keys[:], " ", context.temp_allocator))}}
 	case m.focus == .View && view_alt_label(m) != "": hints = {{"←→↑↓", "Move"}, {"↵", "Launch"}, {"Tab", view_alt_label(m)}, {"⌫", "Back"}}
-	case srch: hints = {{"↑↓", "Move"}, {"↵", "Run"}, {"Esc", "Shortcuts"}}
+	case srch && m.settings: hints = {{"↑↓", "Move"}, {"↵ Space", "Flip"}, {"← →", "Set"}, {"⌫", "Search"}}
+	case srch:
+		hints = {{"↑↓", "Move"}, {"↵", "Run"}, {"⌃1–9", "Nth"}, {"Esc", "Shortcuts"}}
+		if m.si < len(m.results) { // what ⇧↵ does to the picked one
+			r := m.results[m.si]
+			if r.sec == FILE_SEC do hints = {{"↑↓", "Move"}, {"↵", "Open"}, {"⇧↵", "Show in folder"}, {"⌃1–9", "Nth"}, {"Esc", "Shortcuts"}}
+			else if r.act >= 0 && m.sections[r.sec].actions[r.act].app do hints = {{"↑↓", "Move"}, {"↵", "Open"}, {"⇧↵", "Keep open"}, {"⌃1–9", "Nth"}, {"Esc", "Shortcuts"}}
+		}
 	case m.focus == .Menu: hints = {{"↑↓", "Move"}, {"→ ↵", "Open"}, {"type", "Search all"}, {"Esc", "Shortcuts"}}
 	case m.focus == .Sub && on_slider(m) && m.sections[m.open].actions[m.sel_actions[m.si]].toggle: hints = {{"↑↓", "Move"}, {"← →", "Adjust"}, {"↵ ␣", "Mute"}, {"⌫", "Back"}}
 	case m.focus == .Sub && on_slider(m): hints = {{"↑↓", "Move"}, {"← →", "Adjust"}, {"⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
@@ -2480,13 +2608,36 @@ draw_results :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	visible := max((fy - 8 * S - py) / rh, 1)
 	if m.si < m.scroll do m.scroll = m.si
 	if m.si >= m.scroll + visible do m.scroll = m.si - visible + 1
+	home := os.get_env("HOME", context.temp_allocator)
 	for n in m.scroll ..< min(m.scroll + visible, len(m.results)) {
 		r := m.results[n]
-		sec := m.sections[r.sec]
 		on := n == m.si
 		hit_add(a, x0, py, bw, rh, .Result, n, 0)
 		lc, mc, tc := fgb, dim, acc
 		if on { fill_rect(cv, x0, py, bw, rh, argb(acc, 0xff)); mark_sel(a, x0, py, bw, rh); lc, mc, tc = bg, bg, bg }
+		if n < 9 { // ⌃1–9 runs it: the number left of the tag
+			tg := r.sec == FILE_SEC ? "file" : (r.act >= 0 ? m.sections[r.sec].name : "section")
+			kn := fmt.tprintf("^%d", n + 1)
+			text_in(cv, m.f_tiny, kn, x1 - 20 * S - tw(m.f_tiny, tg) - 8 * S - tw(m.f_tiny, kn), py, rh, argb(on ? bg : mix(bg, dim, 0.6), 0xff))
+		}
+		if r.sec == FILE_SEC {
+			f := m.files[r.act]
+			slash := strings.last_index_byte(f, '/')
+			dir := f[:max(slash, 0)]
+			if home != "" && strings.has_prefix(dir, home) do dir = strings.concatenate({"~", dir[len(home):]}, context.temp_allocator)
+			x := x0 + 20 * S
+			text_in(cv, m.f_row, "󰈔", x, py, rh, argb(lc, 0xff))
+			x += 15 * S + 12 * S
+			text_in(cv, m.f_tiny, "file", x1 - 20 * S - tw(m.f_tiny, "file"), py, rh, argb(tc, 0xff))
+			tag_x := x1 - 20 * S - 90 * S
+			base := f[slash + 1:]
+			bwid := min(tw(m.f_row, base), (tag_x - x) * 2 / 3)
+			text_in(cv, m.f_row, base, x, py, rh, argb(lc, 0xff), x + bwid)
+			text_in(cv, m.f_small, ellipsize(m.f_small, dir, tag_x - x - bwid - 24 * S), x + bwid + 12 * S, py, rh, argb(mc, 0xff))
+			py += rh
+			continue
+		}
+		sec := m.sections[r.sec]
 		label, meta, tag := sec.name, "", "section"
 		if r.act >= 0 {
 			act := sec.actions[r.act]
@@ -2954,6 +3105,9 @@ menu_setup :: proc(a: ^App, data: string) {
 	// tests and dry runs: no saved history, no network (unless the test names a history file)
 	headless := a.opts.dump || a.opts.dry_run != ""
 	m.sug_off = headless && os.get_env("K4_WEB_SUGGEST", context.temp_allocator) == ""
+	fc := os.get_env("K4_FILES_CMD", context.temp_allocator)
+	m.files_cmd = strings.clone(fc != "" ? fc : FILES_CMD)
+	m.files_off, m.files_sync = headless && fc == "", headless
 	if !headless || os.get_env("K4_CALC_HISTORY", context.temp_allocator) != "" do calc_history_load(m)
 	menu_parse(m, data)
 	menu_fonts(a)
@@ -3005,6 +3159,7 @@ menu_dump :: proc(a: ^App) -> string {
 	case .Menu:
 		if searching(m, a) {
 			for r, i in m.results {
+				if r.sec == FILE_SEC { fmt.sbprintfln(&b, "%s %s | file", i == m.si ? "*" : " ", m.files[r.act]); continue }
 				sec := m.sections[r.sec]
 				label := r.act >= 0 ? sec.actions[r.act].label : sec.name
 				fmt.sbprintfln(&b, "%s %s | %s", i == m.si ? "*" : " ", label, r.act >= 0 ? sec.name : "section")
