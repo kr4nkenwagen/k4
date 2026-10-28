@@ -41,6 +41,7 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --notifyd               the notification service: popups, history, do not disturb (notifyd.odin)
   --notify-center         the notification centre (Super+N; notify_center.odin)
   --notify-ctl CMD        a command to the service: list status counts clear dnd on|off|toggle … (prints its reply)
+  --send-ctl CMD          a command to k4-localsend's service (its ctl, arguments tab-separated; prints its reply)
   --clip                  the clipboard history: search, preview, paste (Super+Ctrl+V; entries on stdin, clip.odin)
   --tray                  the system tray's apps and their menus (Super+.; k4-tray list on stdin, tray.odin)
   --perf                  performance, processes and utilities (Super+Shift+Esc; utilities on stdin, perf.odin)
@@ -155,6 +156,7 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--bus": o.bus = true
 		case "--notify-center": o.notify_center = true
 		case "--notify-ctl": o.notify_ctl = value(args, &i, inline, has_inline)
+		case "--send-ctl": o.send_ctl = value(args, &i, inline, has_inline)
 		case "--osd": o.osd = value(args, &i, inline, has_inline)
 		case "--config": _ = value(args, &i, inline, has_inline)
 		case "--dry-run": o.dry_run = value(args, &i, inline, has_inline)
@@ -185,6 +187,12 @@ main :: proc() {
 	if opts.notify_ctl != "" { // a command to the notification service, no window
 		reply, sent := nd_ctl(opts.notify_ctl)
 		if !sent { fmt.eprintln("k4: the notification service is not running"); os.exit(1) }
+		fmt.print(reply)
+		os.exit(0)
+	}
+	if opts.send_ctl != "" { // the same to LocalSend's (k4-localsend's ctl, without Python's start-up)
+		reply, sent := unix_ctl(send_sock(), opts.send_ctl)
+		if !sent { fmt.eprintln("k4-localsend: the service is not running"); os.exit(1) }
 		fmt.print(reply)
 		os.exit(0)
 	}

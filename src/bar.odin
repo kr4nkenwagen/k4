@@ -59,6 +59,7 @@ Module :: struct {
 	compact, slim, wide, flash: bool,
 	tip: string, // flags' tip=: the tooltip when the module prints none
 	next_file: string, // clock flag next=PATH: today's meetings (start end title video, TSV)
+	last_line: string, // the line it shows: the same one again changes nothing (no redraw)
 	// what it shows
 	text, tooltip, class, icon, icon_tone, text_tone, text2, text2_tone: string,
 	level, battery, pct: int, // -1: none
@@ -85,6 +86,7 @@ Module :: struct {
 }
 
 Bar :: struct {
+	redraw: bool, // bar_tick saw something visible change (the clock, a tooltip, a finished click…)
 	mods: [dynamic]Module,
 	height: int,
 	bottom, transparent: bool,
@@ -106,7 +108,23 @@ Bar :: struct {
 	width: int, // logical width of the output strip (from configure)
 }
 
+// SIGTERM (a new bar replacing this one, k4-bar stop) or SIGINT: the module commands are told
+// first, so their event pipelines go with them instead of outliving the bar.
+@(private = "file") bar_term_flag: libc.sig_atomic_t
+@(private = "file") bar_on_term :: proc "c" (sig: c.int) { bar_term_flag = 1 }
+
+// Called after every wakeup: true once a SIGTERM came, the modules signalled.
+bar_terminated :: proc(a: ^App) -> bool {
+	if bar_term_flag == 0 do return false
+	for &m in a.bar.mods do if m.running do linux.kill(linux.Pid(m.proc_.pid), .SIGTERM)
+	return true
+}
+
 bar_setup :: proc(a: ^App, data: string) {
+	if a.opts.dry_run == "" && !a.opts.dump {
+		libc.signal(libc.SIGTERM, bar_on_term)
+		libc.signal(libc.SIGINT, bar_on_term)
+	}
 	b := new(Bar)
 	a.bar = b
 	b.height, b.hover, b.hover_ws, b.tip, b.tip_off = 26, -1, -1, -1, -1
@@ -262,7 +280,7 @@ mod_line :: proc(m: ^Module, line: string) {
 mod_read :: proc(m: ^Module) -> bool {
 	chunk: [4096]u8
 	n, _ := os.read(m.pipe, chunk[:])
-	before := m.text
+	changed := false
 	if n > 0 {
 		append(&m.buf, ..chunk[:n])
 		if m.interval == 0 { // continuous: every complete line counts
@@ -272,10 +290,10 @@ mod_read :: proc(m: ^Module) -> bool {
 				if nl < 0 do break
 				line := strings.clone(string(m.buf[:nl]), context.temp_allocator)
 				remove_range(&m.buf, 0, nl + 1)
-				if strings.trim_space(line) != "" do mod_line(m, line)
+				if strings.trim_space(line) != "" do changed |= mod_show(m, line)
 			}
 		}
-		return m.text != before
+		return changed
 	}
 	// finished: the last line wins
 	os.close(m.pipe)
@@ -285,11 +303,22 @@ mod_read :: proc(m: ^Module) -> bool {
 		last := ""
 		text := string(m.buf[:])
 		for line in strings.split_lines_iterator(&text) do if strings.trim_space(line) != "" do last = line
-		mod_line(m, last)
+		changed = mod_show(m, last)
 		m.next = time.tick_add(time.tick_now(), time.Duration(m.interval * f64(time.Second)))
-	} else {
-		m.next = time.tick_add(time.tick_now(), 3 * time.Second) // a follower died: start it again
+		return changed
 	}
+	m.next = time.tick_add(time.tick_now(), 3 * time.Second) // a follower died: start it again
+	return true
+}
+
+// A module's new line: parsed and shown unless it is the one already shown (most runs of a
+// polled module print the same line; each redraw of a wide bar costs).
+@(private)
+mod_show :: proc(m: ^Module, line: string) -> bool {
+	if line == m.last_line && m.lines > 0 do return false
+	delete(m.last_line)
+	m.last_line = strings.clone(line)
+	mod_line(m, line)
 	return true
 }
 
@@ -301,6 +330,8 @@ bar_tick :: proc(a: ^App) -> int {
 	wait := 60_000
 	until :: proc(now, t: time.Tick) -> int { return max(int(time.duration_milliseconds(time.tick_diff(now, t))), 0) + 1 }
 	// the tooltip: 500 ms after the pointer settles on a module that has one
+	old_tip, old_h, old_region := b.tip, b.want_h, b.want_region
+	defer if b.tip != old_tip || b.want_h != old_h || b.want_region != old_region || b.prev.ws >= 0 do b.redraw = true
 	b.tip = -1
 	if b.hover >= 0 && b.hover < len(b.mods) && b.hover != b.tip_off && mod_tooltip(b, b.hover) != "" {
 		at := time.tick_add(b.hover_at, 500 * time.Millisecond)
@@ -319,10 +350,13 @@ bar_tick :: proc(a: ^App) -> int {
 	}
 	for &m in b.mods {
 		if m.clicking {
-			if st, err := os.process_wait(m.click, 0); err == nil && st.exited do m.clicking = false
+			if st, err := os.process_wait(m.click, 0); err == nil && st.exited { m.clicking = false; b.redraw = true }
 			else do wait = min(wait, 100)
 		}
-		if m.flash_until != {} && time.tick_diff(now, m.flash_until) > 0 do wait = min(wait, until(now, m.flash_until))
+		if m.flash_until != {} {
+			if time.tick_diff(now, m.flash_until) > 0 do wait = min(wait, until(now, m.flash_until))
+			else { m.flash_until = {}; b.redraw = true } // the percentage goes back to the icon
+		}
 		switch m.kind {
 		case .Exec:
 			if !m.running && time.tick_diff(m.next, now) >= 0 do mod_start(&m)
@@ -338,9 +372,10 @@ bar_tick :: proc(a: ^App) -> int {
 			tone := utc ? "accent" : ""
 			if !utc && m.next_file != "" do if md, mt, ok := clock_meeting(m.next_file); ok do d, tone = md, mt
 			// m.text outlives this frame's temp allocator: keep heap copies
-			if t != m.text { if len(m.text) > 0 do delete(m.text); m.text = strings.clone(t) }
-			if d != m.text2 { if len(m.text2) > 0 do delete(m.text2); m.text2 = strings.clone(d) }
+			if t != m.text { if len(m.text) > 0 do delete(m.text); m.text = strings.clone(t); b.redraw = true }
+			if d != m.text2 { if len(m.text2) > 0 do delete(m.text2); m.text2 = strings.clone(d); b.redraw = true }
 			if tone != m.text2_tone {
+				b.redraw = true
 				if len(m.text2_tone) > 0 do delete(m.text2_tone)
 				m.text2_tone = strings.clone(tone)
 			}

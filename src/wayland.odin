@@ -51,6 +51,7 @@ Wl :: struct {
 	compose:    ^xkb_compose_state,
 	repeat_rate, repeat_delay: int,
 	nd_kb: bool, // the notification popups have asked for the keyboard
+	anim_at: time.Tick, // the last frame drawn only for a shader's animation
 	repeat_key: u32,
 	repeat_at:  time.Tick,
 	cpu:        []u32, // GPU path: the CPU frame before the shaders
@@ -358,6 +359,18 @@ frame_done :: proc "c" (data: rawptr, cb: ^wl.callback, t: uint) {
 }
 frame_listener := wl.callback_listener{done = frame_done}
 
+// A shader animates: every frame, except on the bar, which is on screen all the time (30 fps
+// there: a starfield at the panel's 120 Hz is a core's worth of work for a strip of pixels).
+BAR_ANIM_MS :: 33
+anim_due :: proc(a: ^App) -> bool {
+	if !gpu_animating() do return false
+	return a.bar == nil || anim_wait(a) == 0
+}
+anim_wait :: proc(a: ^App) -> int {
+	if a.bar == nil do return 0
+	return max(BAR_ANIM_MS - int(time.duration_milliseconds(time.tick_since(W.anim_at))), 0)
+}
+
 redraw :: proc() {
 	if !W.configured || W.frame_pending do return
 	w, h := W.width * W.scale, W.height * W.scale
@@ -596,14 +609,21 @@ run_wayland :: proc(a: ^App) -> bool {
 			left := time.tick_diff(time.tick_now(), W.repeat_at)
 			timeout = i32(max(time.duration_milliseconds(left), 0))
 		}
-		if (W.dirty || gpu_animating()) && !W.frame_pending && W.configured do timeout = 0
+		if (W.dirty || anim_due(a)) && !W.frame_pending && W.configured do timeout = 0
+		else if gpu_animating() && W.configured { // the bar's animation: its next frame
+			w := i32(anim_wait(a))
+			if timeout < 0 || w < timeout do timeout = w
+		}
 		tick := a.menu != nil ? menu_tick_ms(a.menu) : -1 // a slow loader: the waiting count and slow lines
-		if a.bar != nil do tick = bar_tick(a)               // the bar: the clock and the next module run
+		if a.bar != nil {                                   // the bar: the clock and the next module run
+			tick = bar_tick(a)
+			if a.bar.redraw { W.dirty = true; a.bar.redraw = false } // only what shows changed draws a frame
+		}
 		if a.ov != nil do tick = 1000 - int(time.to_unix_nanoseconds(time.now()) / 1_000_000 % 1000) + 5 // the overview's clock
 		if a.nd != nil do tick = nd_tick(a)                 // popups time out
 		if a.nc != nil do tick = 1000                       // the centre follows the service
-		if a.perf != nil do tick = perf_tick_ms(a)
-		if a.clip != nil do tick = clip_tick_ms(a)          // a secret's countdown          // the numbers once a second, a running utility's progress faster
+		if a.perf != nil do tick = perf_tick_ms(a)          // the numbers once a second, a running utility's progress faster
+		if a.clip != nil do tick = clip_tick_ms(a)          // a secret's countdown
 		if a.send != nil do tick = time.tick_diff(time.tick_now(), a.send.scan_until) > 0 ? 80 : 500 // devices and the transfer
 		if a.ssh != nil do tick = a.ssh.check.running ? 100 : 500 // the connect steps, the data in the background
 		if a.router != nil do tick = 500                    // the data every 3 s, the reboot count
@@ -624,9 +644,10 @@ run_wayland :: proc(a: ^App) -> bool {
 			if a.nd.sock >= 0 do append(&fds, linux.Poll_Fd{fd = a.nd.sock, events = {.IN}})
 		}
 		n, _ := linux.poll(fds[:], timeout)
+		if a.bar != nil && bar_terminated(a) { wl.display_cancel_read(W.display); a.exit = 0; break }
 		if n == 0 && tick >= 0 {
-			if a.bar != nil { bar_tick(a) } else if a.menu != nil { menu_on_tick(a) } else if a.nc != nil { nc_load(a) } else if a.perf != nil { perf_tick(a) } else if a.clip != nil { clip_tick(a) } else if a.send != nil { send_refresh(a) } else if a.ssh != nil { ssh_tick(a) } else if a.router != nil { router_tick(a) } else if a.pn != nil do panel_on_tick(a)
-			W.dirty = true
+			if a.bar != nil { bar_tick(a); if a.bar.redraw { W.dirty = true; a.bar.redraw = false } } else if a.menu != nil { menu_on_tick(a) } else if a.nc != nil { nc_load(a) } else if a.perf != nil { perf_tick(a) } else if a.clip != nil { clip_tick(a) } else if a.send != nil { send_refresh(a) } else if a.ssh != nil { ssh_tick(a) } else if a.router != nil { router_tick(a) } else if a.pn != nil do panel_on_tick(a)
+			if a.bar == nil do W.dirty = true // (the bar says when it needs a frame: above)
 		}
 		if n > 0 && .IN in fds[0].revents {
 			if i(wl.display_read_events(W.display)) < 0 { a.exit = 1; break }
@@ -671,7 +692,7 @@ run_wayland :: proc(a: ^App) -> bool {
 			w, h := menu_size(a)
 			if w != a.width || h != a.height { a.width, a.height = w, h; menu_resize(a) }
 		}
-		if (W.dirty || gpu_animating()) && !a.done do redraw()
+		if (W.dirty || anim_due(a)) && !a.done { if !W.dirty do W.anim_at = time.tick_now(); redraw() }
 	}
 	wl.display_disconnect(W.display)
 	return true

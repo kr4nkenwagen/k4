@@ -176,7 +176,30 @@ gpu_init_window :: proc(wl_display, wl_surface: rawptr, w, h: int) -> bool {
 	if !egl.MakeCurrent(G.display, G.surface, G.surface, G.ctx) do return false
 	egl.SwapInterval(G.display, 0) // k4 paces frames with wl_surface.frame itself
 	G.ok = gpu_gl_setup()
-	return G.ok
+	if !G.ok do return false
+	// A software renderer runs every shader pass on the CPU (a bar redrawing at 3440 px wide
+	// costs a fifth of a core): then no shaders at all. It happens when the GPU's driver was
+	// updated without a reboot (its EGL refuses the running kernel module, Mesa takes over).
+	vendor := string(egl.QueryString(G.display, egl.VENDOR))
+	renderer := string(cstring(gl.GetString(gl.RENDERER)))
+	if os.get_env("K4_GPU_DEBUG", context.temp_allocator) != "" do fmt.eprintfln("k4: EGL %s · GL %s", vendor, renderer)
+	if strings.contains(renderer, "llvmpipe") || strings.contains(renderer, "softpipe") || strings.contains(renderer, "Software Rasterizer") {
+		fmt.eprintfln("k4: %s is a software renderer; drawing without shaders (a GPU driver updated without a reboot?)", renderer)
+		gpu_release()
+		return false
+	}
+	return true
+}
+
+// Lets go of the window's EGL state (a software renderer): the shm path draws instead.
+@(private)
+gpu_release :: proc() {
+	egl.MakeCurrent(G.display, egl.NO_SURFACE, egl.NO_SURFACE, egl.NO_CONTEXT)
+	if G.surface != egl.NO_SURFACE do egl.DestroySurface(G.display, G.surface)
+	if G.ctx != egl.NO_CONTEXT do egl.DestroyContext(G.display, G.ctx)
+	if G.egl_window != nil do wl_egl_window_destroy(G.egl_window)
+	egl.Terminate(G.display)
+	G.ok, G.surface, G.ctx, G.egl_window, G.display = false, egl.NO_SURFACE, egl.NO_CONTEXT, nil, egl.NO_DISPLAY // (no "need OpenGL 4.3" line)
 }
 
 // Dry runs: no window (EGL surfaceless), the result read back.
