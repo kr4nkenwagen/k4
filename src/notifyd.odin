@@ -21,7 +21,11 @@ import "logic"
 // for the centre (k4 --notify-center) until dismissed. Do not disturb holds popups back except
 // critical ones. The centre, the bar and scripts reach it through $XDG_RUNTIME_DIR/k4-notify.sock
 // (k4 --notify-ctl CMD): list, status, counts (APP<TAB>N per app, for the bar's count tags),
-// dismiss ID, dismiss-app APP, dismiss-popups, clear, act ID KEY, invoke-last, dnd on|off|toggle.
+// dismiss ID, dismiss-app APP, dismiss-popups, clear, act ID KEY, invoke-last, dnd on|off|toggle,
+// focus (Super+Shift+N: the popups take the keyboard: ↑↓ pick a card, ↵ its default action, 1–3
+// its buttons, Del dismisses, Space shows all of its app's notes, r replies in the card to one
+// that offers inline-reply, Esc gives the keyboard back). k4's services post with urgency warn
+// for a yellow card (a drive still busy, a VPN that dropped, a battery running low).
 
 ND_W :: 380
 ND_MAX :: 3
@@ -33,6 +37,7 @@ Note :: struct {
 	tag, icon, quote, cmd: string, // posted by k4's own services (post): a tag, a glyph, a quoted text, the command their buttons run
 	actions: [dynamic][2]string, // key, label ("default": a click on the card)
 	urgency: int, // 0 low, 1 normal, 2 critical
+	warn: bool, // posted with urgency warn: normal, drawn yellow
 	progress: int, // 0–100 from the "value" hint, -1 none
 	at: i64, // unix seconds
 	timeout: int, // ms the popup shows, -1 until acted on (asked for: -1 the default, 0 stays)
@@ -53,6 +58,10 @@ Nd :: struct {
 	more: int,
 	f9, f9b, f10, f10b, f11b, f12, f13, f13b: ^Font,
 	want_w, want_h: int,
+	focus: bool, // the popups have the keyboard (focus): sel is the picked card
+	sel: int,
+	expand: string, // Space: every note of this app as its own card
+	reply: bool, // typing a reply (a.query) to the picked card
 	watcher: bool, // also the tray's StatusNotifierWatcher (no one else was)
 	sni: [dynamic]string, // its registered items: "<bus name>/<path>"
 }
@@ -236,7 +245,7 @@ nd_tick :: proc(a: ^App) -> int {
 	for i := len(n.notes) - 1; i >= 0; i -= 1 {
 		x := &n.notes[i]
 		if !x.popup || x.timeout < 0 do continue
-		if !n.hover do x.left -= dt
+		if !n.hover && !n.focus do x.left -= dt
 		if x.left <= 0 {
 			x.popup = false
 			// the rest of its app's stack goes with it
@@ -306,7 +315,7 @@ nd_call :: proc(a: ^App, msg: ^DBus_Msg) -> bool {
 	case "GetCapabilities":
 		arr: DBus_Iter
 		dbus_message_iter_open_container(&out, DT_ARRAY, "s", &arr)
-		for cap in ([]string{"actions", "body", "persistence", "icon-static"}) do dbus_put_str(&arr, cap)
+		for cap in ([]string{"actions", "body", "persistence", "icon-static", "inline-reply"}) do dbus_put_str(&arr, cap)
 		dbus_message_iter_close_container(&out, &arr)
 		return false
 	case "GetServerInformation":
@@ -605,6 +614,11 @@ nd_command :: proc(a: ^App, line: string) -> (reply: string, changed: bool) {
 	case "act":
 		if len(f) > 2 do if id, ok := strconv.parse_uint(f[1]); ok do nd_act(a, u32(id), strings.trim_space(rest[len(f[1]):]))
 		return "ok\n", true
+	case "focus": // the popups take the keyboard (Super+Shift+N)
+		cards, _ := nd_visible(n)
+		if len(cards) == 0 do return "none\n", false
+		n.focus, n.sel, n.reply = true, 0, false
+		return "ok\n", true
 	case "dnd":
 		v := len(f) > 1 ? f[1] : "toggle"
 		n.dnd = v == "on" ? true : (v == "off" ? false : !n.dnd)
@@ -617,6 +631,7 @@ nd_command :: proc(a: ^App, line: string) -> (reply: string, changed: bool) {
 		if id, ok := strconv.parse_uint(get(p, 0)); ok do x.id = u32(id)
 		x.app, x.title, x.body = get(p, 1), get(p, 2), get(p, 3)
 		if u, ok := strconv.parse_int(get(p, 4)); ok do x.urgency = clamp(u, 0, 2)
+		else if get(p, 4) == "warn" do x.warn = true
 		if v, ok := strconv.parse_int(get(p, 5)); ok do x.progress = clamp(v, -1, 100)
 		if t, ok := strconv.parse_int(get(p, 6)); ok do x.timeout = t
 		x.tag, x.icon, x.quote = get(p, 7), get(p, 8), get(p, 9)
@@ -719,6 +734,14 @@ wrap_hard :: proc(f: ^Font, s: string, w: int) -> []string {
 
 // The cards on show: critical first, then the newest; one per app, its count.
 nd_visible :: proc(n: ^Nd) -> (cards: []Nd_Card, more: int) {
+	if n.expand != "" { // Space: the app's notes, each its own card, newest first
+		out := make([dynamic]Nd_Card, 0, 8, context.temp_allocator)
+		#reverse for x in n.notes do if x.app == n.expand do append(&out, Nd_Card{id = x.id, count = 1})
+		if len(out) > 0 {
+			if len(out) > ND_MAX + 1 { more = len(out) - ND_MAX - 1; return out[:ND_MAX + 1], more }
+			return out[:], 0
+		}
+	}
 	order := make([dynamic]int, 0, 8, context.temp_allocator)
 	for x, i in n.notes do if x.popup do append(&order, i)
 	// newest first, critical before the rest
@@ -740,13 +763,14 @@ nd_visible :: proc(n: ^Nd) -> (cards: []Nd_Card, more: int) {
 }
 
 // One popup card at y (x: its left), its height; cv nil measures.
-nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hover: bool) -> int {
+nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hover: bool, sel := false) -> int {
 	n := a.nd
 	t := a.theme
 	H := hud(t)
 	soft := mix(H.fg, H.bg, 0.2)
 	w := ND_W * S
-	lvl := note.urgency == 2 ? H.hot : (note.urgency == 0 ? H.faint : H.acc)
+	lvl := note.urgency == 2 ? H.hot : (note.warn ? t.yellow : (note.urgency == 0 ? H.faint : H.acc))
+	replying := sel && n.reply
 	pl, pr, pt, pb := 18 * S, 14 * S, 11 * S, 12 * S
 	iw := w - pl - pr
 	// the content's height first
@@ -771,6 +795,7 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 	if len(quote_l) > 0 do h += 9 * S + 16 * S + len(quote_l) * 18 * S
 	if note.progress >= 0 do h += 9 * S + 4 * S + 5 * S + int(n.f10.line_h)
 	if len(acts) > 0 do h += 9 * S + 24 * S
+	if replying do h += 9 * S + 28 * S + 4 * S + int(n.f10.line_h)
 	h += pb
 	stack := count > 1 ? 10 * S : 0
 	if cv == nil do return h + stack
@@ -782,11 +807,12 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 		rounded_rect(cv, x + 8 * S, y + h + 5 * S - 7 * S, w - 16 * S, 12 * S, 0, 0, f32(S), argb(H.line, 0xff))
 	}
 	cut := 10 * S
-	edge_on := hover || note.urgency == 2 || note.tag == "WAITING"
+	edge_on := hover || sel || note.urgency == 2 || note.warn || note.tag == "WAITING"
 	if note.urgency == 2 do for k in 1 ..= 3 do cut_outline(cv, x - k * 2 * S, y - k * 2 * S, w + k * 4 * S, h + k * 4 * S, cut + k * S, 2 * S, argb(lvl, u8(0x0c / k + 1)))
 	cut_rect(cv, x + S, y + S, w - 2 * S, h - 2 * S, cut - S, argb(note.urgency == 2 ? mix(H.bg, H.hot, 0.08) : H.bg, a.bg_alpha))
 	cut_rect(cv, x + S, y + S, w - 2 * S, h - 2 * S, cut - S, argb(t.fg, 0x08))
 	cut_outline(cv, x, y, w, h, cut, S, argb(edge_on ? lvl : H.line, 0xff))
+	if sel do cut_outline(cv, x - 3 * S, y - 3 * S, w + 6 * S, h + 6 * S, cut + 2 * S, S, argb(H.acc, 0xff)) // the picked card (focus)
 	fill_rect(cv, x + S, y + S, 3 * S, h - 2 * S, argb(lvl, 0xff))
 	hit_add(a, x, y, w, h, .Item, int(note.id), 0)
 	// the head: app mark, APP · time, tag, ×
@@ -814,7 +840,8 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 	case note.tag != "": tag, tagc = note.tag, note.tag == "SAVED" ? t.green : H.acc
 	case count > 1: tag, tagc = fmt.tprintf("+%d", count - 1), H.acc
 	case note.urgency == 2: tag, tagc = "CRITICAL", H.hot
-	case hover && note.timeout >= 0: tag = "PAUSED"
+	case note.warn: tag, tagc = "WARNING", t.yellow
+	case (hover || n.focus) && note.timeout >= 0: tag = "PAUSED"
 	case note.timeout < 0: tag = "STAYS"
 	}
 	if tag != "" {
@@ -874,14 +901,33 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 		for p, i in acts {
 			bw := tw(n.f11b, p[1]) + 16 * S
 			if ax + bw > x + w - pr do break
+			if sel && i < 3 { // focus: 1–3 run them
+				kn := fmt.tprintf("%d", i + 1)
+				bw += tw(n.f10, kn) + 6 * S
+			}
 			prim := i == 0
 			pc := lvl == H.faint ? H.fg : lvl
 			if prim do fill_rect(cv, ax, yy, bw, 24 * S, argb(lvl, 0x14))
 			rounded_rect(cv, ax, yy, bw, 24 * S, 0, 0, f32(S), argb(prim ? lvl : H.line, 0xff))
 			text_in(cv, n.f11b, p[1], ax + 8 * S, yy, 24 * S, argb(prim ? pc : soft, 0xff))
+			if sel && i < 3 do text_in(cv, n.f10, fmt.tprintf("%d", i + 1), ax + 8 * S + tw(n.f11b, p[1]) + 6 * S, yy, 24 * S, argb(H.dim, 0xff))
 			hit_add(a, ax, yy, bw, 24 * S, .Chip, int(note.id), i + 1)
 			ax += bw + 6 * S
 		}
+		yy += 24 * S
+	}
+	// the reply: a line in the card, ↵ sends it
+	if replying {
+		yy += 9 * S
+		fill_rect(cv, x + pl, yy, iw, 28 * S, argb(H.bg, 0xff))
+		rounded_rect(cv, x + pl, yy, iw, 28 * S, 0, 0, f32(S), argb(H.acc, 0xff))
+		q := string(a.query[:])
+		if q == "" do text_in(cv, n.f12, "Reply…", x + pl + 10 * S, yy, 28 * S, argb(H.faint, 0xff))
+		else do text_in(cv, n.f12, q, x + pl + 10 * S, yy, 28 * S, argb(H.fg, 0xff), x + pl + iw - 10 * S)
+		cx := x + pl + 10 * S + min(tw(n.f12, q[:clamp(a.cursor, 0, len(q))]), iw - 22 * S)
+		fill_rect(cv, cx, yy + 7 * S, S, 14 * S, argb(H.acc, 0xff))
+		yy += 28 * S + 4 * S
+		text_in(cv, n.f10, "↵ send · Esc cancel", x + pl, yy, int(n.f10.line_h), argb(H.dim, 0xff))
 	}
 	// the timer: what is left of the popup's time
 	if note.timeout > 0 {
@@ -900,11 +946,12 @@ nd_size :: proc(a: ^App) -> (int, int) {
 	cards, more := nd_visible(n)
 	if len(cards) == 0 do return 0, 0
 	h := ND_PAD
-	for c in cards {
+	for c, k in cards {
 		i := nd_find(n, c.id)
-		h += nd_card(a, nil, 1, 0, 0, n.notes[i], c.count, false) + 10
+		h += nd_card(a, nil, 1, 0, 0, n.notes[i], c.count, false, n.focus && k == n.sel) + 10
 	}
 	if more > 0 do h += 26 + 10
+	if n.focus do h += 22
 	return ND_W + 2 * ND_PAD, h
 }
 
@@ -915,9 +962,9 @@ nd_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	H := hud(a.theme)
 	y := ND_PAD * S
 	x := ND_PAD * S
-	for c in cards {
+	for c, k in cards {
 		i := nd_find(n, c.id)
-		y += nd_card(a, cv, S, x, y, n.notes[i], c.count, n.hover) + 10 * S
+		y += nd_card(a, cv, S, x, y, n.notes[i], c.count, n.hover, n.focus && k == n.sel) + 10 * S
 	}
 	if more > 0 {
 		l := fmt.tprintf("+%d more", more)
@@ -929,7 +976,95 @@ nd_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		text_in(cv, n.f11b, l, bx + 10 * S, y, 26 * S, argb(mix(H.fg, H.bg, 0.2), 0xff))
 		text_in(cv, n.f10, k, bx + 10 * S + tw(n.f11b, l) + 8 * S, y, 26 * S, argb(H.dim, 0xff))
 		hit_add(a, bx, y, bw, 26 * S, .Web, 0, 0)
+		y += 26 * S + 10 * S
 	}
+	if n.focus { // what the keys do
+		l := n.reply ? "↵ send   Esc cancel" : "↑↓ pick   ↵ open   1–3 buttons   Del dismiss   Space all   r reply   Esc"
+		lw := tw(n.f10, l) + 16 * S
+		bx := x + ND_W * S - lw
+		fill_rect(cv, bx, y, lw, 20 * S, argb(H.bg, a.bg_alpha))
+		rounded_rect(cv, bx, y, lw, 20 * S, 0, 0, f32(S), argb(H.acc, 0xff))
+		text_in(cv, n.f10, l, bx + 8 * S, y, 20 * S, argb(H.fg, 0xff))
+	}
+}
+
+// The keys while the popups have the keyboard (focus).
+nd_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> bool {
+	n := a.nd
+	if !n.focus do return false
+	cards, _ := nd_visible(n)
+	if len(cards) == 0 { nd_unfocus(a); return true }
+	n.sel = clamp(n.sel, 0, len(cards) - 1)
+	id := cards[n.sel].id
+	i := nd_find(n, id)
+	if i < 0 do return false
+	x := n.notes[i]
+	if n.reply {
+		switch {
+		case k == .Escape: n.reply = false; clear(&a.query); a.cursor = 0
+		case k == .Enter:
+			if strings.trim_space(string(a.query[:])) == "" do return true
+			nd_send_reply(a, id, string(a.query[:]))
+			n.reply = false; clear(&a.query); a.cursor = 0
+		case: return app_edit_key(a, k, ctrl, ch, text)
+		}
+		return true
+	}
+	buttons := make([dynamic]string, 0, 4, context.temp_allocator)
+	for p in x.actions do if p[0] != "default" && p[1] != "" do append(&buttons, p[0])
+	switch {
+	case k == .Escape || (ctrl && (ch == 'c' || ch == 'g')):
+		if n.expand != "" { n.expand, n.sel = "", 0 } else do nd_unfocus(a)
+	case k == .Down || text == "j" || k == .Tab: n.sel = min(n.sel + 1, len(cards) - 1)
+	case k == .Up || text == "k" || k == .Back_Tab: n.sel = max(n.sel - 1, 0)
+	case k == .Enter:
+		has_default := false
+		for p in x.actions do if p[0] == "default" do has_default = true
+		if has_default do nd_act(a, id, "default")
+		else do nd_remove(a, id, 2)
+	case len(text) == 1 && text[0] >= '1' && text[0] <= '3':
+		b := int(text[0] - '1')
+		if b < len(buttons) do nd_button(a, id, buttons[b])
+	case k == .Delete || k == .Backspace || text == "x": nd_remove(a, id, 2)
+	case text == " ": n.expand, n.sel = n.expand == x.app ? "" : x.app, 0
+	case text == "r":
+		for p in x.actions do if p[0] == "inline-reply" { n.reply = true; clear(&a.query); a.cursor = 0 }
+	case: return false
+	}
+	if c2, _ := nd_visible(n); len(c2) == 0 do nd_unfocus(a)
+	else do n.sel = clamp(n.sel, 0, len(c2) - 1)
+	return true
+}
+
+nd_unfocus :: proc(a: ^App) {
+	n := a.nd
+	n.focus, n.reply, n.expand, n.sel = false, false, "", 0
+	clear(&a.query); a.cursor = 0
+}
+
+// A button: inline-reply opens the reply line (with the keyboard), the rest run.
+nd_button :: proc(a: ^App, id: u32, key: string) {
+	n := a.nd
+	if key != "inline-reply" { nd_act(a, id, key); return }
+	cards, _ := nd_visible(n)
+	for c, k in cards do if c.id == id do n.sel = k
+	n.focus, n.reply = true, true
+	clear(&a.query); a.cursor = 0
+}
+
+// The reply goes back to the app (NotificationReplied), and the note goes.
+nd_send_reply :: proc(a: ^App, id: u32, text: string) {
+	n := a.nd
+	if n.conn != nil {
+		msg := dbus_message_new_signal("/org/freedesktop/Notifications", "org.freedesktop.Notifications", "NotificationReplied")
+		it: DBus_Iter
+		dbus_message_iter_init_append(msg, &it)
+		dbus_put_u32(&it, id)
+		dbus_put_str(&it, text)
+		dbus_connection_send(n.conn, msg, nil)
+		dbus_message_unref(msg)
+	}
+	nd_remove(a, id, 2)
 }
 
 nd_pointer_move :: proc(a: ^App, x, y: int) -> bool {
@@ -960,7 +1095,7 @@ nd_click :: proc(a: ^App, x, y, button: int) -> bool {
 			k := 0
 			for p in n.notes[i].actions do if p[0] != "default" && p[1] != "" {
 				k += 1
-				if k == h.b { nd_act(a, id, p[0]); break }
+				if k == h.b { nd_button(a, id, p[0]); break }
 			}
 		}
 	case .Item:
@@ -974,11 +1109,13 @@ nd_click :: proc(a: ^App, x, y, button: int) -> bool {
 	return true
 }
 
-// Tests: notes from stdin, one a line: APP\tTITLE\tBODY\tURGENCY\tPROGRESS\tACTIONS(key:label,…)
+// Tests: notes from stdin, one a line: APP\tTITLE\tBODY\tURGENCY\tPROGRESS\tACTIONS(key:label,…);
+// post lines as the services send them; "focus" as Super+Shift+N
 nd_fixture :: proc(a: ^App, data: string) {
 	text := data
 	for line in strings.split_lines_iterator(&text) {
 		if strings.has_prefix(line, "post\t") { nd_command(a, line); continue } // as k4's services post
+		if line == "focus" { nd_command(a, line); continue } // as Super+Shift+N
 		f := strings.split(line, "\t", context.temp_allocator)
 		if len(f) < 2 do continue
 		get :: proc(f: []string, i: int) -> string { return i < len(f) ? f[i] : "" }
@@ -998,10 +1135,12 @@ nd_dump :: proc(a: ^App) -> string {
 	sb := strings.builder_make(context.temp_allocator)
 	cards, more := nd_visible(n)
 	fmt.sbprintfln(&sb, "notify %d · dnd %s", nd_unread(n), n.dnd ? "on" : "off")
-	for c in cards {
+	for c, k in cards {
 		x := n.notes[nd_find(n, c.id)]
-		fmt.sbprintf(&sb, "popup %s · %s", x.app, x.title)
+		fmt.sbprintf(&sb, "%spopup %s · %s", n.focus ? (k == n.sel ? "* " : "  ") : "", x.app, x.title)
 		if c.count > 1 do fmt.sbprintf(&sb, " +%d", c.count - 1)
+		if x.warn do fmt.sbprint(&sb, " (warn)")
+		if n.focus && k == n.sel && n.reply do fmt.sbprintf(&sb, " (reply: %s)", string(a.query[:]))
 		fmt.sbprintln(&sb)
 	}
 	if more > 0 do fmt.sbprintfln(&sb, "+%d more", more)

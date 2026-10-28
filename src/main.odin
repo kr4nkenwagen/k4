@@ -319,6 +319,7 @@ main :: proc() {
 			for f in a.fonts do font_resize(f, f.base_px * f32(s))
 		}
 		if opts.dry_run != "" {
+			if a.nd != nil { w, h := nd_size(a); a.width, a.height = max(w, 1), max(h, 1) } // the popups as the keys left them
 			cv := Canvas{make([]u32, a.width * a.height * s * s), a.width * s, a.height * s}
 			app_draw(a, &cv, s)
 			if os.get_env("K4_DRY_SHADERS", context.temp_allocator) != "" {   // the shaders too, offscreen

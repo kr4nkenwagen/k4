@@ -50,6 +50,7 @@ Wl :: struct {
 	state:      ^xkb_state,
 	compose:    ^xkb_compose_state,
 	repeat_rate, repeat_delay: int,
+	nd_kb: bool, // the notification popups have asked for the keyboard
 	repeat_key: u32,
 	repeat_at:  time.Tick,
 	cpu:        []u32, // GPU path: the CPU frame before the shaders
@@ -650,6 +651,13 @@ run_wayland :: proc(a: ^App) -> bool {
 		if a.bar != nil && (a.bar.want_h != W.bar_h || a.bar.want_region != W.bar_region) && W.configured do bar_resize(a.bar)
 		if a.nd != nil {
 			nd_tick(a)
+			if a.nd.focus && !nd_popups_visible(a.nd) do nd_unfocus(a)
+			if a.nd.focus != W.nd_kb && W.layer != nil { // focus: the popups take the keyboard, then give it back
+				W.nd_kb = a.nd.focus
+				wlr.layer_surface_v1_set_keyboard_interactivity(W.layer, W.nd_kb ? .exclusive : .none)
+				wl.surface_commit(W.surface)
+				W.dirty = true
+			}
 			w, h := nd_size(a)
 			if max(w, 1) != W.width || max(h, 1) != W.height do nd_resize(a)
 			if nd_popups_visible(a.nd) do W.dirty = true

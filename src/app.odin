@@ -345,7 +345,7 @@ app_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string, alt := fals
 	if a.router != nil do return router_key(a, k, ctrl, alt, ch, text)
 	if a.displays != nil do return displays_key(a, k, ctrl, alt, ch, text)
 	if a.pn != nil do return a.pn.mode.key(a, k, ctrl, alt, ch, text)
-	if a.nd != nil do return false
+	if a.nd != nil do return nd_key(a, k, ctrl, ch, text)
 	if a.menu != nil do return menu_key(a, k, ctrl, alt, ch, text)
 	return app_edit_key(a, k, ctrl, ch, text)
 }

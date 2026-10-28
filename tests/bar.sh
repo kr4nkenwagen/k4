@@ -58,6 +58,11 @@ check "power: an unavailable tile says why" "toast No swap big enough for 16 GB 
 check "power: Esc closes" "exit 1" "$(pw --keys "<esc>"; echo "exit $?")"
 # notifications: the popups from fixture notes, the centre from a fixture list (no service, no bus)
 nd() { K4_NOTIFY_FIXTURE=1 "$K4" --notifyd --dump "$@" < ../notify/notes.txt 2>&1; }
+nf() { K4_NOTIFY_FIXTURE=1 "$K4" --notifyd --dump "$@" < ../notify/focus.txt 2>&1; }   # with a warn card, a reply, then focus
+check "notify focus: the first card picked, ↓ the next, warn marked" "* popup System · Battery critically low · 5%|* popup Drives · Can’t eject STICK yet (warn)" "$( (nf | sed -n 2p; nf --keys "<down>" | sed -n 3p) | paste -sd'|')"
+check "notify focus: r replies in the card, ↵ sends it and it goes" "* popup Signal · Anna (reply: hi there)|notify 7 · dnd off" "$( (nf --keys "<down><down>rhi there" | sed -n 4p; nf --keys "<down><down>rok<enter>" | head -1) | paste -sd'|')"
+check "notify focus: Del dismisses, Space shows only the app's notes, Esc lets go" "notify 7 · dnd off|1|popup System · Battery critically low · 5%" "$( (nf --keys "<del>" | head -1; nf --keys " " | grep -c popup; nf --keys "<esc>" | sed -n 2p) | paste -sd'|')"
+
 check "notify: critical first, one card an app, +N more" "popup System · Battery critically low · 5%|popup Mail · 3 new newsletters|popup Slack · Jonas Lind +1|+2 more" "$(nd | grep '^popup\|more' | paste -sd'|')"
 nc() { K4_NOTIFY_LIST=../notify/list.txt "$K4" --notify-center --dump "$@" 2>&1; }
 check "centre: grouped by app, newest first" "centre 9 · dnd off|*   System · Battery critically low · 5%|    Calendar · Standup in 5 min|  [Slack 3]" "$(nc | head -4 | paste -sd'|')"
