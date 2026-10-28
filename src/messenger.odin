@@ -14,7 +14,7 @@ import "core:time"
 // ↑↓ pick a conversation (it opens, and is read), typing writes, ↵ sends, PgUp older messages, the
 // wheel scrolls them, / filters the list, ^R marks it read, Esc clears the line, then the filter,
 // then closes. Before it works: Set up (↵ runs k4-messengerd setup, its steps as they come), Log in
-// (paste the cookies of a messenger.com session: Tab shows them, ↵ hands them to the bridge).
+// (paste the cookies of a messenger.com session with ^V: Tab shows them, ↵ hands them to the bridge).
 // The data comes from k4-messenger (panel lines R and L, panel.odin), again every 2 s while open:
 //   S <state setup|down|login|relogin|error|ok> <unread> <account> <note>
 //   C <room> <name> <unread> <unix time> <sender of the last, in groups> <last line> <group 1|0> <mine 1|0>
@@ -160,7 +160,7 @@ msg_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> boo
 		case k == .Tab: m.reveal = !m.reveal
 		case k == .Backspace: panel_bs(&m.pn)
 		case k == .Escape: if len(m.input) > 0 do panel_clear(&m.pn); else do panel_close(a)
-		case ctrl && ch == 'v': return false
+		case ctrl && ch == 'v': panel_type(&m.pn, msg_clipboard())
 		case text != "" && k == .None && !ctrl: panel_type(&m.pn, text)
 		case: return false
 		}
@@ -195,11 +195,28 @@ msg_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> boo
 		case m.popup && m.chat: m.chat = false
 		case: panel_close(a)
 		}
+	case ctrl && ch == 'v' && m.open != "": panel_type(&m.pn, msg_clipboard())
 	case text == "/" && len(m.input) == 0 && list_keys: m.filtering = true
 	case text != "" && k == .None && !ctrl && !alt && m.open != "": panel_type(&m.pn, text)
 	case: return false
 	}
 	return true
+}
+
+// What the clipboard holds, as text on one line (a pasted "Copy as cURL" spans several; the field
+// is one line). K4_MESSENGER_CLIPBOARD stands in for it in tests.
+@(private = "file")
+msg_clipboard :: proc() -> string {
+	text := os.get_env("K4_MESSENGER_CLIPBOARD", context.temp_allocator)
+	if text == "" {
+		_, out, _, err := os.process_exec({command = {"wl-paste", "--no-newline", "--type", "text/plain"}}, context.temp_allocator)
+		if err != nil do return ""
+		text = string(out)
+	}
+	t, _ := strings.replace_all(text, "\\\n", " ", context.temp_allocator) // a shell line continuation
+	t, _ = strings.replace_all(t, "\r", "", context.temp_allocator)
+	t, _ = strings.replace_all(t, "\n", " ", context.temp_allocator)
+	return t
 }
 
 @(private = "file")
