@@ -8,13 +8,14 @@ import "core:strings"
 // 420×500, a card per USB stick, SD card or external disk: its kind, label, model and mount
 // point, a state (mounted, not mounted, locked, busy, writing, safe to remove), an eject button
 // and how full it is. The picked card opens its actions: ↵ opens it (mounting it first), m mounts
-// or unmounts, e ejects (unmounts and powers it off), y copies its path. A drive something still
+// or unmounts, e ejects (unmounts and powers it off), y copies its path, p copies the files copied in
+// a file manager onto it (in the background: its card says how far, the bar module too). A drive something still
 // uses turns yellow and says what holds it (↵ closes them and ejects, Esc leaves it); an
 // encrypted one asks for its passphrase in the card (Tab shows it). The data comes from
 // k4-drives (panel lines R and L, panel.odin), again every 2 s while open:
 //   D <id> <USB|SSD|SD|HDD|PHONE> <label> <model · size · filesystem> <mount point>
 //     <used 0–1, -1 unknown> <use, e.g. "24 of 64 GB"> <mounted|unmounted|locked|busy|writing|safe> <note>
-// The runner's verbs: open ID, mount ID, unmount ID, eject ID, force ID, copy ID, unlock ID
+// The runner's verbs: open ID, mount ID, unmount ID, eject ID, force ID, copy ID, paste ID, unlock ID
 // ($K4_INPUT: the passphrase).
 
 DRIVES_W, DRIVES_H :: 420, 500
@@ -99,6 +100,9 @@ drv_act :: proc(a: ^App, verb: string) {
 		if x.state == "writing" { panel_say(&d.pn, "Still writing · eject waits until it is done", a.theme.yellow); return }
 		panel_run(a, "eject", x.id)
 	case "copy": panel_run(a, "copy", x.id)
+	case "paste":
+		if x.path == "" { panel_say(&d.pn, "Mount it first: m, then p", a.theme.yellow); return }
+		panel_run(a, "paste", x.id)
 	}
 }
 
@@ -132,6 +136,7 @@ drv_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> boo
 	case text == "m": drv_act(a, "mount")
 	case text == "e": drv_act(a, "eject")
 	case text == "y": drv_act(a, "copy")
+	case text == "p": drv_act(a, "paste")
 	case k == .Escape: panel_close(a)
 	case: return false
 	}
@@ -289,7 +294,7 @@ drv_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	}
 	keep, tone := d.pn.toast, d.pn.tone
 	if keep != "" && strings.has_prefix(keep, "Closed") do d.pn.tone = th.yellow
-	panel_foot(a, cv, S, H, {{"↑↓", "Drive"}, {"↵", "Open"}, {"m", "Mount"}, {"e", "Eject"}, {"Esc", "Close"}}, false)
+	panel_foot(a, cv, S, H, {{"↑↓", "Drive"}, {"↵", "Open"}, {"m", "Mount"}, {"e", "Eject"}, {"p", "Paste"}}, false)
 	d.pn.tone = tone
 	frame(cv, 0, 0, w, h, S, argb(H.line, 0xff), argb(H.acc, 0xff), 22)
 }

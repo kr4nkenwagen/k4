@@ -93,6 +93,7 @@ check "perf: utilities left column first" "* Free up space · Empty trash|  Free
 check "perf: a utility marked ask asks first" "* Free up space · Empty trash (asking)" "$(pf --keys "3<enter>" | sed -n 2p)"
 check "perf: y runs it, n cancels" "toast (trash)|* Free up space · Empty trash" "$( (pf --keys "3<enter>y" | grep '^toast'; pf --keys "3<enter>n" | sed -n 2p) | paste -sd'|')"
 check "perf: a step row moves its value" "toast (profile Performance)" "$(pf --keys "3<right><down><right>" | grep '^toast')"
+check "perf: a utility runs in the background; another one waits" "running thumbs|toast Clear thumbnails is still running · this one waits" "$(K4_PERF_NOKILL=1 "$K4" --perf --dump --keys "3<down><enter><enter>" < ../perf/slow.txt 2>&1 | grep -E '^(running|toast)' | paste -sd'|')"
 # Send to (LocalSend): devices from a file, no service
 sd() { K4_SEND_FIXTURE=1 "$K4" --send --dump "$@" < ../send/devices.txt 2>&1; }
 check "send: the devices, the first picked" "send 3 FILES · files · 6 devices|* Jon’s Pixel 8" "$(sd | head -2 | paste -sd'|')"
@@ -138,7 +139,7 @@ check "media: space, seek, track, volume, Tab" "(toggle org.mpris.MediaPlayer2.s
 check "media: a live stream can't seek" "toast A live stream can’t seek" "$(md --keys "<right>" < ../media/live.txt | grep '^toast')"
 dr() { "$K4" --drives --dump "$@" < ../drives/drives.txt 2>&1; }
 check "drives: each card and its state" "* USB STICK · mounted · /run/media/kr4nk/STICK · 24 of 64 GB|  SSD Backup · busy · /run/media/kr4nk/Backup · 712 of 1000 GB" "$(dr | sed -n 2,3p | paste -sd'|')"
-check "drives: m e y and enter" "(unmount /dev/sdb1)|(eject /dev/sdb1)|(copy /dev/sdb1)|(open /dev/sdb1)" "$(for k in m e y "<enter>"; do dr --keys "$k" | grep '^toast' | cut -c7-; done | paste -sd'|')"
+check "drives: m e y p and enter" "(unmount /dev/sdb1)|(eject /dev/sdb1)|(copy /dev/sdb1)|(paste /dev/sdb1)|(open /dev/sdb1)" "$(for k in m e y p "<enter>"; do dr --keys "$k" | grep '^toast' | cut -c7-; done | paste -sd'|')"
 check "drives: busy: enter closes them and ejects" "toast (force /dev/sdc1)" "$(dr --keys "<down><enter>" | grep '^toast')"
 check "drives: an encrypted one takes its passphrase in the card" "toast (unlock /dev/sde1)" "$(dr --keys "<down><down><down>secret<enter>" | grep '^toast')"
 sn() { "$K4" --snap --dump "$@" 2>&1; }

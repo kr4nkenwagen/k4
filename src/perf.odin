@@ -78,9 +78,18 @@ Perf :: struct {
 	ui: int,
 	uask: string,
 	utils_loaded: bool,
+	job, lister: Perf_Job, // the utility running and the list loading, both in the background
+	job_id, job_label: string,
 	toast: string,
 	toast_hot: bool,
 	f9, f10, f10b, f11, f11b, f12, f12b, f13b, f24b: ^Font,
+}
+
+Perf_Job :: struct {
+	proc_: os.Process,
+	out: string,
+	running: bool,
+	at: time.Tick,
 }
 
 Perf_Fs :: struct { mount: string, used, total: f32 }
@@ -406,13 +415,90 @@ perf_parse_utils :: proc(p: ^Perf, data: string) {
 	}
 }
 
+// The list (and its sizes) loads in the background; a window that renders once loads it at once.
 @(private = "file")
 perf_load_utils :: proc(a: ^App) {
 	p := a.perf
-	if p.loader == "" || p.utils_loaded do return
-	_, out, _, err := os.process_exec({command = {"sh", "-c", p.loader}}, context.temp_allocator)
-	if err == nil do perf_parse_utils(p, string(out))
-	p.utils_loaded = true
+	if p.loader == "" || p.utils_loaded || p.lister.running do return
+	if a.opts.dry_run != "" || a.opts.dump {
+		_, out, _, err := os.process_exec({command = {"sh", "-c", p.loader}}, context.temp_allocator)
+		if err == nil do perf_parse_utils(p, string(out))
+		p.utils_loaded = true
+		return
+	}
+	perf_job_start(&p.lister, p.loader, "list")
+}
+
+@(private = "file")
+perf_job_start :: proc(j: ^Perf_Job, cmd, tag: string) -> bool {
+	run := os.get_env("XDG_RUNTIME_DIR", context.temp_allocator)
+	delete(j.out)
+	j.out = fmt.aprintf("%s/k4-perf-%s-%d.out", run != "" ? run : "/tmp", tag, os.get_pid())
+	pr, err := os.process_start({command = {"sh", "-c", fmt.tprintf("exec %s > %s 2>&1", cmd, sh_quote(j.out))}})
+	if err != nil do return false
+	j.proc_, j.running, j.at = pr, true, time.tick_now()
+	return true
+}
+
+// What the job printed so far, and whether it just finished.
+@(private = "file")
+perf_job_poll :: proc(j: ^Perf_Job) -> (text: string, done: bool) {
+	if data, err := os.read_entire_file(j.out, context.temp_allocator); err == nil do text = string(data)
+	if !j.running do return
+	if st, _ := os.process_wait(j.proc_, 0); st.exited {
+		j.running, done = false, true
+		_ = os.remove(j.out)
+	}
+	return
+}
+
+// The last line a job printed: its progress while it runs, its result when done.
+@(private = "file")
+perf_last_line :: proc(text: string) -> string {
+	lines := strings.split_lines(strings.trim_space(text), context.temp_allocator)
+	l := len(lines) > 0 ? lines[len(lines) - 1] : ""
+	if i := strings.last_index_byte(l, '\r'); i >= 0 do l = l[i + 1:] // a progress bar redrawn in place
+	return strings.trim_space(l)
+}
+
+// Once a second the numbers; more often while a utility runs, for its progress line.
+perf_tick :: proc(a: ^App) {
+	p := a.perf
+	if time.duration_seconds(time.tick_diff(p.prev_at, time.tick_now())) >= 0.95 do perf_sample(p)
+	if p.lister.running {
+		if text, done := perf_job_poll(&p.lister); done {
+			keep := p.ui
+			clear(&p.utils)
+			perf_parse_utils(p, text)
+			p.utils_loaded = true
+			p.ui = min(keep, max(len(p.utils) - 1, 0))
+			for &v in p.utils do if v.id == p.job_id && p.toast != "" && !v.tog && len(v.steps) == 0 do v.done = strings.clone(p.toast)
+		}
+	}
+	if p.job.running {
+		text, done := perf_job_poll(&p.job)
+		if !done do return
+		msg := perf_last_line(text)
+		if msg == "k4:close" { a.exit = 0; a.done = true; return } // it opened a terminal or picks a window
+		p.toast = strings.clone(msg)
+		p.toast_hot = false
+		for &u in p.utils do if u.id == p.job_id && !u.tog && len(u.steps) == 0 {
+			u.done = strings.clone(msg)
+			p.utils_loaded = false
+			perf_load_utils(a) // the sizes again
+		}
+	}
+}
+
+perf_tick_ms :: proc(a: ^App) -> int { return a.perf.job.running || a.perf.lister.running ? 150 : 1000 }
+
+// The row's line while its utility runs: what it last printed, and for how long.
+@(private = "file")
+perf_job_line :: proc(p: ^Perf) -> string {
+	text, _ := os.read_entire_file(p.job.out, context.temp_allocator)
+	l := perf_last_line(string(text))
+	secs := int(time.duration_seconds(time.tick_diff(p.job.at, time.tick_now())))
+	return fmt.tprintf("%s · %d:%02d", l != "" ? l : "Running…", secs / 60, secs % 60)
 }
 
 // The utilities in reading order: the left column, then the right.
@@ -429,27 +515,22 @@ perf_run_util :: proc(a: ^App, confirmed: bool) {
 	order := perf_util_order(p)
 	if p.ui >= len(order) do return
 	u := &p.utils[order[p.ui]]
+	if p.job.running && p.runner != "" {
+		p.toast = fmt.aprintf("%s is still running · this one waits", p.job_label)
+		p.toast_hot = true
+		return
+	}
 	if u.ask && !confirmed && p.uask != u.id { p.uask = u.id; p.toast = ""; return }
 	p.uask = ""
 	arg := ""
 	if len(u.steps) > 0 { u.cur = (u.cur + 1) % len(u.steps); arg = u.steps[u.cur] }
 	if u.tog { u.on = !u.on; arg = u.on ? "on" : "off" }
 	if p.runner == "" { p.toast = fmt.aprintf("(%s%s%s)", u.id, arg != "" ? " " : "", arg); return } // tests
-	_, out, _, _ := os.process_exec({command = {"sh", "-c", fmt.tprintf("%s %s %s", p.runner, sh_quote(u.id), sh_quote(arg))}}, context.temp_allocator)
-	lines := strings.split_lines(strings.trim_space(string(out)), context.temp_allocator)
-	msg := len(lines) > 0 ? lines[len(lines) - 1] : ""
-	if msg == "k4:close" { a.exit = 0; a.done = true; return } // it opened a terminal or picks a window
-	p.toast = strings.clone(msg)
-	p.toast_hot = false
-	if !u.tog && len(u.steps) == 0 {
-		delete(u.done)
-		u.done = strings.clone(msg)
-		keep := p.ui
-		p.utils_loaded = false
-		perf_load_utils(a) // the sizes again
-		p.ui = keep
-		for &v in p.utils do if v.id == u.id do v.done = strings.clone(msg)
-	}
+	delete(p.job_id); delete(p.job_label)
+	p.job_id, p.job_label = strings.clone(u.id), strings.clone(u.label)
+	u.done = ""
+	p.toast = ""
+	perf_job_start(&p.job, fmt.tprintf("%s %s %s", p.runner, sh_quote(u.id), sh_quote(arg)), "run") // perf_tick reads the result
 }
 
 // ---------- keys and the pointer ----------
@@ -478,7 +559,7 @@ perf_kill :: proc(a: ^App, force: bool) {
 @(private = "file")
 perf_btop :: proc(a: ^App) {
 	if a.perf.runner == "" { a.perf.toast = "(btop)"; return }
-	_, _, _, _ = os.process_exec({command = {"sh", "-c", fmt.tprintf("%s btop", a.perf.runner)}}, context.temp_allocator)
+	_, _ = os.process_start({command = {"setsid", "-f", "sh", "-c", fmt.tprintf("%s btop", a.perf.runner)}}) // the window goes at once; btop opens behind it
 	a.exit = 0; a.done = true
 }
 
@@ -958,6 +1039,7 @@ perf_draw_utils :: proc(a: ^App, cv: ^Canvas, S, top, fy: int, H: HUD, soft: u32
 			meta, mc := u.meta, H.acc
 			if len(u.steps) > 0 do meta = fmt.tprintf("‹ %s ›", u.steps[clamp(u.cur, 0, len(u.steps) - 1)])
 			if u.done != "" { sub, sc, meta, mc = u.done, t.green, "done", t.green }
+			if p.job.running && p.job_id == u.id { sub, sc, meta, mc = perf_job_line(p), H.acc, "running", H.acc }
 			if asking { sub, sc, meta, mc = "Sure? y runs it · n cancels", H.hot, "y / n", H.hot }
 			right := x + colw - 10 * S
 			if u.tog {
@@ -1000,6 +1082,7 @@ perf_dump :: proc(a: ^App) -> string {
 			fmt.sbprintfln(&sb, "%s %s · %s%s", k == p.ui ? "*" : " ", u.group, u.label, p.uask == u.id ? " (asking)" : "")
 		}
 	}
+	if p.job.running do fmt.sbprintfln(&sb, "running %s", p.job_id)
 	if p.toast != "" do fmt.sbprintfln(&sb, "toast %s", p.toast)
 	return strings.to_string(sb)
 }

@@ -1,0 +1,6 @@
+R	sh -c 'echo "Cleaning… 40%"; sleep 0.3; echo "Freed 1 GB"' --
+U	0	Free up space	trash	Empty trash	612 files	2.3 GB	ask
+U	0	Free up space	thumbs	Clear thumbnails	~/.cache/thumbnails	1.2 GB	
+U	1	Fix things	audio	Restart audio	pipewire		
+U	1	Power	profile	Power profile	steps		step=Power saver|Balanced|Performance;cur=1
+U	1	Power	awake	Stay awake	no lock		tog=0
