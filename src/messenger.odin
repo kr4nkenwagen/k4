@@ -13,14 +13,16 @@ import "core:time"
 // at a time: the list, ↵ the conversation, Esc back.
 // ↑↓ pick a conversation (it opens, and is read), typing writes, ↵ sends, PgUp older messages, the
 // wheel scrolls them, / filters the list, ^R marks it read, Esc clears the line, then the filter,
-// then closes. Before it works: Set up (↵ runs k4-messengerd setup, its steps as they come), Log in
+// then closes. ^N starts a chat: type a name, ↵ searches Messenger, ↑↓ pick, ↵ opens the chat
+// (the bridge adds only recent chats on its own; older ones come back this way). Before it works: Set up (↵ runs k4-messengerd setup, its steps as they come), Log in
 // (paste the cookies of a messenger.com session with ^V: Tab shows them, ↵ hands them to the bridge).
 // The data comes from k4-messenger (panel lines R and L, panel.odin), again every 2 s while open:
 //   S <state setup|down|login|relogin|error|ok> <unread> <account> <note>
 //   C <room> <name> <unread> <unix time> <sender of the last, in groups> <last line> <group 1|0> <mine 1|0>
 //   O <room>                    the open one; then its messages, oldest first:
 //   M <id> <unix time> <sender> <mine 1|0> <text|image|video|audio|file|emote> <text>
-// The runner's verbs: open ROOM, close, more, send ROOM ($K4_INPUT), read ROOM, setup (its steps in $XDG_RUNTIME_DIR/k4-messenger-setup.log),
+// The runner's verbs: open ROOM, close, more, send ROOM ($K4_INPUT), read ROOM, search QUERY
+// (k4:person ID NAME lines), start ID NAME (k4:open ROOM), setup (its steps in $XDG_RUNTIME_DIR/k4-messenger-setup.log),
 // login ($K4_INPUT: the cookies).
 
 MSG_W, MSG_H :: 900, 600
@@ -44,6 +46,12 @@ Messenger :: struct {
 	scroll: int,    // lines up from the newest
 	steps: [dynamic]string, // setup's lines as they come
 	setting_up: bool,
+	// ^N: a new chat: the name typed, the people found for it, the picked one
+	newchat: bool,
+	who: [dynamic]u8,
+	searched: string, // the name the list is for ("" none yet)
+	people: [dynamic][2]string, // id, name
+	pcur: int,
 }
 
 messenger_setup :: proc(a: ^App, data: string) {
@@ -166,6 +174,32 @@ msg_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> boo
 		}
 		return true
 	}
+	if m.newchat {
+		switch {
+		case k == .Escape: msg_newchat_end(m)
+		case k == .Down: m.pcur = min(m.pcur + 1, max(len(m.people) - 1, 0))
+		case k == .Up: m.pcur = max(m.pcur - 1, 0)
+		case k == .Enter:
+			q := strings.trim_space(string(m.who[:]))
+			if q == "" || panel_busy(&m.pn) do return true
+			if q == m.searched && m.pcur < len(m.people) { // the list is for this name: open the picked one
+				p := m.people[m.pcur]
+				panel_run(a, "start", p[0], p[1])
+			} else {
+				for &x in m.people { delete(x[0]); delete(x[1]) }
+				clear(&m.people)
+				m.pcur = 0
+				delete(m.searched); m.searched = strings.clone(q)
+				panel_run(a, "search", q)
+			}
+		case k == .Backspace: if len(m.who) > 0 do pop(&m.who)
+		case ctrl && ch == 'v': append(&m.who, ..transmute([]u8)msg_clipboard())
+		case text != "" && k == .None && !ctrl && !alt: append(&m.who, ..transmute([]u8)text)
+		case: return false
+		}
+		return true
+	}
+	if ctrl && ch == 'n' && msg_ready(m) { m.newchat = true; if m.popup do m.chat = false; return true }
 	if m.filtering {
 		switch {
 		case k == .Escape: clear(&m.filter); m.filtering = false; m.cur = 0
@@ -233,6 +267,11 @@ msg_click :: proc(a: ^App, x, y, button: int) -> bool {
 	if !ok do return false
 	#partial switch h.kind {
 	case .Row: msg_pick(a, h.a); if m.popup do m.chat = true
+	case .Item: // a person found for a new chat
+		if m.newchat && h.a < len(m.people) {
+			if h.a == m.pcur do panel_run(a, "start", m.people[h.a][0], m.people[h.a][1])
+			else do m.pcur = h.a
+		}
 	case .Chip: // the notices' buttons
 		switch h.a {
 		case 0: if !m.setting_up do msg_setup(a)
@@ -244,7 +283,33 @@ msg_click :: proc(a: ^App, x, y, button: int) -> bool {
 }
 
 @(private = "file")
-msg_ran :: proc(a: ^App, verb, line: string) -> bool { return false }
+msg_newchat_end :: proc(m: ^Messenger) {
+	m.newchat = false
+	clear(&m.who)
+	for &x in m.people { delete(x[0]); delete(x[1]) }
+	clear(&m.people)
+	delete(m.searched); m.searched = ""
+	m.pcur = 0
+}
+
+// The search's people (k4:person ID NAME), and the chat to open (k4:open ROOM).
+@(private = "file")
+msg_ran :: proc(a: ^App, verb, line: string) -> bool {
+	m := M(a)
+	switch {
+	case strings.has_prefix(line, "k4:person\t"):
+		f := fields(line[10:])
+		append(&m.people, [2]string{strings.clone(fget(f, 0)), strings.clone(fget(f, 1))})
+		return true
+	case strings.has_prefix(line, "k4:open\t"):
+		delete(m.open); m.open = strings.clone(line[8:])
+		msg_newchat_end(m)
+		m.cur, m.scroll = 0, 0
+		if m.popup do m.chat = true
+		return true
+	}
+	return false
+}
 
 // Setup runs in the background (a minute or two: downloads, the services' first start); its
 // steps ("Step 2/5 · …") come from its log, read while it runs.
@@ -337,10 +402,11 @@ msg_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	case "setup", "down": hints = {{"↵", m.state == "down" ? "Repair" : "Set up"}, {"Esc", "Close"}}
 	case "login", "relogin": hints = {{"↵", "Log in"}, {"Tab", m.reveal ? "Hide" : "Show"}, {"Esc", "Close"}}
 	case:
-		if m.filtering do hints = {{"↑↓", "Pick"}, {"↵", "Open"}, {"Esc", "Stop filtering"}}
+		if m.newchat do hints = {{"↵", len(m.people) > 0 && strings.trim_space(string(m.who[:])) == m.searched ? "Open chat" : "Search"}, {"↑↓", "Pick"}, {"Esc", "Back"}}
+		else if m.filtering do hints = {{"↑↓", "Pick"}, {"↵", "Open"}, {"Esc", "Stop filtering"}}
 		else if m.popup && !m.chat do hints = {{"↑↓", "Pick"}, {"↵", "Open"}, {"/", "Filter"}, {"Esc", "Close"}}
 		else if m.popup do hints = {{"↵", "Send"}, {"PgUp", "Older"}, {"Esc", "Back"}}
-		else do hints = {{"↑↓", "Chat"}, {"↵", "Send"}, {"PgUp", "Older"}, {"/", "Filter"}, {"Esc", "Close"}}
+		else do hints = {{"↑↓", "Chat"}, {"↵", "Send"}, {"^N", "New chat"}, {"/", "Filter"}, {"Esc", "Close"}}
 	}
 	fy := panel_foot(a, cv, S, H, hints, !m.popup)
 	body_y := hh + S
@@ -349,11 +415,13 @@ msg_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	case "login", "relogin": msg_draw_login(a, cv, S, H, px, body_y, w - 2 * px); return
 	}
 	if m.popup {
-		if m.chat do msg_draw_chat(a, cv, S, H, 0, body_y, w, fy - body_y, now)
+		if m.newchat do msg_draw_newchat(a, cv, S, H, 0, body_y, w, fy - body_y)
+		else if m.chat do msg_draw_chat(a, cv, S, H, 0, body_y, w, fy - body_y, now)
 		else do msg_draw_list(a, cv, S, H, 0, body_y, w, fy - body_y, now)
 	} else {
 		lw := MSG_LIST_W * S
-		msg_draw_list(a, cv, S, H, 0, body_y, lw, fy - body_y, now)
+		if m.newchat do msg_draw_newchat(a, cv, S, H, 0, body_y, lw, fy - body_y)
+		else do msg_draw_list(a, cv, S, H, 0, body_y, lw, fy - body_y, now)
 		fill_rect(cv, lw, body_y, S, fy - body_y, argb(H.line, 0xff))
 		msg_draw_chat(a, cv, S, H, lw + S, body_y, w - lw - S, fy - body_y, now)
 	}
@@ -506,6 +574,43 @@ msg_draw_chat :: proc(a: ^App, cv: ^Canvas, S: int, H: HUD, x, y, w, h: int, now
 	if m.scroll > 0 do text_in(cv, m.f10, "↓ newer · PgDn", x + w - pad - tw(m.f10, "↓ newer · PgDn"), top, 16 * S, argb(H.acc, 0xff))
 }
 
+// ^N: who to write to, and the people Messenger found for it.
+@(private = "file")
+msg_draw_newchat :: proc(a: ^App, cv: ^Canvas, S: int, H: HUD, x, y, w, h: int) {
+	m := M(a)
+	pad := 14 * S
+	yy := y + 12 * S
+	spaced(cv, m.f10b, "NEW CHAT", x + pad, yy, 16 * S, H.dim, S)
+	yy += 22 * S
+	fh := 34 * S
+	rounded_rect(cv, x + pad, yy, w - 2 * pad, fh, 0, argb(H.bg, 0xff), f32(S), argb(H.acc, 0xff))
+	q := string(m.who[:])
+	if q == "" do text_in(cv, m.f12, "A name…", x + pad + 16 * S, yy, fh, argb(H.faint, 0xff))
+	q = ellipsize(m.f12, q, w - 2 * pad - 24 * S)
+	text_in(cv, m.f12, q, x + pad + 12 * S, yy, fh, argb(H.fg, 0xff))
+	fill_rect(cv, x + pad + 12 * S + (q != "" ? tw(m.f12, q) + S : 0), yy + 8 * S, 2 * S, 18 * S, argb(H.acc, 0xff))
+	yy += fh + 10 * S
+	if panel_busy(&m.pn) { text_in(cv, m.f11, "Searching Messenger…", x + pad, yy, 20 * S, argb(H.acc, 0xff)); return }
+	if len(m.people) == 0 {
+		l := m.searched == "" ? "↵ searches Messenger for the name" : "Nobody found · try another spelling"
+		text_in(cv, m.f11, l, x + pad, yy, 20 * S, argb(H.dim, 0xff))
+		return
+	}
+	rh := 40 * S
+	for p, i in m.people {
+		if yy + rh > y + h do break
+		on := i == m.pcur
+		if on { fill_rect(cv, x, yy, w, rh, argb(H.acc, 0x22)); fill_rect(cv, x, yy, 3 * S, rh, argb(H.acc, 0xff)); mark_sel(a, x, yy, w, rh) }
+		hit_add(a, x, yy, w, rh, .Item, i, 0)
+		ac := note_app_color(a.theme, p[1])
+		fill_rect(cv, x + pad, yy + 7 * S, 26 * S, 26 * S, argb(ac, 0x22))
+		mono := note_mono(p[1])
+		text_in(cv, m.f10b, mono, x + pad + (26 * S - tw(m.f10b, mono)) / 2, yy + 7 * S, 26 * S, argb(ac, 0xff))
+		text_in(cv, on ? m.f12b : m.f12, ellipsize(m.f12b, p[1], w - 2 * pad - 36 * S), x + pad + 36 * S, yy, rh, argb(H.fg, 0xff))
+		yy += rh
+	}
+}
+
 @(private = "file")
 msg_draw_setup :: proc(a: ^App, cv: ^Canvas, S: int, H: HUD, x, y, w: int) {
 	m := M(a)
@@ -552,6 +657,10 @@ msg_dump :: proc(a: ^App) -> string {
 	m := M(a)
 	sb := strings.builder_make(context.temp_allocator)
 	fmt.sbprintfln(&sb, "messenger %s · %d unread%s", m.state, m.unread, m.popup ? (m.chat ? " · chat" : " · list") : "")
+	if m.newchat {
+		fmt.sbprintfln(&sb, "newchat %s", string(m.who[:]))
+		for p, i in m.people do fmt.sbprintfln(&sb, "%s person %s", i == m.pcur ? "*" : " ", p[1])
+	}
 	if m.filtering || len(m.filter) > 0 do fmt.sbprintfln(&sb, "filter %s", string(m.filter[:]))
 	for r, i in msg_shown(m) do fmt.sbprintfln(&sb, "%s %s%s · %s", i == m.cur ? "*" : " ", r.name, r.unread > 0 ? fmt.tprintf(" (%d)", r.unread) : "", r.last)
 	if m.open != "" do fmt.sbprintfln(&sb, "open %s", m.open)
