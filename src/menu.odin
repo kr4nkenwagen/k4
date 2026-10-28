@@ -1,6 +1,7 @@
 package k4
 
 import "core:c/libc"
+import "core:encoding/json"
 import "core:fmt"
 import "core:math"
 import "core:os"
@@ -207,7 +208,17 @@ Menu :: struct {
 	cf:       int,               // 0 Yes, 1 No
 	loading:  int,
 	toast:    string,
-	history:  [dynamic][2]string,
+	history:  [dynamic][2]string, // the calculator's, newest first (~/.local/state/k4/calc-history)
+	hist_i:   int,                // ↑ ↓ in the calculator: -1 none, else the history entry recalled
+	// the web search's live suggestions (DuckDuckGo's ac), fetched in the background
+	sug:      [dynamic]string,
+	sug_q:    string,             // the query the suggestions are for
+	sug_want: string,             // the query to fetch next, once typing settles
+	sug_at:   time.Tick,
+	sug_proc: os.Process,
+	sug_run:  bool,
+	sug_out:  string,
+	sug_off:  bool,               // tests and dry runs: no network
 	// text input (input= flag, k4:input)
 	input_id, input_label, input_prompt, input_hint: string,
 	input_password: bool,
@@ -440,6 +451,7 @@ section_slow :: proc(m: ^Menu, s: ^Section) -> bool {
 // Milliseconds until the menu needs a redraw on its own (the slow notice, the waiting
 // count), or -1.
 menu_tick_ms :: proc(m: ^Menu) -> int {
+	if m.focus == .Web && (m.sug_run || m.sug_want != "") do return 60 // suggestions: settle, then fetch and poll
 	if m.focus != .Sub || m.open < 0 || m.open >= len(m.sections) do return -1
 	s := &m.sections[m.open]
 	if s.refresh > 0 && s.load.state == .Ready do return max(s.refresh * 1000 - int(time.duration_milliseconds(time.tick_since(s.load.started))), 0) + 1
@@ -451,6 +463,7 @@ menu_tick_ms :: proc(m: ^Menu) -> int {
 // again (O refresh=N; not while an action runs).
 menu_on_tick :: proc(a: ^App) {
 	m := a.menu
+	if m.focus == .Web do web_suggest_tick(a)
 	if m.focus == .Sub && m.open >= 0 && m.open < len(m.sections) {
 		s := &m.sections[m.open]
 		if s.refresh > 0 && s.load.state == .Ready && m.runner.state != .Loading && time.duration_seconds(time.tick_since(s.load.started)) >= f64(s.refresh) {
@@ -458,6 +471,38 @@ menu_on_tick :: proc(a: ^App) {
 		}
 	}
 	menu_refilter(a)
+}
+
+// The web search's suggestions: once typing has settled for 150 ms, DuckDuckGo's autocomplete
+// (curl in the background, 2 s at most); the answer is kept for its query.
+web_suggest_tick :: proc(a: ^App) {
+	m := a.menu
+	if m.sug_run {
+		st, _ := os.process_wait(m.sug_proc, 0)
+		if !st.exited do return
+		m.sug_run = false
+		data, err := os.read_entire_file(m.sug_out, context.temp_allocator)
+		if err == nil {
+			// ["query", ["suggestion", …]]
+			v: [2]json.Value
+			if json.unmarshal(data, &v, allocator = context.temp_allocator) == nil {
+				if list, ok := v[1].(json.Array); ok {
+					clear(&m.sug)
+					for x in list do if sx, ok2 := x.(json.String); ok2 do append(&m.sug, strings.clone(string(sx)))
+					if q, ok3 := v[0].(json.String); ok3 { delete(m.sug_q); m.sug_q = strings.clone(string(q)) }
+				}
+			}
+		}
+	}
+	if m.sug_want == "" || m.sug_run || time.duration_milliseconds(time.tick_since(m.sug_at)) < 150 do return
+	q := m.sug_want
+	m.sug_want = ""
+	if q == m.sug_q do return
+	run := os.get_env("XDG_RUNTIME_DIR", context.temp_allocator)
+	if m.sug_out == "" do m.sug_out = fmt.aprintf("%s/k4-web-suggest.json", run != "" ? run : "/tmp")
+	url := strings.concatenate({"https://duckduckgo.com/ac/?type=list&q=", url_escape(q)}, context.temp_allocator)
+	p, err := os.process_start({command = {"sh", "-c", fmt.tprintf("curl -s --max-time 2 %s > %s", sh_quote(url), sh_quote(m.sug_out))}})
+	if err == nil do m.sug_proc, m.sug_run = p, true
 }
 
 // k4:retry: start the open section's loader again.
@@ -771,6 +816,10 @@ menu_on_query :: proc(a: ^App) {
 			set_query(a, q[1:]); m.focus, m.si = .Calc, 0; menu_refilter(a); return
 		}
 	}
+	if m.focus == .Web && !m.sug_off && q != "" && q[0] != '!' {
+		delete(m.sug_want)
+		m.sug_want, m.sug_at = strings.clone(q), time.tick_now()
+	}
 	m.si = 0
 	m.scroll = 0
 	menu_refilter(a)
@@ -936,7 +985,12 @@ web_rows :: proc(a: ^App) -> []Web_Row {
 	rows := make([dynamic]Web_Row, 0, 5, context.temp_allocator)
 	ddg :: proc(s: string) -> string { return strings.concatenate({"https://duckduckgo.com/?q=", url_escape(s)}, context.temp_allocator) }
 	append(&rows, Web_Row{"DDG", fmt.tprintf("Search DuckDuckGo for “%s”", q), "duckduckgo.com", ddg(q)})
-	if q[0] != '!' do for b in BANGS do append(&rows, Web_Row{b[0], q, b[1], ddg(fmt.tprintf("%s %s", b[0], q))})
+	m := a.menu
+	if m.sug_q == q do for sg, i in m.sug { // live suggestions (→ completes one)
+		if i >= 4 do break
+		if sg != q do append(&rows, Web_Row{"·", sg, "suggestion  →", ddg(sg)})
+	}
+	if q[0] != '!' do for b, i in BANGS do append(&rows, Web_Row{b[0], q, fmt.tprintf("%s  Alt %d", b[1], i + 1), ddg(fmt.tprintf("%s %s", b[0], q))})
 	return rows[:]
 }
 
@@ -1003,8 +1057,7 @@ menu_run :: proc(a: ^App) {
 		out, ok := logic.calc_eval(q)
 		if !ok do return
 		copy_to_clipboard(out)
-		inject_at(&m.history, 0, [2]string{strings.clone(q), strings.clone(out)})
-		if len(m.history) > 5 do resize(&m.history, 5)
+		calc_remember(a, q, out)
 		m.toast = fmt.aprintf("Copied  %s", out)
 	case .Confirm:
 		if m.cf == 0 do menu_confirmed(a)
@@ -1179,6 +1232,28 @@ finish :: proc(a: ^App, id: string) {
 }
 
 @(private)
+calc_remember :: proc(a: ^App, q, out: string) {
+	m := a.menu
+	for h, i in m.history do if h[0] == q { ordered_remove(&m.history, i); break }
+	inject_at(&m.history, 0, [2]string{strings.clone(q), strings.clone(out)})
+	if len(m.history) > CALC_HISTORY_MAX do resize(&m.history, CALC_HISTORY_MAX)
+	m.hist_i = -1
+	if !(a.opts.dump || a.opts.dry_run != "") || os.get_env("K4_CALC_HISTORY", context.temp_allocator) != "" do calc_history_save(m)
+}
+
+// The result rounded to two decimals, the unit kept ("3.106855961 mi" -> "3.11 mi").
+@(private)
+calc_rounded :: proc(out: string) -> string {
+	num, unit := out, ""
+	if sp := strings.index_byte(out, ' '); sp > 0 do num, unit = out[:sp], out[sp:]
+	v, ok := strconv.parse_f64(num)
+	if !ok do return out
+	r := fmt.tprintf("%.2f", v)
+	r = strings.trim_right(strings.trim_right(r, "0"), ".")
+	return strings.concatenate({r, unit}, context.temp_allocator)
+}
+
+@(private)
 copy_to_clipboard :: proc(s: string) {
 	r, w, err := os.pipe()
 	if err != nil do return
@@ -1220,6 +1295,11 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 	}
 	if compact_now(a) && m.focus == .Sub && compact_key(a, k, ctrl, ch, text) do return true
 	if m.focus == .Sub && m.sections[m.open].cal && !alt && !(ctrl && (ch == 'c' || ch == 'g')) do return cal_key(a, k, ctrl, ch, text)
+	if alt && ch >= '1' && ch <= '4' && m.focus == .Web { // the bangs, by number
+		bang := BANGS[int(ch - '1')][0]
+		for r in web_rows(a) do if r.tag == bang { finish(a, strings.concatenate({"url:", r.url})); break }
+		return true
+	}
 	if alt && ch != 0 {
 		up := strings.to_upper(utf8.runes_to_string({ch}, context.temp_allocator), context.temp_allocator)
 		for s, i in m.sections do if s.key == up { menu_enter(a, i); return true }
@@ -1252,6 +1332,41 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 		case: return false
 		}
 		return true
+	}
+	if m.focus == .Calc {
+		q := q_of(a)
+		switch {
+		case k == .Enter && (ctrl || a.shift):
+			out, ok := logic.calc_eval(q)
+			if !ok do return true
+			calc_remember(a, q, out)
+			if a.shift { finish(a, strings.concatenate({"paste:", out})); return true } // into the window under the launcher
+			r := calc_rounded(out)
+			copy_to_clipboard(r)
+			m.toast = fmt.aprintf("Copied  %s", r)
+			return true
+		case k == .Up && len(m.history) > 0:
+			m.hist_i = min(m.hist_i + 1, len(m.history) - 1)
+			set_query(a, m.history[m.hist_i][0])
+			return true
+		case k == .Down && m.hist_i >= 0:
+			m.hist_i -= 1
+			set_query(a, m.hist_i >= 0 ? m.history[m.hist_i][0] : "")
+			return true
+		}
+	}
+	if m.focus == .Web {
+		rows := web_rows(a)
+		switch {
+		case k == .Enter && ctrl && m.si < len(rows):
+			copy_to_clipboard(rows[m.si].url)
+			m.toast = fmt.aprintf("Copied  %s", rows[m.si].url)
+			return true
+		case k == .Right && m.si < len(rows) && rows[m.si].tag == "·": // complete the suggestion
+			set_query(a, rows[m.si].label)
+			m.si = 0
+			return true
+		}
 	}
 	if ctrl {
 		switch ch {
@@ -1815,8 +1930,8 @@ menu_hints :: proc(a: ^App, sc: bool) -> (hints: [][2]string) {
 	case m.focus == .Sub && on_slider(m) && m.sections[m.open].actions[m.sel_actions[m.si]].toggle: hints = {{"↑↓", "Move"}, {"← →", "Adjust"}, {"↵ ␣", "Mute"}, {"⌫", "Back"}}
 	case m.focus == .Sub && on_slider(m): hints = {{"↑↓", "Move"}, {"← →", "Adjust"}, {"⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
 	case m.focus == .Sub: hints = {{"↑↓", "Move"}, {"↵ ␣", "Run / toggle"}, {"← ⌫", "Back"}, {"⌃J ⌃K", "Vim"}}
-	case m.focus == .Web: hints = {{"↑↓", "Bang"}, {"↵", "Open in browser"}, {"⌫", "Exit mode"}}
-	case m.focus == .Calc: hints = {{"↵", "Copy result"}, {"⌫", "Exit mode"}, {"Esc", "Back"}}
+	case m.focus == .Web: hints = {{"↑↓", "Pick"}, {"↵", "Open"}, {"⌃↵", "Copy URL"}, {"→", "Complete"}, {"Alt 1–4", "Bang"}}
+	case m.focus == .Calc: hints = {{"↵", "Copy"}, {"⌃↵", "Copy rounded"}, {"⇧↵", "Paste"}, {"↑", "History"}, {"⌫", "Exit mode"}}
 	case m.views[m.view].name == "wall": hints = {{"←→↑↓", "Move"}, {"↵", "Set background"}, {"⌫", "Back"}}
 	case m.views[m.view].name == "theme": hints = {{"↑↓", "Move"}, {"↵", "Apply theme"}, {"⌫", "Back"}}
 	case m.views[m.view].grid: hints = {{"←→↑↓", "Move"}, {"↵", "Open"}, {"⌫", "Back"}}
@@ -2638,7 +2753,7 @@ draw_calc :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		text_in(cv, m.f_row, r, x + w - tw(m.f_row, r), y, 26 * S, argb(fgb, 0xff))
 		y += 26 * S
 	}
-	note := "Supports + − × / ^ % ( ), 0x hex, pi, e, sqrt sin cos tan log ln abs round"
+	note := "+ − × / ^ ( ), 15% of 2400, 5 km in mi, 30 c to f, 2 GiB in MB, 0x hex, pi, sqrt sin cos log ln round"
 	draw_text_f(cv, m.f_small, note, x, by + bh - pad - int(m.f_small.line_h), argb(dim, 0xff), nil, 0, x + w)
 }
 
@@ -2801,10 +2916,45 @@ menu_fonts :: proc(a: ^App) {
 	if a.scale > 1 do for f in a.fonts do font_resize(f, f.base_px * f32(a.scale))
 }
 
+CALC_HISTORY_MAX :: 20
+
+@(private)
+calc_history_path :: proc() -> string {
+	if p := os.get_env("K4_CALC_HISTORY", context.temp_allocator); p != "" do return p
+	return strings.concatenate({os.get_env("HOME", context.temp_allocator), "/.local/state/k4/calc-history"}, context.temp_allocator)
+}
+
+@(private)
+calc_history_load :: proc(m: ^Menu) {
+	data, err := os.read_entire_file(calc_history_path(), context.temp_allocator)
+	if err != nil do return
+	text := string(data)
+	for line in strings.split_lines_iterator(&text) {
+		tab := strings.index_byte(line, '\t')
+		if tab <= 0 do continue
+		append(&m.history, [2]string{strings.clone(line[:tab]), strings.clone(line[tab + 1:])})
+		if len(m.history) >= CALC_HISTORY_MAX do break
+	}
+}
+
+@(private)
+calc_history_save :: proc(m: ^Menu) {
+	p := calc_history_path()
+	if i := strings.last_index_byte(p, '/'); i > 0 do os.make_directory_all(p[:i])
+	sb := strings.builder_make(context.temp_allocator)
+	for h in m.history do fmt.sbprintf(&sb, "%s\t%s\n", h[0], h[1])
+	_ = os.write_entire_file(p, transmute([]u8)strings.to_string(sb))
+}
+
 menu_setup :: proc(a: ^App, data: string) {
 	m := new(Menu)
 	m.entry = -1
+	m.hist_i = -1
 	a.menu = m
+	// tests and dry runs: no saved history, no network (unless the test names a history file)
+	headless := a.opts.dump || a.opts.dry_run != ""
+	m.sug_off = headless && os.get_env("K4_WEB_SUGGEST", context.temp_allocator) == ""
+	if !headless || os.get_env("K4_CALC_HISTORY", context.temp_allocator) != "" do calc_history_load(m)
 	menu_parse(m, data)
 	menu_fonts(a)
 	a.width, a.height = MENU_W, MENU_H

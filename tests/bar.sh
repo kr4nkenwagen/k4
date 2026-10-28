@@ -174,5 +174,12 @@ check "displays: dropped left of the laptop, it snaps to its edge, centred" "* D
 check "displays: dropped on the laptop, it moves to the nearest free edge" "* DP-1 -560,900 2560x1440" "$(ds --keys "<press:493,270><move:280,250><release:280,250>" | sed -n 3p)"
 check "displays: enter applies, the top left at 0,0" "toast (apply eDP-1 2560 270 DP-1 0 0)" "$(ds --keys "<press:493,270><move:120,250><release:120,250><enter>" | tail -1)"
 check "displays: arrows nudge, r puts them back" "* DP-1 1440,0 2560x1440" "$(ds --keys "<right><down>r" | sed -n 3p)"
+mt() { printf 'S\tA\tApps\tA\t\n' | env -u WAYLAND_DISPLAY "$K4" --menu --dump "$@" 2>&1; }   # no display: copying does nothing
+check "calc: percent, units; enter copies" "toast Copied  3.106855961 mi" "$(mt --keys "=5 km in mi<enter>" | grep toast)"
+check "calc: ctrl+enter copies rounded" "toast Copied  1.78" "$(mt --keys "=1920 / 1080<ctrl-enter>" | grep toast)"
+check "calc: shift+enter pastes into the window below" "paste:360" "$(mt --keys "=15% of 2400<shift-enter>")"
+check "calc: up recalls the history" "query 2 GiB in MB" "$(hist=$tmp/calc-hist; K4_CALC_HISTORY=$hist mt --keys "=2 GiB in MB<enter>" >/dev/null; K4_CALC_HISTORY=$hist mt --keys "=<up>" | grep '^query')"
+check "web: alt+2 searches Wikipedia" "url:https://duckduckgo.com/?q=%21w+arch+linux" "$(mt --keys "g arch linux<alt-2>" | tail -1)"
+check "web: ctrl+enter copies the URL" "toast Copied  https://duckduckgo.com/?q=arch+linux" "$(mt --keys "g arch linux<ctrl-enter>" | grep toast)"
 echo "bar tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
