@@ -1,0 +1,10 @@
+S	1	sonnet	haiku|sonnet|fable	1793099940
+A	962876	k4-integrations-six	/home/kr4nk/repos/k4	interactive	busy		1793099700	
+A	2961975	design-gaps	/home/kr4nk/repos/dotfiles	interactive	waiting	permission prompt	1793099880	
+A	9882	knight-stance	/home/kr4nk/repos/kr4nkengine	interactive	idle		1793092800	
+A	555	nightly-review	/home/kr4nk/repos/k4	background	busy		1793098920	ab12cd
+U	five_hour	5-hour window	0.64	resets 15:30 · in 1 h 44 min
+U	seven_day	Weekly · all models	0.82	resets Mon 09:00
+U	seven_day_fable	Weekly · Fable	1.0	resets Mon 09:00
+P	/home/kr4nk/repos/k4	k4 · 2 sessions
+P	/home/kr4nk/repos/dotfiles	dotfiles · 1 session

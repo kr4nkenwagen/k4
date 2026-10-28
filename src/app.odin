@@ -57,6 +57,7 @@ Options :: struct {
 	drives:        bool,   // --drives
 	snap:          bool,   // --snap
 	bus:           bool,   // --bus
+	claude:        bool,   // --claude
 	dump:          bool, // --dump: print the state as text instead of a PNG
 }
 

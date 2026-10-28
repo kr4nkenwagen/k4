@@ -25,6 +25,7 @@ Mode :: struct {
 	loaded: proc(a: ^App, data: string),                // stdin at the start, then the loader's output
 	ran:    proc(a: ^App, verb, line: string) -> bool,  // a k4: line the panel does not know; true: used
 	tick:   proc(a: ^App) -> int,                       // may be nil: ms to the mode's next tick, -1 none
+	stream: proc(a: ^App, line: string),                // may be nil: a streamed run's lines as they come, then "k4:end"
 	dump:   proc(a: ^App) -> string,
 }
 
@@ -43,6 +44,9 @@ Panel :: struct {
 	refresh_ms: int,    // load again every N ms while open (0: only after runs)
 	loaded_at:  time.Tick,
 	run, load:  Pjob,
+	sjob:       Pjob,   // a streamed run (panel_stream): its output is read as it grows
+	soff:       int,    // how much of it was handed over
+	spart:      [dynamic]u8, // a line not finished yet
 	toast:      string,
 	tone:       u32,    // the message's colour; 0 the accent
 	toast_at:   time.Tick,
@@ -212,6 +216,7 @@ panel_tick_ms :: proc(a: ^App) -> int {
 	p := a.pn
 	t := -1
 	if p.run.running || p.load.running do t = 60
+	if p.sjob.running do t = 40
 	if p.refresh_ms > 0 {
 		left := p.refresh_ms - int(time.duration_milliseconds(time.tick_since(p.loaded_at)))
 		t = t < 0 ? max(left, 1) : min(t, max(left, 1))
@@ -225,6 +230,7 @@ panel_tick_ms :: proc(a: ^App) -> int {
 panel_on_tick :: proc(a: ^App) {
 	p := a.pn
 	if p.mode.tick != nil do p.mode.tick(a) // the mode's timers (a countdown, a reveal running out)
+	panel_stream_poll(a)
 	if out, done := pjob_poll(&p.run); done do panel_ran(a, p.run.verb, out)
 	if a.done do return
 	if out, done := pjob_poll(&p.load); done {
@@ -235,6 +241,76 @@ panel_on_tick :: proc(a: ^App) {
 }
 
 panel_busy :: proc(p: ^Panel) -> bool { return p.run.running }
+panel_streaming :: proc(p: ^Panel) -> bool { return p.sjob.running }
+
+// Runs `<runner> VERB ARG…` and hands its output to the mode's stream proc line by line while it
+// runs (an answer appearing as it is written), then "k4:end". Dry runs and dumps run it at once.
+panel_stream :: proc(a: ^App, verb: string, args: ..string, secret := "") {
+	p := a.pn
+	if p.runner == "" {
+		parts := make([dynamic]string, 0, 4, context.temp_allocator)
+		append(&parts, verb)
+		for x in args do append(&parts, x)
+		panel_say(p, fmt.tprintf("(%s)", strings.join(parts[:], " ", context.temp_allocator)))
+		return
+	}
+	if p.sjob.running do panel_stop(a)
+	sb := strings.builder_make(context.temp_allocator)
+	strings.write_string(&sb, p.runner)
+	strings.write_byte(&sb, ' ')
+	strings.write_string(&sb, sh_quote(verb))
+	for x in args { strings.write_byte(&sb, ' '); strings.write_string(&sb, sh_quote(x)) }
+	if a.opts.dump || a.opts.dry_run != "" {
+		_, out, _, _ := os.process_exec({command = {"sh", "-c", strings.to_string(sb)}}, context.temp_allocator)
+		for line in strings.split_lines(string(out), context.temp_allocator) do if line != "" do p.mode.stream(a, line)
+		p.mode.stream(a, "k4:end")
+		return
+	}
+	p.soff = 0
+	clear(&p.spart)
+	if !pjob_start(p, &p.sjob, "stream", strings.to_string(sb), secret) do panel_say(p, fmt.tprintf("Could not run %s", p.runner), a.theme.red)
+}
+
+// Stops a streamed run (Esc while an answer is coming).
+panel_stop :: proc(a: ^App) {
+	p := a.pn
+	if !p.sjob.running do return
+	_ = os.process_kill(p.sjob.p)
+	_, _ = os.process_wait(p.sjob.p, 200 * time.Millisecond)
+	p.sjob.running = false
+	if p.sjob.out != "" { os.remove(p.sjob.out); delete(p.sjob.out); p.sjob.out = "" }
+	clear(&p.spart)
+	p.mode.stream(a, "k4:end")
+}
+
+// The new part of a streamed run's output, as whole lines; at its end the rest, then "k4:end".
+@(private = "file")
+panel_stream_poll :: proc(a: ^App) {
+	p := a.pn
+	if !p.sjob.running do return
+	st, _ := os.process_wait(p.sjob.p, 0)
+	data, err := os.read_entire_file(p.sjob.out, context.temp_allocator)
+	if err == nil && len(data) > p.soff {
+		append(&p.spart, ..data[p.soff:])
+		p.soff = len(data)
+		for {
+			nl := -1
+			for c, i in p.spart do if c == '\n' { nl = i; break }
+			if nl < 0 do break
+			line := strings.clone(string(p.spart[:nl]), context.temp_allocator)
+			remove_range(&p.spart, 0, nl + 1)
+			if line != "" do p.mode.stream(a, line)
+		}
+	}
+	if st.exited {
+		if len(p.spart) > 0 { p.mode.stream(a, strings.clone(string(p.spart[:]), context.temp_allocator)); clear(&p.spart) }
+		p.sjob.running = false
+		os.remove(p.sjob.out)
+		delete(p.sjob.out)
+		p.sjob.out = ""
+		p.mode.stream(a, "k4:end")
+	}
+}
 
 // ---------- a text field ----------
 

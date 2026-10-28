@@ -98,7 +98,7 @@ picture it is a track: the cover, the title over the artist, a glyph (media keys
 
 ## Windows fed by scripts
 
-Six windows share `src/panel.odin`: the data comes on stdin, `R` names the script that runs
+Seven windows share `src/panel.odin`: the data comes on stdin, `R` names the script that runs
 their actions in the background (its last line is the footer's message; `k4:` lines steer the
 window) and `L` the one that loads the data again. Each file's header has its format.
 
@@ -109,6 +109,7 @@ window) and `L` the one that loads the data again. Each file's header has its fo
 | `--media` | any MPRIS player: cover, position, controls, volume, the players | `media-menu`, the bar's media module |
 | `--drives` | removable drives: mount, open, eject (busy: what holds it), unlock LUKS in the card | `k4-drives`, the bar's drives module |
 | `--snap` | btrfs snapshots: take, compare, keep, delete, restore | `k4-snap`, Perf › Utilities |
+| `--claude` | Claude: ask with your Claude Code login (streamed, tools off), the Claude Code sessions (jump, start, stop), the plan's usage windows | `k4-claude`, the bar's Claude module, Super+Alt+A |
 | `--bus` | the next hour of departures at a remembered stop (Trafiklab Realtime API, key in the keyring), a stop search | `k4-bus`, the bar's bus module |
 
 The tray popup takes an unread count per app (the count tag on its tile and NEEDS YOU row), and

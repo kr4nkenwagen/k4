@@ -208,5 +208,17 @@ check "launcher: > then ⌫ goes back to the menu" "crumb MENU" "$(lt --keys "><
 check "launcher: ⌃3 runs the third result in place" "toast ran vol" "$(lt --keys "o<ctrl-3>" | grep '^toast')"
 check "launcher: ⇧↵ opens an app and keeps the launcher" "focus Menu|toast ran term" "$(lt --keys "term<shift-enter>" | grep -E '^(focus|toast)' | paste -sd'|')"
 check "launcher: files after the rest, ↵ opens, ⇧↵ shows the folder" "* /home/u/Documents/invoice.pdf | file|file:/home/u/Documents/invoice.pdf|reveal:/home/u/Documents/invoice.pdf" "$( (lt --keys "invoice" | grep '| file'; lt --keys "invoice<enter>" | tail -1; lt --keys "invoice<shift-enter>" | tail -1) | paste -sd'|')"
+# Claude: data from a file at a pinned clock; a stand-in runner streams an answer (tests/claude/runner.sh)
+cl() { K4_CLAUDE_NOW=1793100000 "$K4" --claude --dump "$@" 2>&1; }
+clr() { (cat ../claude/data.txt; printf 'R\tsh ../claude/runner.sh\n') | cl "$@"; }
+check "claude: the question streams a Markdown answer; its time and model; the session kept" "q write a timer · 09:44 · sonnet|a Two units in \`~/.config/systemd/user/\`.|session 3f13d34d" "$(clr --keys "write a timer<enter>" | grep '^q \|^a \|^session' | paste -sd'|')"
+check "claude: the stream's limits reach the usage page" "5-hour window · 66% · resets 15:30 · in 1 h 44 min" "$(clr --keys "hi<enter><alt-3>" | grep '5-hour')"
+check "claude: sessions, needs you first, the longest waiting in each group first" "* waiting design-gaps · /home/kr4nk/repos/dotfiles · permission prompt|  busy nightly-review · /home/kr4nk/repos/k4|  busy k4-integrations-six · /home/kr4nk/repos/k4" "$(cl --keys "<tab>" < ../claude/data.txt | sed -n 2,4p | paste -sd'|')"
+check "claude: enter jumps, n picks a folder, x asks then stops a background one" "toast (jump 2961975)|toast (new /home/kr4nk/repos/k4)|toast (stop ab12cd)" "$( (cl --keys "<tab><enter>" < ../claude/data.txt | grep '^toast'; cl --keys "<tab>n<enter>" < ../claude/data.txt | grep '^toast'; cl --keys "<tab><down>xy" < ../claude/data.txt | grep '^toast') | paste -sd'|')"
+check "claude: an interactive one is not stopped from here" "toast Only background sessions can be stopped from here · this one runs in a terminal" "$(cl --keys "<tab><down><down>x" < ../claude/data.txt | grep '^toast')"
+check "claude: ← → change the model only with an empty field; the popup opens on sessions" "toast (model fable)|typing a|claude sessions · sonnet · 4 sessions" "$( (cl --keys "<right>" < ../claude/data.txt | grep '^toast'; cl --keys "a<right>" < ../claude/data.txt | grep '^typing'; cl --popup 600,80,1280,right < ../claude/data.txt | head -1) | paste -sd'|')"
+# icons only (B icons=1): each module its icon and tags; text-only modules and the title hide; the clock its time
+printf 'B\theight=26\ticons=1\nM\tws\tleft\tworkspaces\t-\t0\t-\t-\t-\t-\t-\t-\nM\tclk\tcenter\tclock\tT1;D1\t0\t-\t-\t-\t-\t-\t-\nM\tvol\tright\texec\techo "{\\"icon\\":\\"I\\",\\"text\\":\\"62%%\\",\\"text2\\":\\"x\\",\\"level\\":40}"\t30\t-\t-\t-\t-\t-\t-\nM\tbat\tright\texec\techo "{\\"battery\\":9,\\"text\\":\\"9%%\\"}"\t30\t-\t-\t-\t-\t-\t-\nM\tplain\tright\texec\techo "just text"\t30\t-\t-\t-\t-\t-\t-\nM\tdc\tright\texec\techo "{\\"icon\\":\\"D\\",\\"badge\\":3}"\t30\t-\t-\t-\t-\t-\t-\n' > "$tmp/spec5"
+check "bar: icons only" "center: [T1]|right: [I] [bat:9] [D badge:3]" "$(K4_BAR_WORKSPACES=one-output.json "$K4" --bar --dump -w 1000 < "$tmp/spec5" 2>&1 | sed -n 2,3p | paste -sd'|')"
 echo "bar tests: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

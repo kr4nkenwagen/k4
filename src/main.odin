@@ -55,6 +55,7 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --media                 any MPRIS player: now playing, controls, players (media-menu data, media.odin)
   --drives                removable drives: mount, open, eject, unlock (k4-drives data, drives.odin)
   --snap                  btrfs snapshots: take, compare, keep, delete, restore (k4-snap data, snap.odin)
+  --claude                Claude: ask (streamed, your Claude Code login), sessions, usage (k4-claude data, claude.odin)
   --bus                   bus departures at a remembered stop, the stop picker, the Trafiklab key (k4-bus data, bus.odin)
   --output NAME           the bar's output (default: the compositor's choice)
   --config FILE           accepted and ignored (fuzzel compatibility)
@@ -155,6 +156,7 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--drives": o.drives = true
 		case "--snap": o.snap = true
 		case "--bus": o.bus = true
+		case "--claude": o.claude = true
 		case "--notify-center": o.notify_center = true
 		case "--notify-ctl": o.notify_ctl = value(args, &i, inline, has_inline)
 		case "--send-ctl": o.send_ctl = value(args, &i, inline, has_inline)
@@ -240,7 +242,7 @@ main :: proc() {
 	} else if opts.messenger { // a panel mode too (its own branch: the list above changes often)
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		messenger_setup(a, string(data))
-	} else if opts.pass || opts.keyring || opts.media || opts.drives || opts.snap || opts.bus {
+	} else if opts.pass || opts.keyring || opts.media || opts.drives || opts.snap || opts.bus || opts.claude {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		switch {
 		case opts.pass: pass_setup(a, string(data))
@@ -249,6 +251,7 @@ main :: proc() {
 		case opts.drives: drives_setup(a, string(data))
 		case opts.snap: snap_setup(a, string(data))
 		case opts.bus: bus_setup(a, string(data))
+		case opts.claude: claude_setup(a, string(data))
 		}
 	} else if opts.perf {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)

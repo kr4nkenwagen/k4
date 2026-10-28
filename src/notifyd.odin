@@ -807,7 +807,7 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 		rounded_rect(cv, x + 8 * S, y + h + 5 * S - 7 * S, w - 16 * S, 12 * S, 0, 0, f32(S), argb(H.line, 0xff))
 	}
 	cut := 10 * S
-	edge_on := hover || sel || note.urgency == 2 || note.warn || note.tag == "WAITING"
+	edge_on := hover || sel || note.urgency == 2 || note.warn || note.tag == "WAITING" || note.tag == "NEEDS YOU"
 	if note.urgency == 2 do for k in 1 ..= 3 do cut_outline(cv, x - k * 2 * S, y - k * 2 * S, w + k * 4 * S, h + k * 4 * S, cut + k * S, 2 * S, argb(lvl, u8(0x0c / k + 1)))
 	cut_rect(cv, x + S, y + S, w - 2 * S, h - 2 * S, cut - S, argb(note.urgency == 2 ? mix(H.bg, H.hot, 0.08) : H.bg, a.bg_alpha))
 	cut_rect(cv, x + S, y + S, w - 2 * S, h - 2 * S, cut - S, argb(t.fg, 0x08))

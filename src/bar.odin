@@ -17,6 +17,8 @@ import "logic"
 // open (accent block, while its click command runs: a popup) and alarm (red block) fill.
 // Modules come from stdin, one a line, tab-separated:
 //   B <key>=<value>…    height=26 · position=top|bottom · transparent=1 (Ghostty's background-opacity, else 55%)
+//                       · icons=1 (each module its icon alone, with its count tag; text, boxes and levels go,
+//                       the window title too, the clock keeps its time; the tooltips keep the info)
 //   M <id> <side> <kind> <arg> <interval> <tone> <left> <right> <middle> <up> <down> [flags]
 //      side: left center right · kind: workspaces, window, clock, text / icon (arg), exec
 //      (arg = a shell command: interval > 0 runs it every that many seconds and keeps its last
@@ -90,6 +92,7 @@ Bar :: struct {
 	mods: [dynamic]Module,
 	height: int,
 	bottom, transparent: bool,
+	icons_only: bool, // B icons=1: each module its icon (and its count tag) alone; the info in the tooltip
 	output: string,
 	ws: [dynamic]Ws,
 	title: string,
@@ -143,6 +146,7 @@ bar_setup :: proc(a: ^App, data: string) {
 				case "height": b.height, _ = strconv.parse_int(kv[eq + 1:])
 				case "position": b.bottom = kv[eq + 1:] == "bottom"
 				case "transparent": b.transparent = kv[eq + 1:] == "1" || kv[eq + 1:] == "true"
+				case "icons": b.icons_only = kv[eq + 1:] == "1" || kv[eq + 1:] == "true"
 				}
 			}
 		case "M":
@@ -535,6 +539,11 @@ mod_chip :: proc(a: ^App, i: int, S: int, narrow: bool) -> (c: Chip, shown: bool
 	if narrow && m.compact do c.text, c.text2 = "", ""
 	if narrow && m.slim do c.text = ""
 	if narrow && m.wide do return c, false
+	if b.icons_only { // icons only: the text, the line box and the level go; the clock keeps its time
+		if m.kind == .Clock do c.text2 = ""
+		else if c.icon == "" && c.battery < 0 do return c, false
+		else { c.text, c.text2, c.box = "", "", ""; c.level = -1 }
+	}
 	if c.icon == "" && c.text == "" && c.text2 == "" && c.battery < 0 do return c, false
 	fg := t.fg
 	#partial switch st {
@@ -749,7 +758,7 @@ bar_draw_strip :: proc(a: ^App, cv: ^Canvas, S: int) {
 			for ws, k in wss { if k > 0 do w += gap; w += ws_cell_w(b, ws, S) }
 			widths[i], shown[i] = w, len(wss) > 0
 		case .Window:
-			if b.title == "" do break
+			if b.title == "" || b.icons_only do break
 			title_i = i
 			chips[i] = Chip{text = b.title, px = 10 * S, maxw = 420 * S, fg = t.fg_dim, text_c = t.fg_dim, icon_c = t.fg_dim, battery = -1, level = -1}
 			if b.hover == i do chips[i].bg = argb(t.selection, 0xff)
@@ -915,10 +924,20 @@ bar_dump :: proc(a: ^App) -> string {
 				parts := make([dynamic]string, 0, 8, context.temp_allocator)
 				for ws in bar_workspaces(b) do append(&parts, fmt.tprintf("%s%s", ws.name, ws.focused ? "*" : (ws.urgent ? "!" : (ws.empty ? "_" : ""))))
 				fmt.sbprintf(&sb, " [%s]", strings.join(parts[:], " ", context.temp_allocator))
-			case .Window: if b.title != "" do fmt.sbprintf(&sb, " [%s]", b.title)
+			case .Window: if b.title != "" && !b.icons_only do fmt.sbprintf(&sb, " [%s]", b.title)
 			case .Clock, .Exec, .Text:
 				if m.text == "" && m.icon == "" && m.text2 == "" && m.battery < 0 do continue
+				if b.icons_only && m.kind != .Clock && m.icon == "" && m.battery < 0 do continue
 				parts := make([dynamic]string, 0, 6, context.temp_allocator)
+				if b.icons_only { // as drawn: the icon, the battery glyph and the tags; the clock its time
+					if m.kind == .Clock do append(&parts, m.text)
+					if m.icon != "" do append(&parts, m.icon)
+					if m.battery >= 0 do append(&parts, fmt.tprintf("bat:%d", m.battery))
+					if m.pill != "" do append(&parts, fmt.tprintf("pill:%s", m.pill))
+					if m.badge > 0 do append(&parts, fmt.tprintf("badge:%d", m.badge))
+					fmt.sbprintf(&sb, " [%s]", strings.join(parts[:], " ", context.temp_allocator))
+					continue
+				}
 				if m.icon != "" do append(&parts, m.icon)
 				if m.battery >= 0 do append(&parts, fmt.tprintf("bat:%d", m.battery))
 				if m.level >= 0 do append(&parts, fmt.tprintf("lvl:%d", m.level))
