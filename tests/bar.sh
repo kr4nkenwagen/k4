@@ -58,7 +58,15 @@ check "power: an unavailable tile says why" "toast No swap big enough for 16 GB 
 check "power: Esc closes" "exit 1" "$(pw --keys "<esc>"; echo "exit $?")"
 # notifications: the popups from fixture notes, the centre from a fixture list (no service, no bus)
 nd() { K4_NOTIFY_FIXTURE=1 "$K4" --notifyd --dump "$@" < ../notify/notes.txt 2>&1; }
+# Messenger: conversations from a fixture (no runner: the actions say what they would run)
+ms() { K4_MESSENGER_NOW=1793180000 "$K4" --messenger --dump "$@" 2>&1; }
+check "messenger: unread first, the open one's messages, yours marked" "* Anna Berg (2) · Lunch at 12?|  Family (1) · Dinner on Sunday, bring the kids|  > you: Yes, working from home until 4" "$( (ms < ../messenger/chats.txt | sed -n 2,3p; ms < ../messenger/chats.txt | grep '> you') | paste -sd'|')"
+check "messenger: ↓ opens the next, typing and ↵ sends (shown at once)" "toast (open !fam)|  > you: hello there|toast (send !anna)" "$( (ms --keys "<down>" < ../messenger/chats.txt | grep '^toast'; ms --keys "hello there<enter>" < ../messenger/chats.txt | tail -2) | paste -sd'|')"
+check "messenger: / filters the list" "filter fam|* Family (1) · Dinner on Sunday, bring the kids" "$(ms --keys "/fam" < ../messenger/chats.txt | sed -n 2,3p | paste -sd'|')"
+check "messenger: not set up, logging in (the cookies masked)" "messenger setup · 0 unread|input ••••|toast (login)" "$( (ms < ../messenger/setup.txt | head -1; ms --keys "xs=1" < ../messenger/login.txt | grep '^input'; ms --keys "xs=1<enter>" < ../messenger/login.txt | grep '^toast') | paste -sd'|')"
 nf() { K4_NOTIFY_FIXTURE=1 "$K4" --notifyd --dump "$@" < ../notify/focus.txt 2>&1; }   # with a warn card, a reply, then focus
+printf '#!/bin/sh\necho "$1 $2 [$K4_INPUT]" >> "$(dirname "$0")/reply.log"\n' > "$tmp/reply-cmd"; chmod +x "$tmp/reply-cmd"
+check "notify: a posted card's inline reply runs its command with the text" "reply 1 [sure, 12?]" "$(printf 'post\t0\tMessenger\tAnna\tLunch?\t1\t-1\t-1\t\t\t\tinline-reply:Reply\t%s\nfocus\n' "$tmp/reply-cmd" | K4_NOTIFY_FIXTURE=1 "$K4" --notifyd --dump --keys "rsure, 12?<enter>" >/dev/null 2>&1; for i in 1 2 3 4 5 6; do [ -s "$tmp/reply.log" ] && break; sleep 0.2; done; cat "$tmp/reply.log")"
 check "notify focus: the first card picked, ↓ the next, warn marked" "* popup System · Battery critically low · 5%|* popup Drives · Can’t eject STICK yet (warn)" "$( (nf | sed -n 2p; nf --keys "<down>" | sed -n 3p) | paste -sd'|')"
 check "notify focus: r replies in the card, ↵ sends it and it goes" "* popup Signal · Anna (reply: hi there)|notify 7 · dnd off" "$( (nf --keys "<down><down>rhi there" | sed -n 4p; nf --keys "<down><down>rok<enter>" | head -1) | paste -sd'|')"
 check "notify focus: Del dismisses, Space shows only the app's notes, Esc lets go" "notify 7 · dnd off|1|popup System · Battery critically low · 5%" "$( (nf --keys "<del>" | head -1; nf --keys " " | grep -c popup; nf --keys "<esc>" | sed -n 2p) | paste -sd'|')"

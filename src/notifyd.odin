@@ -1052,9 +1052,16 @@ nd_button :: proc(a: ^App, id: u32, key: string) {
 	clear(&a.query); a.cursor = 0
 }
 
-// The reply goes back to the app (NotificationReplied), and the note goes.
+// The reply goes back to the app (NotificationReplied; a k4 service's card: its command), and the note goes.
 nd_send_reply :: proc(a: ^App, id: u32, text: string) {
 	n := a.nd
+	if i := nd_find(n, id); i >= 0 && n.notes[i].cmd != "" { // posted by a k4 service: "CMD reply ID", the text in $K4_INPUT
+		_ = os.set_env("K4_INPUT", text) // (the environment, not the command line, as the menu's runner does)
+		libc.system(strings.clone_to_cstring(fmt.tprintf("setsid -f sh -c %s >/dev/null 2>&1 </dev/null", sh_quote(fmt.tprintf("%s reply %d", n.notes[i].cmd, id))), context.temp_allocator))
+		os.unset_env("K4_INPUT")
+		nd_remove(a, id, 2)
+		return
+	}
 	if n.conn != nil {
 		msg := dbus_message_new_signal("/org/freedesktop/Notifications", "org.freedesktop.Notifications", "NotificationReplied")
 		it: DBus_Iter

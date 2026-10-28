@@ -42,6 +42,7 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --notify-center         the notification centre (Super+N; notify_center.odin)
   --notify-ctl CMD        a command to the service: list status counts clear dnd on|off|toggle … (prints its reply)
   --send-ctl CMD          a command to k4-localsend's service (its ctl, arguments tab-separated; prints its reply)
+  --messenger             Facebook Messenger: conversations, messages, writing (k4-messenger data, messenger.odin)
   --clip                  the clipboard history: search, preview, paste (Super+Ctrl+V; entries on stdin, clip.odin)
   --tray                  the system tray's apps and their menus (Super+.; k4-tray list on stdin, tray.odin)
   --perf                  performance, processes and utilities (Super+Shift+Esc; utilities on stdin, perf.odin)
@@ -157,6 +158,7 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--notify-center": o.notify_center = true
 		case "--notify-ctl": o.notify_ctl = value(args, &i, inline, has_inline)
 		case "--send-ctl": o.send_ctl = value(args, &i, inline, has_inline)
+		case "--messenger": o.messenger = true
 		case "--osd": o.osd = value(args, &i, inline, has_inline)
 		case "--config": _ = value(args, &i, inline, has_inline)
 		case "--dry-run": o.dry_run = value(args, &i, inline, has_inline)
@@ -235,6 +237,9 @@ main :: proc() {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		ssh_setup(a, string(data))
 		a.width, a.height = SSH_W, SSH_H
+	} else if opts.messenger { // a panel mode too (its own branch: the list above changes often)
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		messenger_setup(a, string(data))
 	} else if opts.pass || opts.keyring || opts.media || opts.drives || opts.snap || opts.bus {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		switch {

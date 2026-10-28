@@ -43,6 +43,7 @@ Options :: struct {
 	notify_center: bool,   // --notify-center
 	notify_ctl:    string, // --notify-ctl CMD
 	send_ctl:      string, // --send-ctl CMD
+	messenger:     bool,   // --messenger
 	clip:          bool,   // --clip
 	tray:          bool,   // --tray
 	perf:          bool,   // --perf
