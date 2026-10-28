@@ -17,14 +17,18 @@ import "core:unicode/utf8"
 //   S <recording 1|0>        R <command>: runs "VERB ID" in place (pin, delete; its output
 //   L <command>: the list again        is the footer's message)
 //   E <id> <unix time> <pinned 1|0> <text|block|image> <label> <lines> <chars> <image file> <body>
-// (the body's lines joined by \x1f). Paste, copy and extra close k4 and print "VERB\tID".
+//     [<app> <secret 1|0>]
+// (the body's lines joined by \x1f). Each row names the app it was copied from. A secret (from a
+// password manager) shows masked, "expires in 12 s", and is gone from the list after that (k4-clip
+// watch takes it out of the history). Colours (#rgb, #rrggbb, rgb(), hsl()) get a swatch.
+// Paste, copy and extra close k4 and print "VERB\tID".
 
 CLIP_W, CLIP_H :: 980, 600
 
 Clip_Entry :: struct {
-	id, label, image, body: string,
+	id, label, image, body, app: string,
 	at: i64,
-	pinned: bool,
+	pinned, secret: bool,
 	kind: int, // 0 text, 1 block, 2 image
 	lines, chars: int,
 }
@@ -78,10 +82,35 @@ clip_parse :: proc(c: ^Clip, data: string) {
 			e.chars, _ = strconv.parse_int(get(f, 7))
 			b, _ := strings.replace_all(get(f, 9), "\x1f", "\n", context.temp_allocator)
 			e.body = strings.clone(b)
+			e.app, e.secret = strings.clone(get(f, 10)), get(f, 11) == "1"
+			if e.secret { // never drawn: paste and copy go by its id
+				delete(e.label); delete(e.body)
+				e.label, e.body, e.kind, e.lines = strings.clone("••••••••••"), strings.clone("••••••••••"), 0, 1
+			}
 			append(&c.all, e)
 		}
 	}
 }
+
+CLIP_SECRET_S :: 12 // a secret leaves the history this long after its copy
+
+@(private = "file")
+clip_now :: proc() -> i64 {
+	if v := os.get_env("K4_CLIP_NOW", context.temp_allocator); v != "" do if now, ok := strconv.parse_i64(v); ok do return now
+	return time.to_unix_seconds(time.now())
+}
+
+// A secret's seconds left in the history; 0 once it is gone.
+@(private = "file")
+clip_left :: proc(e: Clip_Entry) -> i64 { return e.secret ? max(e.at + CLIP_SECRET_S - clip_now(), 0) : -1 }
+
+// While a secret counts down, the window ticks every second; at 0 it leaves the list.
+clip_tick_ms :: proc(a: ^App) -> int {
+	for e in a.clip.all do if clip_left(e) > 0 do return 1000
+	return -1
+}
+
+clip_tick :: proc(a: ^App) { clip_filter(a) }
 
 @(private = "file")
 clip_query :: proc(a: ^App) -> string { return strings.to_lower(strings.trim_space(string(a.query[:])), context.temp_allocator) }
@@ -96,7 +125,8 @@ clip_filter :: proc(a: ^App) {
 	clear(&c.vis)
 	q := clip_query(a)
 	for pass in 0 ..< 2 do for e, i in c.all {
-		if e.pinned != (pass == 0) || !clip_kind_ok(c.tab, e.kind) do continue
+		if e.pinned != (pass == 0) || !clip_kind_ok(c.tab, e.kind) || clip_left(e) == 0 do continue
+		if e.secret && q != "" do continue // a secret is never found by what it says
 		if q != "" && !strings.contains(strings.to_lower(e.label, context.temp_allocator), q) && !strings.contains(strings.to_lower(e.body, context.temp_allocator), q) do continue
 		append(&c.vis, i)
 	}
@@ -208,8 +238,7 @@ clip_scroll :: proc(a: ^App, n: int) -> bool {
 
 @(private = "file")
 clip_ago :: proc(at: i64) -> string {
-	d := time.to_unix_seconds(time.now()) - at
-	if v := os.get_env("K4_CLIP_NOW", context.temp_allocator); v != "" do if now, ok := strconv.parse_i64(v); ok do d = now - at
+	d := clip_now() - at
 	switch {
 	case d < 60: return fmt.tprintf("%d s", max(d, 0))
 	case d < 3600: return fmt.tprintf("%d min", d / 60)
@@ -241,12 +270,57 @@ clip_lang :: proc(body: string) -> string {
 	return "text"
 }
 
+// A colour the text is: #rgb, #rrggbb, #rrggbbaa, rgb()/rgba() or hsl()/hsla() (the alpha dropped).
 @(private = "file")
 clip_hex :: proc(s: string) -> (u32, bool) {
-	t := strings.trim_space(s)
-	if len(t) != 7 || t[0] != '#' do return 0, false
-	v, ok := strconv.parse_u64_of_base(t[1:], 16)
-	return u32(v), ok
+	t := strings.to_lower(strings.trim_space(s), context.temp_allocator)
+	if len(t) > 1 && t[0] == '#' {
+		h := t[1:]
+		for ch in h do if !(ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'f') do return 0, false
+		switch len(h) {
+		case 3:
+			v, _ := strconv.parse_u64_of_base(h, 16)
+			r, g, b := u32(v >> 8 & 0xf), u32(v >> 4 & 0xf), u32(v & 0xf)
+			return (r * 17) << 16 | (g * 17) << 8 | b * 17, true
+		case 6, 8:
+			v, _ := strconv.parse_u64_of_base(h[:6], 16)
+			return u32(v), true
+		}
+		return 0, false
+	}
+	fn := ""
+	for p in ([]string{"rgba(", "rgb(", "hsla(", "hsl("}) do if strings.has_prefix(t, p) { fn = p; break }
+	if fn == "" || !strings.has_suffix(t, ")") do return 0, false
+	inner, _ := strings.replace_all(t[len(fn):len(t) - 1], ",", " ", context.temp_allocator)
+	inner, _ = strings.replace_all(inner, "/", " ", context.temp_allocator)
+	parts := strings.fields(inner, context.temp_allocator)
+	if len(parts) < 3 || len(parts) > 4 do return 0, false
+	n: [3]f64
+	for i in 0 ..< 3 {
+		x := strings.trim_suffix(strings.trim_suffix(parts[i], "%"), "deg")
+		v, ok := strconv.parse_f64(x)
+		if !ok do return 0, false
+		n[i] = v
+		if fn[0] == 'r' && strings.has_suffix(parts[i], "%") do n[i] = v * 2.55
+	}
+	c8 :: proc(v: f64) -> u32 { return u32(clamp(v + 0.5, 0, 255)) }
+	if fn[0] == 'r' do return c8(n[0]) << 16 | c8(n[1]) << 8 | c8(n[2]), true
+	// hsl: hue in degrees, saturation and lightness in percent
+	h := n[0] - 360 * f64(int(n[0] / 360)); if h < 0 do h += 360
+	sat, l := clamp(n[1], 0, 100) / 100, clamp(n[2], 0, 100) / 100
+	ch := (1 - abs(2 * l - 1)) * sat
+	x := ch * (1 - abs(h / 60 - 2 * f64(int(h / 120)) - 1))
+	m := l - ch / 2
+	r, g, b: f64
+	switch {
+	case h < 60: r, g = ch, x
+	case h < 120: r, g = x, ch
+	case h < 180: g, b = ch, x
+	case h < 240: g, b = x, ch
+	case h < 300: r, b = x, ch
+	case: r, b = ch, x
+	}
+	return c8((r + m) * 255) << 16 | c8((g + m) * 255) << 8 | c8((b + m) * 255), true
 }
 
 @(private = "file")
@@ -260,6 +334,13 @@ clip_kc :: proc(a: ^App, e: Clip_Entry, H: HUD) -> u32 {
 
 @(private = "file")
 clip_meta :: proc(e: Clip_Entry) -> string {
+	from := e.app != "" ? fmt.tprintf(" · from %s", e.app) : ""
+	if e.secret do return fmt.tprintf("secret%s · expires in %d s", from, clip_left(e))
+	return strings.concatenate({clip_meta_kind(e), from}, context.temp_allocator)
+}
+
+@(private = "file")
+clip_meta_kind :: proc(e: Clip_Entry) -> string {
 	switch e.kind {
 	case 1: return fmt.tprintf("%s · %d lines · %s", clip_lang(e.body), e.lines, clip_ago(e.at))
 	case 2:
@@ -481,6 +562,7 @@ clip_preview :: proc(a: ^App, cv: ^Canvas, S, x, y, w, h: int, e: Clip_Entry, H:
 	case 1: info = fmt.tprintf("%s · %d lines · %d chars", clip_lang(e.body), e.lines, e.chars)
 	case 2: info = clip_meta(e)
 	}
+	if e.secret do info = fmt.tprintf("secret · expires in %d s", clip_left(e))
 	ix := x + 20 * S + kw + 10 * S
 	text_in(cv, c.f11, ellipsize(c.f11, info, x + w - 30 * S - tw(c.f10, when_) - ix), ix, y, hh, argb(H.dim, 0xff))
 	fill_rect(cv, x, y + hh, w, S, argb(H.line, 0xff))
@@ -566,7 +648,7 @@ clip_dump :: proc(a: ^App) -> string {
 	for v, i in c.vis {
 		e := c.all[v]
 		kinds := [3]string{"text", "block", "image"}
-		fmt.sbprintfln(&sb, "%s %s%s · %s", i == c.cur ? "*" : " ", e.pinned ? "◆ " : "", e.label, kinds[e.kind])
+		fmt.sbprintfln(&sb, "%s %s%s · %s%s", i == c.cur ? "*" : " ", e.pinned ? "◆ " : "", e.label, kinds[e.kind], e.secret || e.app != "" ? fmt.tprintf(" · %s", clip_meta(e)) : "")
 	}
 	if c.toast != "" do fmt.sbprintfln(&sb, "toast %s", c.toast)
 	return strings.to_string(sb)

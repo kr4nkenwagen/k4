@@ -1,0 +1,6 @@
+S	1
+E	s1	1793019995	0	text	hunter2	1	7		hunter2	Bitwarden	1
+E	s2	1793019900	0	text	gone	1	4		gone	KeePassXC	1
+E	c1	1793019800	0	text	rgb(59, 130, 246)	1	17		rgb(59, 130, 246)	firefox	0
+E	c2	1793019700	0	text	hsl(217 91% 60%)	1	16		hsl(217 91% 60%)		0
+E	c3	1793019600	0	text	#3bf	1	4		#3bf		0

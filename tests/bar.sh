@@ -70,6 +70,9 @@ cl() { K4_CLIP_NOW=1793020000 "$K4" --clip --dump "$@" < ../clip/entries.txt 2>&
 check "clip: pinned first, then newest" "clip All · 10 of 10|* ◆ jon.felix@kestrel.dev · text|  ◆ Host kestrel-build · block|  git rebase -i HEAD~3 · text" "$(cl | head -4 | paste -sd'|')"
 check "clip: typing searches labels and text" "clip All · 1 of 10|* def parse_quick(s: str) -> Event: · block" "$(cl --keys "QUICK.match" | head -2 | paste -sd'|')"
 check "clip: Tab filters by kind" "clip Blocks · 3 of 10" "$(cl --keys "<tab><tab>" | head -1)"
+cm() { K4_CLIP_NOW=1793020000 "$K4" --clip --dump "$@" < ../clip/meta.txt 2>&1; }
+check "clip: the app; a secret masked, counting down, gone after 12 s" "clip All · 4 of 5|* •••••••••• · text · secret · from Bitwarden · expires in 7 s|  rgb(59, 130, 246) · text · 17 chars · 3 min · from firefox" "$(cm | head -3 | paste -sd'|')"
+check "clip: search never finds a secret" "clip All · 0 of 5" "$(cm --keys "hunt" | head -1)"
 check "clip: enter pastes, shift-enter copies" "paste	3|copy	3" "$( (cl --keys "<down><down><enter>"; cl --keys "<down><down><shift-enter>") | paste -sd'|')"
 check "clip: ctrl-enter on text pastes plain, on a block opens it" "plain	3|extra	2" "$( (cl --keys "<down><down><ctrl-enter>"; cl --keys "<down><ctrl-enter>") | paste -sd'|')"
 check "clip: alt-2 pastes the second unpinned one" "paste	5" "$(cl --keys "<alt-2>")"
