@@ -475,6 +475,13 @@ panel_meter :: proc(cv: ^Canvas, x, y, w, h: int, frac: f32, c, track: u32) {
 	fill_rect(cv, x, y, int(f32(w) * clamp(frac, 0, 1)), h, argb(c, 0xff))
 }
 
+// A dashed outline (a placeholder: a note that is not a card, a picture not there yet).
+panel_dashed :: proc(cv: ^Canvas, x, y, w, h, S: int, c: u32) {
+	d, g := 4 * S, 3 * S
+	for xx := x; xx < x + w; xx += d + g { fill_rect(cv, xx, y, min(d, x + w - xx), S, c); fill_rect(cv, xx, y + h - S, min(d, x + w - xx), S, c) }
+	for yy := y; yy < y + h; yy += d + g { fill_rect(cv, x, yy, S, min(d, y + h - yy), c); fill_rect(cv, x + w - S, yy, S, min(d, y + h - yy), c) }
+}
+
 // The count tag (the Kestrel design's chat badge): 11 px tall, at least as wide, 9 px bold
 // digits in the surface colour, a 2 px ring of the surface around it; 99+ at most.
 count_label :: proc(n: int) -> string { return n > 99 ? "99+" : fmt.tprint(n) }

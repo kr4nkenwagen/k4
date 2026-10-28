@@ -1,0 +1,8 @@
+S	ok		2026.08.19	0.41.0
+F	ok	chromium	
+W	h1	Night bus through the old town	City Loops	1530	88000	@DIR@/thumb.png
+W	h2	Fixing a squeaky bottom bracket	Spoke & Rim	612	240000	
+W	h3	Ten minutes of rain on a tin roof	Quiet Hours	600	3100000	@DIR@/thumb.png
+W	h4	How lighthouses were lit	Coast Notes	1104	57000	
+W	h5	Making flatbread on a camp stove	Crumb	745	410000	@DIR@/thumb.png
+H	1793176400	a7	Sourdough without a scale	Crumb	1015	@DIR@/thumb.png	420

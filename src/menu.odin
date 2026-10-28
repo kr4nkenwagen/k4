@@ -63,7 +63,14 @@ import "logic"
 //   O pane                                            (after a P record) draw the page in the right pane,
 //                                                     next to the sections, instead of full width
 // A flags for them: mark=<glyph> markc=<tone> sub=<text> chip=<TEXT> chipc=<tone> metac=<tone>
-// thumb=<image> dim slow key=<letter> (shortcut mode), choice=<a>|<b>|<c> (the meta is the
+// thumb=<image> dim slow search (search finds it, the section never lists it) key=<letter> (shortcut mode),
+// and for search's rows: icon=<glyph> tag=<text> (instead of the section's), people=<n> (a group's
+// size, boxed), chat=dm|named|group (a chat: found by the words its name and find= start; a DM
+// named so ranks first, then a named group, then a group with someone so named; find= its members,
+// | between, an unnamed group's found member first in its name), always (shown after the rest
+// for any 2 letters or more: "Set up Messenger to search your chats"), words (found by the words
+// its name, find= and tag= start, not anywhere in them), min=<n> (only once n letters are typed),
+// rank=<n> (its place: an app the name starts with is 300, a chat 100–355; a YouTube video 90), choice=<a>|<b>|<c> (the meta is the
 // value: ← → steps it and runs R with K4_VALUE set). A section's static lines show until its
 // loader's output replaces them (a skeleton, or the last fetch). The action id k4:retry restarts
 // the open section's loader. S takes a 7th field of flags: dim, group=<heading>.
@@ -85,6 +92,11 @@ Action :: struct {
 	mark, markc, sub, chip, chipc, metac, thumb, key: string,
 	find: string, // more words the filter matches (an emoji's keywords), not shown
 	dim, slow: bool,
+	search: bool, // only search finds it (a conversation in an integration's page): never listed
+	always: bool, // search shows it for anything (2 letters or more), after the rest
+	icon, tag, people, chat: string, // a search row's own glyph and tag, a group's size, a chat's kind
+	words: bool, // search matches word starts only
+	min_q, rank: int, // search: letters needed first (0: any), its score (0: the usual)
 	toggle, on: bool, // toggle=on|off: drawn as a switch; Space or Enter flips it
 	choices: []string,
 	// notice: label = title, meta = body, tone; card: glyph, state, label = title, meta = line,
@@ -390,6 +402,15 @@ action_from :: proc(f: []string) -> Action {
 		case flag == "dim": a.dim = true
 		case strings.has_prefix(flag, "toggle="): a.toggle, a.stay, a.on = true, true, flag[7:] == "on"
 		case flag == "slow": a.slow = true
+		case flag == "search": a.search = true
+		case flag == "always": a.always = true
+		case strings.has_prefix(flag, "icon="): a.icon = strings.clone(flag[5:])
+		case strings.has_prefix(flag, "tag="): a.tag = strings.clone(flag[4:])
+		case strings.has_prefix(flag, "people="): a.people = strings.clone(flag[7:])
+		case strings.has_prefix(flag, "chat="): a.chat = strings.clone(flag[5:])
+		case flag == "words": a.words = true
+		case strings.has_prefix(flag, "min="): a.min_q, _ = strconv.parse_int(flag[4:])
+		case strings.has_prefix(flag, "rank="): a.rank, _ = strconv.parse_int(flag[5:])
 		case strings.has_prefix(flag, "find="): a.find = strings.clone(flag[5:])
 		case strings.has_prefix(flag, "mark="): a.mark = strings.clone(flag[5:])
 		case strings.has_prefix(flag, "markc="): a.markc = strings.clone(flag[6:])
@@ -755,6 +776,7 @@ menu_refilter :: proc(a: ^App) {
 		slow := section_slow(m, s)
 		for act, i in s.actions {
 			if act.slow && !slow do continue
+			if act.search && !filter do continue
 			if filter && (act.heading || !(has_fold(act.label, q) || (act.find != "" && has_fold(act.find, q)))) do continue
 			append(&m.shown_actions, i)
 			if !act.heading do append(&m.sel_actions, i)
@@ -778,6 +800,7 @@ menu_search :: proc(m: ^Menu, q: string) {
 	seen := make(map[string]bool, 16, context.temp_allocator) // > lists a setting shown in two sections once
 	Scored :: struct { r: Result, score: int }
 	items := make([dynamic]Scored, 0, 64, context.temp_allocator)
+	always := make([dynamic]Result, 0, 2, context.temp_allocator)
 	ql := strings.to_lower(q, context.temp_allocator)
 	for s, si in m.sections {
 		if s.kind != .Section do continue
@@ -790,9 +813,35 @@ menu_search :: proc(m: ^Menu, q: string) {
 				if act.id in seen do continue
 				seen[act.id] = true
 			}
+			if act.always { if !m.settings do append(&always, Result{si, ai}); continue }
+			if act.chat != "" { // a chat: every word starts a word of its name or its members'
+				if m.settings do continue
+				ok := true
+				for t in toks do if !word_start(act.label, t) && !word_start(act.find, t) && !strings.has_prefix(s.name, t) { ok = false; break }
+				if !ok do continue
+				// people first when a name is typed: a DM so named, a named group, a group with them in it
+				score := 100
+				switch {
+				case act.chat == "dm" && word_start(act.label, ql): score = 350
+				case act.chat == "named" && word_start(act.label, ql): score = 260
+				case word_start(act.find, ql) || word_start(act.label, ql): score = 220
+				}
+				if act.chip != "" do score += 5
+				append(&items, Scored{Result{si, ai}, score})
+				continue
+			}
+			if act.min_q > 0 && len(strings.trim_space(q)) < act.min_q do continue
+			if act.words { // every word starts a word of its name, find= or tag=
+				if m.settings do continue
+				ok := true
+				for t in toks do if !word_start(act.label, t) && !word_start(act.find, t) && !word_start(act.tag, t) { ok = false; break }
+				if !ok do continue
+				append(&items, Scored{Result{si, ai}, act.rank})
+				continue
+			}
 			text := strings.to_lower(strings.concatenate({act.label, " ", hdr, " ", s.name}, context.temp_allocator), context.temp_allocator)
 			if !all_in(text, toks) do continue
-			score := (strings.has_prefix(strings.to_lower(act.label, context.temp_allocator), ql) ? 2 : 0) + (act.app ? 1 : 0)
+			score := act.rank != 0 ? act.rank : (strings.has_prefix(strings.to_lower(act.label, context.temp_allocator), ql) ? 200 : 0) + (act.app ? 100 : 0)
 			append(&items, Scored{Result{si, ai}, score})
 		}
 	}
@@ -803,6 +852,7 @@ menu_search :: proc(m: ^Menu, q: string) {
 	}
 	for it in items { if len(m.results) >= 60 do break; append(&m.results, it.r) }
 	if m.settings || len(strings.trim_space(q)) < 2 do return
+	for r in always do append(&m.results, r)
 	// the files the last lookup found that still hold every word, after everything else
 	n := 0
 	for f, i in m.files {
@@ -812,6 +862,31 @@ menu_search :: proc(m: ^Menu, q: string) {
 		append(&m.results, Result{FILE_SEC, i})
 		n += 1
 	}
+}
+
+// The words of s (split at spaces, commas and |) include one starting with t (lower case).
+@(private)
+word_start :: proc(s, t: string) -> bool {
+	if t == "" do return true
+	rest := strings.to_lower(s, context.temp_allocator)
+	for w in strings.split_multi_iterate(&rest, {" ", ",", "|"}) do if strings.has_prefix(w, t) do return true
+	return false
+}
+
+// A search row's name: an unnamed group's with the member found first ("Anna Berg, Maja Holm +2").
+@(private)
+result_label :: proc(act: Action, q: string) -> string {
+	if act.chat != "group" || act.find == "" do return act.label
+	ql := strings.to_lower(strings.trim_space(q), context.temp_allocator)
+	members := strings.split(act.find, "|", context.temp_allocator)
+	hit := -1
+	for x, i in members do if word_start(x, ql) { hit = i; break }
+	if hit <= 0 do return act.label
+	order := make([dynamic]string, 0, len(members), context.temp_allocator)
+	append(&order, members[hit])
+	for x, i in members do if i != hit do append(&order, x)
+	if len(order) <= 3 do return strings.join(order[:], ", ", context.temp_allocator)
+	return fmt.tprintf("%s +%d", strings.join(order[:3], ", ", context.temp_allocator), len(order) - 3)
 }
 
 // The Files group: once typing has settled for 150 ms, a lookup for the query's first word (the
@@ -2616,7 +2691,7 @@ draw_results :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		lc, mc, tc := fgb, dim, acc
 		if on { fill_rect(cv, x0, py, bw, rh, argb(acc, 0xff)); mark_sel(a, x0, py, bw, rh); lc, mc, tc = bg, bg, bg }
 		if n < 9 { // ⌃1–9 runs it: the number left of the tag
-			tg := r.sec == FILE_SEC ? "file" : (r.act >= 0 ? m.sections[r.sec].name : "section")
+			tg := r.sec == FILE_SEC ? "file" : (r.act >= 0 ? (m.sections[r.sec].actions[r.act].tag != "" ? m.sections[r.sec].actions[r.act].tag : m.sections[r.sec].name) : "section")
 			kn := fmt.tprintf("^%d", n + 1)
 			text_in(cv, m.f_tiny, kn, x1 - 20 * S - tw(m.f_tiny, tg) - 8 * S - tw(m.f_tiny, kn), py, rh, argb(on ? bg : mix(bg, dim, 0.6), 0xff))
 		}
@@ -2638,14 +2713,16 @@ draw_results :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 			continue
 		}
 		sec := m.sections[r.sec]
-		label, meta, tag := sec.name, "", "section"
+		label, meta, tag, icon, people, chip := sec.name, "", "section", sec.icon, "", ""
 		if r.act >= 0 {
 			act := sec.actions[r.act]
-			label, meta, tag = act.label, act.meta, sec.name
+			label, meta, tag = result_label(act, q_of(a)), act.meta, act.tag != "" ? act.tag : sec.name
+			if act.icon != "" do icon = act.icon
+			if act.search do people, chip = act.people, act.chip // a chat's size and unread count
 			if meta == "" && act.confirm_title != "" do meta = "asks first"
 		}
 		x := x0 + 20 * S
-		if sec.icon != "" do text_in(cv, m.f_row, sec.icon, x, py, rh, argb(lc, 0xff))
+		if icon != "" do text_in(cv, m.f_row, icon, x, py, rh, argb(lc, 0xff))
 		x += 15 * S + 12 * S
 		tag_x := x1 - 20 * S - 90 * S
 		text_in(cv, m.f_tiny, tag, x1 - 20 * S - tw(m.f_tiny, tag), py, rh, argb(tc, 0xff))
@@ -2658,9 +2735,25 @@ draw_results :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		}
 		sw := 0
 		if r.act >= 0 && sec.actions[r.act].toggle do sw = draw_switch(a, cv, S, tag_x - 12 * S, py, rh, sec.actions[r.act].on, on) + 12 * S
-		mw := meta != "" ? tw(m.f_small, meta) : 0
-		if mw > 0 do text_in(cv, m.f_small, meta, tag_x - 12 * S - sw - mw, py, rh, argb(mc, 0xff))
-		text_in(cv, m.f_row, label, x, py, rh, argb(lc, 0xff), tag_x - 12 * S - sw - mw - (mw > 0 ? 12 * S : 0))
+		mw := meta != "" ? min(tw(m.f_small, meta), (tag_x - x) * 44 / 100) : 0
+		if mw > 0 do text_in(cv, m.f_small, ellipsize(m.f_small, meta, mw), tag_x - 12 * S - sw - mw, py, rh, argb(mc, 0xff))
+		// after the name: a group's size (boxed) and the unread count
+		pw := people != "" ? tw(m.f_tiny, people) + 8 * S : 0
+		cw := chip != "" ? max(11 * S, tw(m.f_tiny, chip) + 6 * S) : 0
+		extra := (pw > 0 ? pw + 12 * S : 0) + (cw > 0 ? cw + 12 * S : 0)
+		lend := tag_x - 12 * S - sw - mw - (mw > 0 ? 12 * S : 0) - extra
+		lt := ellipsize(m.f_row, label, lend - x)
+		text_in(cv, m.f_row, lt, x, py, rh, argb(lc, 0xff), lend)
+		ex := x + tw(m.f_row, lt) + 12 * S
+		if pw > 0 {
+			rounded_rect(cv, ex, py + (rh - 15 * S) / 2, pw, 15 * S, 0, 0, f32(S), argb(on ? bg : mix(bg, dim, 0.45), 0xff))
+			text_in(cv, m.f_tiny, people, ex + 4 * S, py + (rh - 15 * S) / 2, 15 * S, argb(mc, 0xff))
+			ex += pw + 12 * S
+		}
+		if cw > 0 {
+			fill_rect(cv, ex, py + (rh - 11 * S) / 2, cw, 11 * S, argb(on ? bg : acc, 0xff))
+			text_in(cv, m.f_tiny, chip, ex + (cw - tw(m.f_tiny, chip)) / 2, py + (rh - 11 * S) / 2, 11 * S, argb(on ? acc : bg, 0xff))
+		}
 		py += rh
 	}
 }
@@ -3161,8 +3254,11 @@ menu_dump :: proc(a: ^App) -> string {
 			for r, i in m.results {
 				if r.sec == FILE_SEC { fmt.sbprintfln(&b, "%s %s | file", i == m.si ? "*" : " ", m.files[r.act]); continue }
 				sec := m.sections[r.sec]
-				label := r.act >= 0 ? sec.actions[r.act].label : sec.name
-				fmt.sbprintfln(&b, "%s %s | %s", i == m.si ? "*" : " ", label, r.act >= 0 ? sec.name : "section")
+				label := r.act >= 0 ? result_label(sec.actions[r.act], q_of(a)) : sec.name
+				tag := r.act >= 0 ? (sec.actions[r.act].tag != "" ? sec.actions[r.act].tag : sec.name) : "section"
+				if r.act >= 0 && sec.actions[r.act].people != "" do label = fmt.tprintf("%s [%s]", label, sec.actions[r.act].people)
+				if r.act >= 0 && sec.actions[r.act].search && sec.actions[r.act].chip != "" do label = fmt.tprintf("%s (%s)", label, sec.actions[r.act].chip)
+				fmt.sbprintfln(&b, "%s %s | %s", i == m.si ? "*" : " ", label, tag)
 			}
 		} else {
 			group := ""

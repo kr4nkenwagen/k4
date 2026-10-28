@@ -35,6 +35,9 @@ A	waybar	Waybar			toggle=on
 A	mute	Mute output	off		toggle=off
 A	night	Night light			toggle=off
 A	firefox	Firefox			slider=120;max=150;step=5;toggle=off;mark=󰕾
+A	zephyr	Zephyr chat	Messenger		search
+A	sat	Maja Holm, Annika Lund	See you Saturday		search;tag=Messenger;chat=group;find=Maja Holm|Annika Lund;people=3
+A	annika	Annika Lund	Leaving at six		search;tag=Messenger;chat=dm;chip=2
 S	wx	Weather	W	Forecast	x
 O	weather
 WN	Stockholm	automatic location	part	6°	Partly cloudy	Feels 3° · H 9° L 5°

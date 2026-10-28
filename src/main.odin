@@ -35,7 +35,7 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --compact               menu mode: the opened page alone in the popup frame (420 px, no
                           sections or search; ⌃↵ prints launcher:ID for the full launcher)
   --bar                   the status bar (modules on stdin; format in bar.odin)
-  --osd SPEC              the on-screen display for 1.2 s; a second call updates it (osd.odin)
+  --osd SPEC              the on-screen display (1.5 s; media 2.5 s); a second call updates it (osd.odin)
   --overview              every workspace and its windows at once (Super+Tab; overview.odin)
   --power                 the system menu: lock, suspend, … shut down (Super+Esc; tiles on stdin, power.odin)
   --notifyd               the notification service: popups, history, do not disturb (notifyd.odin)
@@ -43,6 +43,7 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --notify-ctl CMD        a command to the service: list status counts clear dnd on|off|toggle … (prints its reply)
   --send-ctl CMD          a command to k4-localsend's service (its ctl, arguments tab-separated; prints its reply)
   --messenger             Facebook Messenger: conversations, messages, writing (k4-messenger data, messenger.odin)
+  --youtube               YouTube: search, results as a grid, the queue, history; plays in a corner (k4-youtube data, youtube.odin)
   --clip                  the clipboard history: search, preview, paste (Super+Ctrl+V; entries on stdin, clip.odin)
   --tray                  the system tray's apps and their menus (Super+.; k4-tray list on stdin, tray.odin)
   --perf                  performance, processes and utilities (Super+Shift+Esc; utilities on stdin, perf.odin)
@@ -161,6 +162,7 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--notify-ctl": o.notify_ctl = value(args, &i, inline, has_inline)
 		case "--send-ctl": o.send_ctl = value(args, &i, inline, has_inline)
 		case "--messenger": o.messenger = true
+		case "--youtube": o.youtube = true
 		case "--osd": o.osd = value(args, &i, inline, has_inline)
 		case "--config": _ = value(args, &i, inline, has_inline)
 		case "--dry-run": o.dry_run = value(args, &i, inline, has_inline)
@@ -242,6 +244,9 @@ main :: proc() {
 	} else if opts.messenger { // a panel mode too (its own branch: the list above changes often)
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		messenger_setup(a, string(data))
+	} else if opts.youtube {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		youtube_setup(a, string(data))
 	} else if opts.pass || opts.keyring || opts.media || opts.drives || opts.snap || opts.bus || opts.claude {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		switch {
@@ -277,13 +282,15 @@ main :: proc() {
 		a.osd = new(Osd)
 		osd_set(a.osd, opts.osd)
 		a.osd.sock = -1
-		a.osd_font = font_sized(&a.font, 13)
-		a.osd_bold = a.osd_font
-		if bold, ok := bold_font(a, 13); ok do a.osd_bold = bold
-		a.osd_icon = font_sized(&a.font, 18)
-		a.osd_small = font_sized(&a.font, 10)
-		append(&a.fonts, a.osd_font, a.osd_bold, a.osd_icon, a.osd_small)
-		a.width, a.height = 300, 48
+		a.osd_font = font_sized(&a.font, 11)
+		a.osd_icon = font_sized(&a.font, 20)
+		a.osd_glyph = font_sized(&a.font, 16)
+		a.osd_bold, a.osd_chip, a.osd_big = font_sized(&a.font, 13), font_sized(&a.font, 11), font_sized(&a.font, 20)
+		if b, ok := bold_font(a, 13); ok do a.osd_bold = b
+		if b, ok := bold_font(a, 11); ok do a.osd_chip = b
+		if b, ok := bold_font(a, 20); ok do a.osd_big = b
+		append(&a.fonts, a.osd_font, a.osd_icon, a.osd_glyph, a.osd_bold, a.osd_chip, a.osd_big)
+		a.width, a.height = OSD_W, OSD_H
 	} else if opts.bar {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		bar_setup(a, string(data))
@@ -373,7 +380,7 @@ main :: proc() {
 		if opts.dump && a.displays != nil && !a.done do fmt.print(displays_dump(a))
 		if opts.dump && a.pn != nil && !a.done do fmt.print(a.pn.mode.dump(a))
 		if a.nd != nil do a.exit = 0
-		if opts.dump && a.osd != nil do fmt.printfln("osd %s %d/%d %s %s", a.osd.icon, a.osd.pct, a.osd.vmax, a.osd.value, a.osd.label)
+		if opts.dump && a.osd != nil do fmt.println(osd_dump(a.osd))
 		if app_plain(a) && !a.done do app_accept(a)
 		if (a.menu != nil || a.bar != nil || a.ov != nil || a.pw != nil || a.nc != nil || a.clip != nil || a.tray != nil || a.perf != nil || a.send != nil || a.ssh != nil || a.router != nil || a.displays != nil || a.pn != nil) && !a.done do a.exit = 1
 		if a.osd != nil do a.exit = 0

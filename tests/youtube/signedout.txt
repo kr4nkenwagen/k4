@@ -1,0 +1,3 @@
+S	ok		2026.08.19	0.41.0
+F	signedout	chromium	
+H	1793176400	a7	Sourdough without a scale	Crumb	1015	@DIR@/thumb.png	420

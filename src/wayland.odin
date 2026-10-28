@@ -552,7 +552,7 @@ run_wayland :: proc(a: ^App) -> bool {
 		W.width, W.height = a.width, a.height
 		wlr.layer_surface_v1_set_size(W.layer, u32(a.width), u32(a.height))
 		wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor(BOTTOM))
-		wlr.layer_surface_v1_set_margin(W.layer, 0, 0, 28, 0) // above a bottom bar too (exclusive zone 0 keeps clear of it)
+		wlr.layer_surface_v1_set_margin(W.layer, 0, 0, 64, 0) // 64 px up (exclusive zone 0 keeps it clear of a bottom bar too)
 		r := wl.compositor_create_region(W.compositor)
 		wl.surface_set_input_region(W.surface, r)
 		wl.region_destroy(r)
@@ -628,7 +628,7 @@ run_wayland :: proc(a: ^App) -> bool {
 		if a.ssh != nil do tick = a.ssh.check.running ? 100 : 500 // the connect steps, the data in the background
 		if a.router != nil do tick = 500                    // the data every 3 s, the reboot count
 		if a.pn != nil do tick = panel_tick_ms(a)           // the script's runs and loads, the refresh
-		if a.osd != nil {                                   // the feedback box: gone after 1.2 s
+		if a.osd != nil {                                   // the feedback box: gone after its hold
 			left := osd_left(a.osd)
 			if left == 0 { a.done = true; break }
 			tick = left

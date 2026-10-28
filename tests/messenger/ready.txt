@@ -1,0 +1,20 @@
+S	ok	8	Jon Jennemann	
+E	15
+C	!anna	Anna Berg	2	1793179880		Are you coming tonight?	0	0	1	Anna Berg
+C	!climb	Climbing club	5	1793179400	Anna Berg	Wall is booked	1	0	1	Anna Berg|Erik Lind|Omar Said|Lisa Wik|Jonas Ek|Maja Holm|Sofia Nyberg|Mamma
+C	!mamma	Mamma	1	1793100000		[photo]	0	0	1	Mamma
+C	!sat	Maja Holm, Anna Berg, Sofia Nyberg +1	0	1793176400	Maja Holm	See you Saturday	1	0	0	Maja Holm|Anna Berg|Sofia Nyberg|Jonas Ek
+C	!erik	Erik Lind	0	1793169200		Thanks!	0	1	1	Erik Lind
+C	!ae	Anna Berg, Erik Lind	0	1793090000		Thanks!	1	1	0	Anna Berg|Erik Lind
+C	!jonas	Jonas Ek	0	1792900000		[voice message]	0	0	1	Jonas Ek
+C	!book	Book club	0	1792800000	Lisa Wik	https://www.goodreads.com/book/show/58613424	1	0	1	Lisa Wik|Omar Said|Sofia Nyberg|Anna Berg|Maja Holm
+C	!lisa	Lisa Wik	0	1792000000		Sounds good	0	1	1	Lisa Wik
+C	!omar	Omar Said	0	1791000000		[sticker]	0	0	1	Omar Said
+O	!sat
+M	$1	1793169120	Maja Holm	0	text	Saturday 10:00 at Klätterverket?
+M	$2	1793169130	Maja Holm	0	text	I can bring the rope
+M	$3	1793169600	Anna Berg	0	text	Yes! Sofia is driving
+M	$4	1793170260	you	1	text	Count me in
+M	$5	1793172120	Sofia Nyberg	0	text	Leaving 9:30 from Teleborg, the car has room for four and all the gear if someone brings the big crash pad
+M	$6	1793172130	Sofia Nyberg	0	image	[photo]	@DIR@/photo.png
+M	$7	1793176400	Maja Holm	0	text	See you Saturday

@@ -44,6 +44,7 @@ Options :: struct {
 	notify_ctl:    string, // --notify-ctl CMD
 	send_ctl:      string, // --send-ctl CMD
 	messenger:     bool,   // --messenger
+	youtube:       bool,   // --youtube
 	clip:          bool,   // --clip
 	tray:          bool,   // --tray
 	perf:          bool,   // --perf
@@ -104,7 +105,7 @@ App :: struct {
 	displays: ^Displays, // --displays: screens to drag into place (displays.odin)
 	pn:       ^Panel, // --pass --keyring --media --drives --snap: a script-fed window (panel.odin)
 	shift:    bool, // Shift is held (the key being handled)
-	osd_font, osd_bold, osd_icon, osd_small: ^Font,
+	osd_font, osd_bold, osd_icon, osd_chip, osd_big, osd_glyph: ^Font, // the OSD's 11, 13 bold, icon, 11 bold, 20 bold, glyph
 	has_icons: bool,
 	// layout in logical pixels
 	pad, row_h, prompt_h, icon_px, gap, width, height, shown: int,
@@ -157,8 +158,8 @@ icon_get :: proc(a: ^App, path: string, size: int) -> ^Icon { return image_scale
 image_cover :: proc(a: ^App, path: string, w, h: int) -> ^Icon { return image_scaled(a, path, w, h, true) }
 
 @(private)
-image_scaled :: proc(a: ^App, path: string, tw, th: int, cover: bool) -> ^Icon {
-	key := fmt.tprintf("%d:%d:%v:%s", tw, th, cover, path)
+image_scaled :: proc(a: ^App, path: string, tw, th: int, cover: bool, max_scale: f32 = 0) -> ^Icon {
+	key := fmt.tprintf("%d:%d:%v:%v:%s", tw, th, cover, max_scale, path)
 	if ic, ok := &a.icons[key]; ok do return ic
 	a.icons[strings.clone(key)] = Icon{}
 	ic := &a.icons[key]
@@ -170,6 +171,7 @@ image_scaled :: proc(a: ^App, path: string, tw, th: int, cover: bool) -> ^Icon {
 	defer k4_free(data)
 	// fit inside (or cover) tw x th, box-filter downscale, premultiply
 	s := cover ? max(f32(tw) / f32(w), f32(th) / f32(h)) : min(f32(tw) / f32(w), f32(th) / f32(h))
+	if max_scale > 0 do s = min(s, max_scale) // (a small picture is not blown up)
 	ow, oh := max(int(f32(w) * s), 1), max(int(f32(h) * s), 1)
 	ox0, oy0 := 0, 0
 	if cover { ox0, oy0 = (ow - tw) / 2, (oh - th) / 2; ow, oh = tw, th }

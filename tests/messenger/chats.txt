@@ -1,7 +1,7 @@
 S	ok	3	Jon Jennemann	
-C	!anna	Anna Berg	2	1793179880		Lunch at 12?	0	0
-C	!fam	Family	1	1793176400	Mum Jennemann	Dinner on Sunday, bring the kids	1	0
-C	!jonas	Jonas Lind	0	1793090000		see you tomorrow	0	1
+C	!anna	Anna Berg	2	1793179880		Lunch at 12?	0	0	1	Anna Berg
+C	!fam	Family	1	1793176400	Mum Jennemann	Dinner on Sunday, bring the kids	1	0	1	Mum Jennemann|Dad Jennemann
+C	!jonas	Jonas Lind	0	1793090000		see you tomorrow	0	1	1	Jonas Lind
 O	!anna
 M	$1	1793089500	Anna Berg	0	text	Hej! Are you around today?
 M	$2	1793089600	you	1	text	Yes, working from home until 4

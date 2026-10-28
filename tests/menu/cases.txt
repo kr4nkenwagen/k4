@@ -33,6 +33,9 @@ toggles	tog	-
 toggle_space	tog	 
 toggle_enter	tog	<down><enter>
 toggle_space_filters	tog	night l
+search_only_row	-	zephyr
+search_only_filter	tog	zeph
+search_chats	-	annika
 toggle_now	tog	<down><down> 	K4_DRY_NOWAIT=keys|K4_SLOW_MS=1
 stream_slider	tog	<down><down><down><right><right>
 stream_slider_cap	tog	<down><down><down><right><right><right><right><right><right><right>

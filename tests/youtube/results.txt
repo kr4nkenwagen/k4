@@ -1,0 +1,13 @@
+S	ok		2026.08.19	0.41.0
+Q	focus music	9
+V	a1	Rainy night jazz for focus	Café Sounds	5400	1200000	@DIR@/thumb.png
+V	a2	Learn Odin in one hour	Ginger Codes	3721	48000	@DIR@/thumb.png
+V	a3	Live: harbour webcam	Port Cam	0	900	
+V	a4	Ten knots every climber should know	Rope Lab	842	350000	@DIR@/thumb.png
+V	a5	Building a bike wheel from scratch	Spoke & Rim	1930	72000	@DIR@/thumb.png
+V	a6	Synth pads, the easy way	Patch Notes	612	15000	
+V	a7	Sourdough without a scale	Crumb	1015	2100000	@DIR@/thumb.png
+V	a8	How trains find their way	Rail Notes	1288	640000	@DIR@/thumb.png
+V	a9	A very long title that goes on and on about nothing in particular just to see how it wraps	Long Talk	61	10	
+H	1793176400	a7	Sourdough without a scale	Crumb	1015	@DIR@/thumb.png	420
+H	1793090000	a2	Learn Odin in one hour	Ginger Codes	3721		3721
