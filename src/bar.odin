@@ -39,7 +39,8 @@ import "logic"
 //      K4_BAR_POS (top|bottom) and K4_BAR_H, and the module runs again right after. While a
 //      click's command runs the module is drawn open, so a popup's module stays an accent block.
 //      flags (k=v;…): px=N (inner padding, default 7), maxw=N / maxw2=N (text caps),
-//      compact (text hidden below 1440 px), slim (only the first text hidden below 1440 px), flash (the wheel shows the percentage for 1.2 s),
+//      compact (text hidden below 1440 px), slim (only the first text hidden below 1440 px), wide (the
+//      whole module hidden below 1440 px), flash (the wheel shows the percentage for 1.2 s),
 //      tip=TEXT (a tooltip for modules that print none), next=PATH (the clock: a meeting from
 //      that TSV of today's "start end title video" replaces the date: "Review in 8 min" in
 //      yellow 10 min before, "Review · j join" in the accent while it runs).
@@ -55,7 +56,7 @@ Module :: struct {
 	interval: f64,
 	on: [5]string, // left right middle up down
 	px, maxw, maxw2: int, // flags
-	compact, slim, flash: bool,
+	compact, slim, wide, flash: bool,
 	tip: string, // flags' tip=: the tooltip when the module prints none
 	next_file: string, // clock flag next=PATH: today's meetings (start end title video, TSV)
 	// what it shows
@@ -149,6 +150,7 @@ bar_setup :: proc(a: ^App, data: string) {
 				case "maxw2": m.maxw2 = n
 				case "compact": m.compact = true
 				case "slim": m.slim = true
+				case "wide": m.wide = true
 				case "flash": m.flash = true
 				case "tip": m.tip = strings.clone(v)
 				case "next":
@@ -497,6 +499,7 @@ mod_chip :: proc(a: ^App, i: int, S: int, narrow: bool) -> (c: Chip, shown: bool
 	flashing := m.flash && m.flash_until != {} && time.tick_diff(time.tick_now(), m.flash_until) > 0 && m.pct >= 0
 	if narrow && m.compact do c.text, c.text2 = "", ""
 	if narrow && m.slim do c.text = ""
+	if narrow && m.wide do return c, false
 	if c.icon == "" && c.text == "" && c.text2 == "" && c.battery < 0 do return c, false
 	fg := t.fg
 	#partial switch st {

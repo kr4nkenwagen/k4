@@ -161,6 +161,7 @@ check "router: unreachable, r retries" "toast (retry)" "$(sed 's/^G\tok/G\tunrea
 bu() { K4_BUS_NOW=1793100000 "$K4" --bus --dump "$@" 2>&1; }
 check "bus: soonest first; now, late, train, cancelled with the next one, timetable" "* 3 Teleborg · 4 min · Läge B|  1 Hov · 9 min · +3 late · Läge A|  KT Kalmar C · 11 min · Spår 2|  4 Araby · cancelled · next: 4 at 14:30 · Läge C|  7 Sandsbro · 17 min · timetable · Läge D" "$(bu < ../bus/departures.txt | sed -n 2,6p | paste -sd'|')"
 check "bus: g groups by platform" "bus ok · Departures · Växjö Resecentrum · grouped|  [Läge B]" "$(bu --keys "g" < ../bus/departures.txt | head -2 | paste -sd'|')"
+check "bus: g groups by direction where the stop has no platforms" "  [→ Teleborg]|* 3 Teleborg · 4 min|  [→ Hov]" "$(bu --keys "g" < <(awk -F'\t' 'BEGIN{OFS="\t"} $1=="D"{$9=""}1' ../bus/departures.txt) | sed -n 2,4p | paste -sd'|')"
 check "bus: enter sets a reminder; a cancelled one says what runs" "toast (remind 3 Teleborg 1793100240)|toast Line 4 at 14:15 is cancelled · next 4 at 14:30" "$( (bu --keys "<enter>" < ../bus/departures.txt | grep '^toast'; bu --keys "<down><down><down><enter>" < ../bus/departures.txt | grep '^toast') | paste -sd'|')"
 check "bus: nothing in the hour names the one after" "empty · next line 7 at 15:18" "$(bu < ../bus/empty.txt | tail -1)"
 check "bus: s picks a stop, the recent ones first" "bus ok · Pick · Växjö Resecentrum|* Växjö Resecentrum · recent" "$(bu --keys "s" < ../bus/departures.txt | head -2 | paste -sd'|')"

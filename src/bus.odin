@@ -12,7 +12,7 @@ import "core:unicode/utf8"
 // A row: the mode's glyph, the line in a box (accent for buses, yellow for trains, red when
 // cancelled), the destination, the time (the planned one struck through when it moved) and the
 // platform, and the minutes left with a tag under them (+3 late, timetable, next: 3 at 14:20).
-// ↵ sets a reminder 5 min before it leaves, g groups by platform, s picks another stop (typing
+// ↵ sets a reminder 5 min before it leaves, g groups by platform (direction where there are none), s picks another stop (typing
 // searches, the last 5 when empty, ↵ uses it), r loads again, Esc closes. Without a Trafiklab key
 // it asks for one (pasted here, kept in the keyring). The data comes from k4-bus (panel lines R
 // and L, panel.odin), again every 30 s while open:
@@ -127,7 +127,11 @@ bus_tick :: proc(a: ^App) -> int {
 	return b.view == .Departures ? 1000 : -1 // the minutes and "updated N s ago" move
 }
 
-// The departures in the order shown: soonest first, or by platform (g).
+// The group a departure belongs to with g: its platform, or its direction where the stop has no platforms.
+@(private = "file")
+bus_group :: proc(d: Bus_Dep) -> string { return d.platform != "" ? d.platform : strings.concatenate({"→ ", d.dest}, context.temp_allocator) }
+
+// The departures in the order shown: soonest first, or by platform or direction (g).
 @(private = "file")
 bus_order :: proc(b: ^Bus) -> []int {
 	out := make([dynamic]int, 0, len(b.deps), context.temp_allocator)
@@ -135,10 +139,10 @@ bus_order :: proc(b: ^Bus) -> []int {
 	plats := make([dynamic]string, 0, 8, context.temp_allocator)
 	for d in b.deps {
 		seen := false
-		for p in plats do if p == d.platform do seen = true
-		if !seen do append(&plats, d.platform)
+		for p in plats do if p == bus_group(d) do seen = true
+		if !seen do append(&plats, bus_group(d))
 	}
-	for p in plats do for d, i in b.deps do if d.platform == p do append(&out, i)
+	for p in plats do for d, i in b.deps do if bus_group(d) == p do append(&out, i)
 	return out[:]
 }
 
@@ -208,7 +212,7 @@ bus_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> boo
 		case text == "s": bus_pick_view(b)
 		case text == "g":
 			b.grouped, b.cur = !b.grouped, 0
-			panel_say(&b.pn, b.grouped ? "Grouped by platform" : "Soonest first")
+			panel_say(&b.pn, b.grouped ? "Grouped by platform or direction" : "Soonest first")
 		case text == "r": panel_say(&b.pn, ""); panel_run(a, "refresh")
 		case k == .Escape: panel_close(a)
 		case: return false
@@ -396,16 +400,16 @@ bus_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 		plat := "\x00"
 		for di, i in order {
 			d := b.deps[di]
-			if b.grouped && d.platform != plat { // a heading per platform: its destinations
-				plat = d.platform
+			if b.grouped && bus_group(d) != plat { // a heading per platform (or direction): its destinations
+				plat = bus_group(d)
 				dests := make([dynamic]string, 0, 4, context.temp_allocator)
-				for x in b.deps do if x.platform == plat {
+				for x in b.deps do if bus_group(x) == plat {
 					seen := false
 					for e in dests do if e == x.dest do seen = true
 					if !seen do append(&dests, x.dest)
 				}
 				if y + 22 * S > fy - 4 * S do break
-				panel_group(a, cv, S, 16 * S, y + 8 * S, int(b.f10b.line_h), H, strings.to_upper(plat != "" ? plat : "OTHER", context.temp_allocator), strings.join(dests[:], " · ", context.temp_allocator))
+				panel_group(a, cv, S, 16 * S, y + 8 * S, int(b.f10b.line_h), H, strings.to_upper(plat, context.temp_allocator), strings.join(dests[:], " · ", context.temp_allocator))
 				y += 8 * S + int(b.f10b.line_h) + 4 * S
 			}
 			rh := 44 * S
@@ -476,7 +480,7 @@ bus_dump :: proc(a: ^App) -> string {
 		plat := "\x00"
 		for di, i in bus_order(b) {
 			d := b.deps[di]
-			if b.grouped && d.platform != plat { plat = d.platform; fmt.sbprintfln(&sb, "  [%s]", plat) }
+			if b.grouped && bus_group(d) != plat { plat = bus_group(d); fmt.sbprintfln(&sb, "  [%s]", plat) }
 			ms, _ := bus_mins(d, now)
 			tag := ""
 			switch {
