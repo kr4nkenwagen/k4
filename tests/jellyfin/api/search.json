@@ -1,0 +1,42 @@
+{
+ "Items": [
+  {
+   "Id": "c0000000000000000000000000000003",
+   "Type": "Movie",
+   "Name": "Static Bloom",
+   "ProductionYear": 2023,
+   "RunTimeTicks": 60600000000,
+   "UserData": {
+    "PlaybackPositionTicks": 0
+   },
+   "BackdropImageTags": [
+    "b"
+   ]
+  },
+  {
+   "Id": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+   "Type": "Series",
+   "Name": "Northern Static",
+   "ProductionYear": 2025,
+   "UserData": {
+    "UnplayedItemCount": 5
+   }
+  },
+  {
+   "Id": "e0000000000000000000000000000001",
+   "Type": "Episode",
+   "Name": "Static",
+   "SeriesName": "Northern Static",
+   "SeriesId": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+   "ParentIndexNumber": 1,
+   "IndexNumber": 1,
+   "RunTimeTicks": 30000000000,
+   "UserData": {
+    "PlaybackPositionTicks": 0
+   },
+   "ImageTags": {
+    "Primary": "x"
+   }
+  }
+ ]
+}

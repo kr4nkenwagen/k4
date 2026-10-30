@@ -1,0 +1,3 @@
+S	setup	0	kr4nkenhole	kr4nkenhole · found on the network
+N	0	0	0	0	0
+U	nossh	0	0	0	0	0

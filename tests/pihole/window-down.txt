@@ -1,0 +1,13 @@
+S	down	0	kr4nkenhole	no answer since 14:31 · retrying every minute
+N	18240	3362	18.4	9	14
+U	ok	24	71	88	3	864000
+Q	ads.tracker.example	1	ADLIST	phone	10:31:54	A
+Q	news.example.org	0	-	desktop	10:31:34	AAAA
+Q	metrics.tv.example	1	YOUR DENY	192.168.1.60	10:31:14	A
+C	desktop	7200
+C	phone	3100
+L	https://lists.example.net/hosts.txt	the default list	400000	1
+L	https://lists.example.net/extra.txt	lists.example.net/extra.txt	12377	0
+G	412377	3 d ago	1
+E	allow	exact	cdn.shop.example	-
+E	deny	exact	metrics.tv.example	-

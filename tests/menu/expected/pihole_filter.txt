@@ -1,0 +1,9 @@
+focus Sub
+crumb NETWORK › PI-HOLE
+query ads.trac
+count on
+hints ↑↓ Move · ↵ Run · allow · ⌃B Block · Del Remove · type Filter · ⌫ Back · Esc Close
+title Pi-hole · Pi-hole on kr4nkenhole · 18240 queries today · 18% blocked · 9 clients (full width)
+* ads.tracker.example | ↵ allows (mark ⊘, / phone.lan · 10:31:54 · adlist)
+exit 1
+log: load apps

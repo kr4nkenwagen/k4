@@ -935,6 +935,14 @@ menu_clock_rows :: proc(m: ^Menu, q: string) {
 				strings.clone("↵ adds it to Parcels"), fmt.aprintf("k4-parcels add %s", sh(num))})
 		}
 	}
+	for verb in ([2]string{"allow", "block"}) { // a domain on the Pi-hole (k4-pihole): "allow ads.example.com"
+		if !strings.has_prefix(ql, strings.concatenate({verb, " "}, context.temp_allocator)) do continue
+		d := strings.trim_space(strings.trim_space(q)[len(verb) + 1:])
+		if strings.contains(d, ".") && !strings.contains(d, " ") {
+			append(&m.clock_rows, [3]string{fmt.aprintf("%s %s on the Pi-hole", verb == "allow" ? "Allow" : "Block", d),
+				strings.clone(verb == "allow" ? "↵ adds it to the allow list" : "↵ adds it to the deny list"), fmt.aprintf("notify Pi-hole \"$(k4-pihole %s %s | head -1)\"", verb, sh(d))})
+		}
+	}
 	if strings.has_prefix(ql, "todo ") { // a todo (k4-todo, Google Tasks): "todo buy milk · fri"
 		text := strings.trim_space(strings.trim_space(q)[5:])
 		if len(text) > 0 {
@@ -956,7 +964,7 @@ result_group :: proc(m: ^Menu, r: Result) -> string {
 	case r.sec == FILE_SEC: return "Files"
 	case r.sec == CLOCK_SEC:
 		label := m.clock_rows[r.act][0]
-		return strings.has_prefix(label, "Track ") ? "Parcels" : strings.has_prefix(label, "Add a todo") ? "Todo" : "Clock"
+		return strings.has_prefix(label, "Track ") ? "Parcels" : strings.has_prefix(label, "Add a todo") ? "Todo" : strings.has_suffix(label, "on the Pi-hole") ? "Pi-hole" : "Clock"
 	case r.act < 0: return "Sections"
 	}
 	act := m.sections[r.sec].actions[r.act]

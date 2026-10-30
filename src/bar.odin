@@ -31,7 +31,9 @@ import "logic"
 //      you, dnd quiet, else the accent), "pill" (the same tag with a short text: "?", "!") and
 //      "outline" (true: an accent ring round the module, the visible-workspace look, for news),
 //      "box" (a short label in an outlined box after the icon: a bus line; "box_tone", default the
-//      accent) and "text2_bold".
+//      accent) and "text2_bold"; "shape" (a drawn line icon in place of the glyph: shield-on,
+//      shield-off, shield-broken, shield-unsafe; shapes.odin), "wash" (a faint tint of that tone
+//      behind it: a click's feedback) and "minw" (the least width in px: a countdown that must not jitter).
 //      An empty text, icon and battery hide the module. class critical/urgent: a red block;
 //      warning: yellow; dim/muted/off/disconnected/stale/empty: the dim colour.
 //      tone: the icon's colour unless the line names one (accent fg dim red orange yellow
@@ -46,6 +48,15 @@ import "logic"
 //      tip=TEXT (a tooltip for modules that print none), next=PATH (the clock: a meeting from
 //      that TSV of today's "start end title video" replaces the date: "Review in 8 min" in
 //      yellow 10 min before, "Review · j join" in the accent while it runs).
+//      group=NAME (its kind: status, apps, info, network, system).
+//   G <id> <glyph> <label> <pin> <command>   a group (the KGroups board). With B groups=1 its members fold
+//      into one chip: the group's glyph (Network: the network module's) and at most one value: the
+//      most urgent member's (red fill for critical, red for needs-you, yellow for degraded, accent for
+//      something running), else the pinned member's (<pin>, or the pins file's: K4_BAR_PINS, lines
+//      "group member"), Apps the unread sum as a pill, Status how many show; System adds a red mic when
+//      muted and a keyboard layout that isn't the default. Its left click runs <command> (the drawer).
+//      The bar writes what each module shows to $XDG_RUNTIME_DIR/k4-bar-<output>.tsv for the drawer:
+//      id group icon shape text text2 icon_tone text_tone class badge badge_tone pill tooltip left.
 // Hovering a module for 500 ms shows its tooltip under it (one line): the surface grows for it,
 // its input region and exclusive zone stay the strip.
 
@@ -62,6 +73,9 @@ Module :: struct {
 	tip: string, // flags' tip=: the tooltip when the module prints none
 	next_file: string, // clock flag next=PATH: today's meetings (start end title video, TSV)
 	timers_file: string, // clock flag timers=PATH: k4-clock's timers, stopwatch, next alarm (bar.tsv)
+	group: string,       // flag group=NAME: the kind it is (a group's chip: the group it stands for)
+	head: bool,          // a group's chip (from a G line)
+	label, pin: string,  // a group's name and its pinned member (the quiet value)
 	last_line: string, // the line it shows: the same one again changes nothing (no redraw)
 	// what it shows
 	text, tooltip, class, icon, icon_tone, text_tone, text2, text2_tone: string,
@@ -72,6 +86,9 @@ Module :: struct {
 	outline: bool, // an accent ring round the module
 	box, box_tone: string, // a short label in an outlined box after the icon (a bus line)
 	text2_bold: bool,
+	shape: Shape, // a drawn icon in place of the glyph
+	wash: string, // a faint tint behind it (a tone)
+	minw: int,    // the least width, logical px
 	lines: int, // lines read so far
 	alt: bool,
 	utc_until, flash_until: time.Tick,
@@ -94,6 +111,9 @@ Bar :: struct {
 	height: int,
 	bottom, transparent: bool,
 	icons_only: bool, // B icons=1: each module its icon (and its count tag) alone; the info in the tooltip
+	grouped: bool,    // B groups=1: each group (G lines) folds into one chip
+	pins: map[string]string, // group → member whose value the quiet chip shows (the pins file)
+	pins_mtime: i64,
 	output: string,
 	ws: [dynamic]Ws,
 	title: string,
@@ -148,8 +168,15 @@ bar_setup :: proc(a: ^App, data: string) {
 				case "position": b.bottom = kv[eq + 1:] == "bottom"
 				case "transparent": b.transparent = kv[eq + 1:] == "1" || kv[eq + 1:] == "true"
 				case "icons": b.icons_only = kv[eq + 1:] == "1" || kv[eq + 1:] == "true"
+				case "groups": b.grouped = kv[eq + 1:] == "1" || kv[eq + 1:] == "true"
 				}
 			}
+		case "G": // a group: its chip stands where its first member is (placed once the modules are read)
+			if len(f) < 3 do continue
+			g := Module{id = strings.clone(fmt.tprintf("group:%s", get(f, 1))), group = strings.clone(get(f, 1)), icon = strings.clone(get(f, 2)), label = strings.clone(get(f, 3)),
+				pin = strings.clone(get(f, 4)), head = true, kind = .Text, px = 7, level = -1, battery = -1, pct = -1}
+			g.on[0] = strings.clone(get(f, 5))
+			append(&b.mods, g)
 		case "M":
 			if len(f) < 4 do continue
 			m := Module{id = strings.clone(get(f, 1)), arg = strings.clone(get(f, 4)), tone = strings.clone(get(f, 6)), px = 7, level = -1, battery = -1, pct = -1}
@@ -176,6 +203,7 @@ bar_setup :: proc(a: ^App, data: string) {
 				case "wide": m.wide = true
 				case "flash": m.flash = true
 				case "tip": m.tip = strings.clone(v)
+				case "group": m.group = strings.clone(v)
 				case "next":
 					p := v
 					if strings.has_prefix(p, "~/") do p = strings.concatenate({os.get_env("HOME", context.temp_allocator), p[1:]}, context.temp_allocator)
@@ -186,6 +214,17 @@ bar_setup :: proc(a: ^App, data: string) {
 					m.timers_file = strings.clone(p)
 				}
 			}
+			append(&b.mods, m)
+		}
+	}
+	{ // each group's chip just before its first member, on that member's side; a group without members goes
+		heads := make([dynamic]Module, 0, 8, context.temp_allocator)
+		rest := make([dynamic]Module, 0, len(b.mods), context.temp_allocator)
+		for m in b.mods { if m.head do append(&heads, m); else do append(&rest, m) }
+		clear(&b.mods)
+		placed := make(map[string]bool, 8, context.temp_allocator)
+		for m in rest {
+			if m.group != "" && !placed[m.group] do for h in heads do if h.group == m.group { hh := h; hh.side = m.side; append(&b.mods, hh); placed[m.group] = true; break }
 			append(&b.mods, m)
 		}
 	}
@@ -260,15 +299,15 @@ mod_start :: proc(m: ^Module) {
 // A line of module output: plain text, or Waybar's JSON with k4's fields.
 @(private)
 mod_line :: proc(m: ^Module, line: string) {
-	for p in ([]^string{&m.text, &m.tooltip, &m.class, &m.icon, &m.icon_tone, &m.text_tone, &m.text2, &m.text2_tone, &m.badge_tone, &m.pill, &m.box, &m.box_tone}) {
+	for p in ([]^string{&m.text, &m.tooltip, &m.class, &m.icon, &m.icon_tone, &m.text_tone, &m.text2, &m.text2_tone, &m.badge_tone, &m.pill, &m.box, &m.box_tone, &m.wash}) {
 		if len(p^) > 0 do delete(p^)
 		p^ = ""
 	}
-	m.level, m.battery, m.pct, m.badge, m.outline, m.text2_bold = -1, -1, -1, 0, false, false
+	m.level, m.battery, m.pct, m.badge, m.outline, m.text2_bold, m.shape, m.minw = -1, -1, -1, 0, false, false, .None, 0
 	m.lines += 1
 	l := strings.trim_space(line)
 	if strings.has_prefix(l, "{") {
-		J :: struct { text, tooltip, class, icon, icon_tone, text_tone, text2, text2_tone, badge_tone, pill, box, box_tone: string, percentage, level, battery, badge: int, outline, text2_bold: bool }
+		J :: struct { text, tooltip, class, icon, icon_tone, text_tone, text2, text2_tone, badge_tone, pill, box, box_tone, shape, wash: string, percentage, level, battery, badge, minw: int, outline, text2_bold: bool }
 		j := J{percentage = -1, level = -1, battery = -1}
 		if json.unmarshal(transmute([]u8)l, &j, allocator = context.temp_allocator) == nil {
 			m.text, m.tooltip, m.class = strings.clone(j.text), strings.clone(j.tooltip), strings.clone(j.class)
@@ -278,6 +317,8 @@ mod_line :: proc(m: ^Module, line: string) {
 			m.badge, m.badge_tone = j.badge, strings.clone(j.badge_tone)
 			m.pill, m.outline = strings.clone(j.pill), j.outline
 			m.box, m.box_tone, m.text2_bold = strings.clone(j.box), strings.clone(j.box_tone), j.text2_bold
+			m.shape, m.wash, m.minw = shape_of(j.shape), strings.clone(j.wash), j.minw
+			if m.shape != .None && m.icon == "" do m.icon = strings.clone("◇") // (shown: the shape draws over the glyph's place)
 			return
 		}
 	}
@@ -320,6 +361,8 @@ mod_read :: proc(m: ^Module) -> bool {
 	return true
 }
 
+@(private = "file") snap_dirty: bool // (mod_show has no bar at hand: bar_tick writes the snapshot)
+
 // A module's new line: parsed and shown unless it is the one already shown (most runs of a
 // polled module print the same line; each redraw of a wide bar costs).
 @(private)
@@ -328,6 +371,7 @@ mod_show :: proc(m: ^Module, line: string) -> bool {
 	delete(m.last_line)
 	m.last_line = strings.clone(line)
 	mod_line(m, line)
+	snap_dirty = true
 	return true
 }
 
@@ -335,6 +379,7 @@ mod_show :: proc(m: ^Module, line: string) -> bool {
 // next deadline.
 bar_tick :: proc(a: ^App) -> int {
 	b := a.bar
+	bar_snapshot(b) // (groups on: what the drawer lists)
 	now := time.tick_now()
 	wait := 60_000
 	until :: proc(now, t: time.Tick) -> int { return max(int(time.duration_milliseconds(time.tick_diff(now, t))), 0) + 1 }
@@ -579,6 +624,7 @@ Chip :: struct {
 	pill: string, // the tag with a short text
 	outline: bool,
 	box: string, box_c: u32, bold2: bool,
+	shape: Shape, minw: int,
 	badge_bg, badge_fg: u32,
 	bold: bool,
 	bg, fg, icon_c, text_c, text2_c, line_c: u32,
@@ -592,7 +638,7 @@ mod_chip :: proc(a: ^App, i: int, S: int, narrow: bool) -> (c: Chip, shown: bool
 	t := a.theme
 	m := &b.mods[i]
 	st := mod_state(b, i)
-	c = {icon = m.icon, text = m.text, text2 = m.text2, battery = m.battery, level = m.level, badge = m.badge, pill = m.pill, outline = m.outline, box = m.box, bold2 = m.text2_bold, px = m.px * S, maxw = m.maxw * S, maxw2 = m.maxw2 * S}
+	c = {icon = m.icon, text = m.text, text2 = m.text2, battery = m.battery, level = m.level, badge = m.badge, pill = m.pill, outline = m.outline, box = m.box, bold2 = m.text2_bold, px = m.px * S, maxw = m.maxw * S, maxw2 = m.maxw2 * S, shape = m.shape, minw = m.minw * S}
 	if m.kind == .Clock do c.bold = true
 	flashing := m.flash && m.flash_until != {} && time.tick_diff(time.tick_now(), m.flash_until) > 0 && m.pct >= 0
 	if narrow && m.compact do c.text, c.text2 = "", ""
@@ -613,6 +659,8 @@ mod_chip :: proc(a: ^App, i: int, S: int, narrow: bool) -> (c: Chip, shown: bool
 	case .Crit: c.bg, fg, c.filled = argb(t.red, 0xff), t.bg, true
 	}
 	if c.filled do c.bold = true
+	if m.wash != "" && !c.filled && st != .Hover do c.bg = argb(token(t, m.wash, t.accent), 0x1f) // a click's feedback: a faint tint of its tone
+	if (m.text_tone == "yellow" || m.text_tone == "red" || m.text_tone == "green") && m.shape != .None do c.bold = true // (a shape's state in words: bold)
 	c.fg = fg
 	if c.filled {
 		c.icon_c, c.text_c, c.text2_c, c.line_c = fg, fg, fg, fg
@@ -639,12 +687,130 @@ mod_chip :: proc(a: ^App, i: int, S: int, narrow: bool) -> (c: Chip, shown: bool
 	return c, true
 }
 
+// How much a module asks for attention (the KGroups board): 4 critical (fills), 3 needs you (red),
+// 2 soon / degraded (yellow), 1 something running (accent with a value), 0 quiet.
+@(private)
+mod_sev :: proc(m: ^Module) -> int {
+	switch m.class { case "critical", "urgent", "error": return 4 }
+	// (the icon's tone, the class and the badge say it; a coloured text alone is the value's own colour, as WoW's gold)
+	tone := m.icon_tone != "" || m.icon != "" || m.shape != .None ? m.icon_tone : m.text_tone
+	if tone == "red" || m.badge_tone == "red" do return 3
+	if m.class == "warning" || tone == "yellow" || m.badge_tone == "yellow" do return 2
+	if (m.icon_tone == "accent" || m.text_tone == "accent") && m.text != "" do return 1
+	return 0
+}
+
+// The pins file (K4_BAR_PINS, else ~/.local/state/sway/bar-pins): "group member" lines, read again when it changes.
+@(private)
+bar_pins :: proc(b: ^Bar) {
+	p := os.get_env("K4_BAR_PINS", context.temp_allocator)
+	if p == "" do p = fmt.tprintf("%s/.local/state/sway/bar-pins", os.get_env("HOME", context.temp_allocator))
+	fi, err := os.stat(p, context.temp_allocator)
+	mt := err == nil ? time.time_to_unix(fi.modification_time) : 0
+	if mt == b.pins_mtime && b.pins != nil do return
+	b.pins_mtime = mt
+	if b.pins == nil do b.pins = make(map[string]string)
+	for k, v in b.pins { delete(k); delete(v) }
+	clear(&b.pins)
+	data, rerr := os.read_entire_file(p, context.temp_allocator)
+	if rerr != nil do return
+	text := string(data)
+	for line in strings.split_lines_iterator(&text) {
+		g, _, mem := strings.partition(strings.trim_space(line), " ")
+		if g != "" && mem != "" do b.pins[strings.clone(g)] = strings.clone(mem)
+	}
+}
+
+// A group's chip (the KGroups board): its glyph and at most one value, the most urgent member speaking
+// for the group in that member's colour; quiet: the pinned member's value (Info, System), the unread
+// sum (Apps), how many show (Status). Hidden when no member shows; open (the accent) while its drawer is up.
+@(private)
+group_chip :: proc(a: ^App, i: int, S: int, narrow: bool) -> (c: Chip, shown: bool) {
+	b := a.bar
+	t := a.theme
+	h := &b.mods[i]
+	bar_pins(b)
+	c = {icon = h.icon, battery = -1, level = -1, px = 7 * S, fg = t.fg, icon_c = t.fg, text_c = t.fg, text2_c = t.fg_dim, badge_bg = t.accent, badge_fg = t.bg}
+	pin := b.pins[h.group] or_else h.pin
+	worst, nvis, unread, red_badge := -1, 0, 0, false
+	pinned, active, mic, kb, net := -1, -1, -1, -1, -1
+	for &m, k in b.mods {
+		if m.head || m.group != h.group do continue
+		if _, ok := mod_chip(a, k, S, narrow); !ok do continue
+		nvis += 1
+		sv := mod_sev(&m)
+		if worst < 0 || sv > mod_sev(&b.mods[worst]) do worst = k
+		if m.badge > 0 { unread += m.badge; if m.badge_tone == "red" do red_badge = true }
+		else if n, ok := strconv.parse_int(m.pill); ok && n > 0 { unread += n; if m.badge_tone == "red" do red_badge = true }
+		if m.id == pin do pinned = k
+		if sv == 1 && active < 0 do active = k
+		switch m.id {
+		case "microphone": mic = k
+		case "keyboard": kb = k
+		case "network": net = k
+		}
+	}
+	if nvis == 0 do return c, false
+	if net >= 0 && b.mods[net].icon != "" do c.icon = b.mods[net].icon // (Network: the Wi-Fi or Ethernet glyph is the group's)
+	w := &b.mods[worst]
+	wsev := mod_sev(w)
+	tone := wsev == 3 ? t.red : t.yellow
+	switch {
+	case wsev >= 4: // critical: the group fills, in that member's words
+		c.bg, c.fg, c.filled, c.bold = argb(t.red, 0xff), t.bg, true, true
+		c.icon, c.shape, c.text = w.icon, w.shape, w.text
+	case wsev >= 2 && w.text != "": c.icon_c, c.text_c, c.text, c.bold = tone, tone, w.text, true
+	case wsev >= 2: c.icon_c = tone
+	case pinned >= 0 && b.mods[pinned].text != "": c.text = b.mods[pinned].text
+	}
+	if c.text == "" && active >= 0 { c.text, c.text_c = b.mods[active].text, t.accent; if c.icon_c == t.fg do c.icon_c = t.accent }
+	if h.group == "apps" && unread > 0 { c.badge = unread; if red_badge { c.badge_bg = t.red; if !c.filled do c.icon_c = t.red } }
+	if h.group == "status" && c.text == "" { c.text, c.text_c = fmt.tprint(nvis), t.fg_dim }
+	if mic >= 0 && mod_sev(&b.mods[mic]) == 3 { c.text2, c.text2_c = b.mods[mic].icon, t.red } // a muted mic joins in red
+	if kb >= 0 && b.mods[kb].class != "dim" && b.mods[kb].text != "" && !c.filled { c.text2 = c.text2 != "" ? fmt.tprintf("%s %s", c.text2, b.mods[kb].text) : b.mods[kb].text; c.text2_c = t.fg }
+	if b.icons_only { c.text, c.text2 = "", ""; c.px = 6 * S }
+	if h.clicking { c.bg, c.fg, c.filled, c.bold = argb(t.accent, 0xff), t.bg, true, true } // its drawer is up
+	else if b.hover == i && !c.filled do c.bg = argb(t.selection, 0xff)
+	if c.filled do c.icon_c, c.text_c, c.text2_c = c.fg, c.fg, c.fg
+	return c, true
+}
+
+// A member of a group while groups are on: its group's chip stands for it. Off: the chips go.
+@(private)
+grouped_away :: proc(b: ^Bar, m: ^Module) -> bool {
+	if m.head do return !b.grouped
+	return b.grouped && m.group != "" && bar_has_head(b, m.group)
+}
+
+@(private)
+bar_has_head :: proc(b: ^Bar, g: string) -> bool { for &m in b.mods do if m.head && m.group == g do return true; return false }
+
+// What each module shows, for the drawer (k4-bar drawer-data): written when something changed.
+@(private)
+bar_snapshot :: proc(b: ^Bar) {
+	if !snap_dirty || !b.grouped do return
+	snap_dirty = false
+	run := os.get_env("XDG_RUNTIME_DIR", context.temp_allocator)
+	if run == "" do run = "/tmp"
+	sb := strings.builder_make(context.temp_allocator)
+	cl :: proc(s: string) -> string { r, _ := strings.replace_all(s, "\t", " ", context.temp_allocator); r2, _ := strings.replace_all(r, "\n", " · ", context.temp_allocator); return r2 }
+	shapes := [Shape]string{.None = "", .Shield_On = "shield-on", .Shield_Off = "shield-off", .Shield_Broken = "shield-broken", .Shield_Unsafe = "shield-unsafe", .Key = "key"}
+	for &m in b.mods {
+		if m.head || m.kind == .Workspaces || m.kind == .Window do continue
+		fmt.sbprintfln(&sb, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%d\t%s\t%s\t%s\t%s", m.id, m.group, cl(m.icon), shapes[m.shape], cl(m.text), cl(m.text2), m.icon_tone, m.text_tone,
+			m.class, m.badge, m.badge_tone, cl(m.pill), cl(m.tooltip != "" ? m.tooltip : m.tip), cl(m.on[0]))
+	}
+	path := fmt.tprintf("%s/k4-bar-%s.tsv", run, b.output != "" ? b.output : "bar")
+	_ = os.write_entire_file(fmt.tprintf("%s.tmp", path), transmute([]u8)strings.to_string(sb))
+	_ = os.rename(fmt.tprintf("%s.tmp", path), path)
+}
+
 @(private)
 chip_w :: proc(b: ^Bar, c: Chip, S: int) -> int {
 	w := 0
 	n := 0
 	f := c.bold ? b.f_bold : b.f_text
-	if c.icon != "" { w += tw(b.f_text, c.icon); n += 1 }
+	if c.shape != .None { w += 14 * S; n += 1 } else if c.icon != "" { w += tw(b.f_text, c.icon); n += 1 }
 	if c.box != "" { w += tw(b.f_box, c.box) + 8 * S; n += 1 }
 	if c.battery >= 0 { w += 22 * S; n += 1 }
 	if c.level >= 0 { w += 4 * S; n += 1 }
@@ -653,7 +819,7 @@ chip_w :: proc(b: ^Bar, c: Chip, S: int) -> int {
 	w += 6 * S * max(n - 1, 0) + 2 * c.px
 	if c.badge > 0 do w += max(0, count_tag_w(b.f_badge, c.badge, S) - 5 * S - c.px + S) // the tag overhangs the end, into the padding
 	else if c.pill != "" do w += max(0, pill_tag_w(b.f_badge, c.pill, S) - 5 * S - c.px + S)
-	return w
+	return max(w, c.minw)
 }
 
 @(private)
@@ -664,7 +830,10 @@ chip_draw :: proc(a: ^App, cv: ^Canvas, c: Chip, x, w, h, S: int) {
 	f := c.bold ? b.f_bold : b.f_text
 	xx := x + c.px
 	right := x + w - c.px
-	if c.icon != "" {
+	if c.shape != .None { // a drawn icon (the Pi-hole shield), 14 px
+		shape_draw(cv, c.shape, xx, (h - 14 * S) / 2, 14 * S, c.icon_c)
+		xx += 14 * S + 6 * S
+	} else if c.icon != "" {
 		text_in(cv, b.f_text, c.icon, xx, 0, h, argb(c.icon_c, 0xff))
 		xx += tw(b.f_text, c.icon) + 6 * S
 	}
@@ -824,7 +993,11 @@ bar_draw_strip :: proc(a: ^App, cv: ^Canvas, S: int) {
 			if b.hover == i do chips[i].bg = argb(t.selection, 0xff)
 			widths[i], shown[i] = chip_w(b, chips[i], S), true
 		case .Clock, .Exec, .Text:
-			c, ok := mod_chip(a, i, S, narrow)
+			if grouped_away(b, &m) do break
+			c: Chip
+			ok: bool
+			if m.head do c, ok = group_chip(a, i, S, narrow)
+			else do c, ok = mod_chip(a, i, S, narrow)
 			if m.kind == .Clock do c.px = (m.px == 7 ? 10 : m.px) * S
 			chips[i], shown[i] = c, ok
 			if ok do widths[i] = chip_w(b, c, S)
@@ -978,7 +1151,7 @@ bar_dump :: proc(a: ^App) -> string {
 	sides := [3]string{"left", "center", "right"}
 	for side in 0 ..< 3 {
 		fmt.sbprintf(&sb, "%s:", sides[side])
-		for m in b.mods {
+		for &m, i in b.mods {
 			if m.side != side do continue
 			switch m.kind {
 			case .Workspaces:
@@ -987,6 +1160,15 @@ bar_dump :: proc(a: ^App) -> string {
 				fmt.sbprintf(&sb, " [%s]", strings.join(parts[:], " ", context.temp_allocator))
 			case .Window: if b.title != "" && !b.icons_only do fmt.sbprintf(&sb, " [%s]", b.title)
 			case .Clock, .Exec, .Text:
+				if grouped_away(b, &m) do continue
+				if m.head { // a group's chip, as drawn
+					c, ok := group_chip(a, i, 1, false)
+					if !ok do continue
+					st := c.filled ? (m.clicking ? " open" : " fill") : (c.text_c == a.theme.red || c.icon_c == a.theme.red ? " red" : (c.text_c == a.theme.yellow || c.icon_c == a.theme.yellow ? " yellow" : ""))
+					fmt.sbprintf(&sb, " <%s%s%s%s%s%s>", m.group, c.text != "" ? fmt.tprintf(" %s", c.text) : "", c.text2 != "" ? fmt.tprintf(" · %s", c.text2) : "",
+						c.badge > 0 ? fmt.tprintf(" badge:%d", c.badge) : "", st, c.badge > 0 && c.badge_bg == a.theme.red ? "/red" : "")
+					continue
+				}
 				if m.text == "" && m.icon == "" && m.text2 == "" && m.battery < 0 do continue
 				if b.icons_only && m.kind != .Clock && m.icon == "" && m.battery < 0 do continue
 				parts := make([dynamic]string, 0, 6, context.temp_allocator)

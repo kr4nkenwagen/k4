@@ -1,0 +1,32 @@
+focus Sub
+crumb NETWORK › PI-HOLE
+query (Filter queries…)
+count on
+hints ↑↓ Move · ↵ Run · allow · ⌃B Block · Del Remove · type Filter · ⌫ Back · Esc Close
+title Pi-hole · Pi-hole on kr4nkenhole · 18240 queries today · 18% blocked · 9 clients (full width)
+== BLOCKING
+* Pause for 5 minutes | the whole network (mark ‖)
+  Pause for 30 minutes | the whole network (mark ‖)
+  Pause until resumed (mark ‖)
+== UNBOUND [ok]
+  unbound resolves · DNSSEC validates | 24 ms · checked just now (mark ✓, / cache hits 71% · recursion 88 ms · 3 SERVFAIL · up 10d)
+  Restart unbound | sudo systemctl restart unbound (mark ↻)
+== RECENT QUERIES [3]
+  ads.tracker.example | ↵ allows (mark ⊘, / phone.lan · 10:31:54 · adlist)
+  news.example.org | AAAA (mark ·, dim, / desktop.lan · 10:31:34)
+  metrics.tv.example | ↵ allows (mark ⊘, / 192.168.1.60 · 10:31:14 · your deny list)
+== TOP CLIENTS TODAY
+  desktop.lan | 7200 queries (mark ◦, / 192.168.1.20)
+  phone.lan | 3100 queries (mark ◦, / 192.168.1.50)
+== ADLISTS [2]
+  Update gravity | 412 377 domains · updated 3 d ago (mark ↻)
+  lists.example.net/hosts.txt | 400 000 domains [on] (/ the default list)
+  lists.example.net/extra.txt | 12 377 domains [off]
+== YOUR ALLOW AND DENY ENTRIES [2]
+  cdn.shop.example | allowed (mark ✓)
+  metrics.tv.example | blocked (mark ⊘)
+== MORE
+  Open Pi-hole’s web page | Pi-hole v6.2 · FTL v6.3 (mark ↗)
+  Look now | checked just now · every minute (mark ↻)
+exit 1
+log: load apps

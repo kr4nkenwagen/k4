@@ -1,0 +1,37 @@
+{
+ "queries": [
+  {
+   "id": 3,
+   "time": 1793352714,
+   "type": "A",
+   "domain": "ads.tracker.example",
+   "status": "GRAVITY",
+   "client": {
+    "ip": "192.168.1.50",
+    "name": "phone.lan"
+   }
+  },
+  {
+   "id": 2,
+   "time": 1793352694,
+   "type": "AAAA",
+   "domain": "news.example.org",
+   "status": "FORWARDED",
+   "client": {
+    "ip": "192.168.1.20",
+    "name": "desktop.lan"
+   }
+  },
+  {
+   "id": 1,
+   "time": 1793352674,
+   "type": "A",
+   "domain": "metrics.tv.example",
+   "status": "DENYLIST",
+   "client": {
+    "ip": "192.168.1.60",
+    "name": ""
+   }
+  }
+ ]
+}

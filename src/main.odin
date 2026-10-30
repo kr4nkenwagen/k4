@@ -44,6 +44,9 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --send-ctl CMD          a command to k4-localsend's service (its ctl, arguments tab-separated; prints its reply)
   --messenger             Facebook Messenger: conversations, messages, writing (k4-messenger data, messenger.odin)
   --youtube               YouTube: search, results as a grid, the queue, history; plays in a corner (k4-youtube data, youtube.odin)
+  --bardrawer             a bar group's drawer: its members with their chips (k4-bar drawer-data, bardrawer.odin)
+  --pihole                Pi-hole and unbound: status, pause, unbound, the query log, adlists, your entries (k4-pihole window-data, pihole.odin)
+  --jellyfin              the same over your Jellyfin server (k4-jellyfin data; its wording from the data's T line)
   --mail                  Gmail: labels, threads, reading and replying (k4-mail data, mail.odin)
   --wow                   World of Warcraft Forever: your characters (k4-wow data, wow.odin)
   --clock                 Clock: world clocks, timers, alarms, a stopwatch (k4-clock data, clock.odin)
@@ -169,6 +172,9 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--send-ctl": o.send_ctl = value(args, &i, inline, has_inline)
 		case "--messenger": o.messenger = true
 		case "--youtube": o.youtube = true
+		case "--pihole": o.pihole = true
+		case "--bardrawer": o.bardrawer = true
+		case "--jellyfin": o.youtube, o.jellyfin = true, true   // the same window over k4-jellyfin's data (its own name: one doesn't close the other)
 		case "--mail": o.mail = true
 		case "--wow": o.wow = true
 		case "--clock": o.clock = true
@@ -257,6 +263,12 @@ main :: proc() {
 	} else if opts.messenger { // a panel mode too (its own branch: the list above changes often)
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		messenger_setup(a, string(data))
+	} else if opts.bardrawer {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		bardrawer_setup(a, string(data))
+	} else if opts.pihole {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		pihole_setup(a, string(data))
 	} else if opts.youtube {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		youtube_setup(a, string(data))

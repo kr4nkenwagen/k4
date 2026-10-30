@@ -1,0 +1,16 @@
+{
+ "domains": [
+  {
+   "domain": "cdn.shop.example",
+   "type": "allow",
+   "kind": "exact",
+   "enabled": true
+  },
+  {
+   "domain": "metrics.tv.example",
+   "type": "deny",
+   "kind": "exact",
+   "enabled": true
+  }
+ ]
+}

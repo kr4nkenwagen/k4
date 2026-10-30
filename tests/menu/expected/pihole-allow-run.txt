@@ -1,0 +1,3 @@
+bm90aWZ5IFBpLWhvbGUgIiQoazQtcGlob2xlIGJsb2NrICdtZXRyaWNzLnR2LmV4YW1wbGUnIHwgaGVhZCAtMSki
+exit 0
+log: load apps

@@ -127,6 +127,15 @@ check "youtube: Esc in an empty field after a search: back to the home page; not
 check "youtube: missing (↵ installs), installing" "card Missing · yt-dlp missing · mpv 0.41.0|toast (install)|card Installing · yt-dlp missing · mpv 0.41.0" "$( (yt missing | grep '^card'; yt missing --keys "<enter>" | grep '^toast'; yt installing | grep '^card') | paste -sd'|')"
 # Keymap: a Corne's QMK layout (a fixture), the keyboard's layer from a stand-in stream
 km() { "$K4" --keymap --dump "$@" < ../keymap/corne.txt 2>&1; }
+# Jellyfin: the same window over k4-jellyfin's data (jellyfin.py's output from the fake server in tests/jellyfin/api)
+jf() { local f="$1"; shift; K4_YOUTUBE_NOW=1793180000 "$K4" --jellyfin --dump "$@" < "../jellyfin/$f.txt" 2>&1; }
+jfr() { local f="$1"; shift; (cat "../jellyfin/$f.txt"; printf 'R\tsh ../youtube/runner.sh\n') | K4_YOUTUBE_NOW=1793180000 "$K4" --jellyfin --dump "$@" 2>&1; echo "exit $?"; }
+check "jellyfin: home is continue watching, next up, recently added, with where each stopped" "jellyfin ok|tab Results 4 · home|  The Quiet Harbour · 2024 · Movie · 1:50:00 · [resume] · at 36% · nothumb|  Northern Static · Echoes · S1 · E4 · 47:00 · [nextup] · nothumb" "$(jf home | sed -n '1p;3p;4p;6p' | paste -sd'|')"
+check "jellyfin: a search puts the show first (its episodes open), then movies and episodes" "* [show] Northern Static · 2025 · 5 unwatched|  Static Bloom · 2023 · Movie · 1:41:00 · nothumb" "$(jf results | sed -n 4,5p | paste -sd'|')"
+check "jellyfin: ↵ on a show opens its episodes" "toast (channel a1b2c3d4e5f60718293a4b5c6d7e8f90)" "$(jfr results --keys "<enter>" | grep '^toast' | head -1)"
+check "jellyfin: a show's episodes, by season and number" "channel Northern Static|* Static · S1 · E1 · 48:00 · nothumb" "$(jf show | sed -n '3p;5p' | paste -sd'|')"
+check "jellyfin: what plays (the shared corner player) is marked on its tile" "  The Quiet Harbour · 2024 · Movie · 1:50:00 · playing · [resume] · at 36% · nothumb|now ▶ The Quiet Harbour · 41:40 / 1:50:00 · PiP · TOP LEFT" "$(jf playing | sed -n '4p;$p' | paste -sd'|')"
+check "jellyfin: ↵ plays and the window goes (the corner player takes over)" "exit 0" "$(jfr results --keys "<right><enter>" | tail -1)"
 kml() { (cat ../keymap/corne.txt; printf 'R\tsh ../keymap/runner.sh\n') | "$K4" --keymap --dump "$@" 2>&1; }
 check "keymap: the layers (a missing one marked), the base's keys: mods held, layer keys, none" "layers *0 Base | 1 Layer 1 | 2 Layer 2 | 3 Layer 3 (missing)|Esc A/Ctrl S/Shift D/Super F/Alt G" "$( (km | grep '^layers'; km | grep '^keys' | cut -d' ' -f16-21) | paste -sd'|')"
 check "keymap: → and a number show another layer; transparent keys show the layer they are reached from" "layers 0 Base | *1 Layer 1 | 2 Layer 2 | 3 Layer 3 (missing)|▽L1 ▽L2" "$( (km --keys "<right>" | grep '^layers'; km --keys "2" | grep '^keys' | tr ' ' '\n' | grep '▽' | paste -sd' ') | paste -sd'|')"
@@ -315,17 +324,86 @@ if [ -f "$TODO_PY" ]; then
 fi
 
 # k4 on a Raspberry Pi (k4-pi, from the dotfiles when installed): cards wait in an outbox, secrets come
-# from a file store, the finder skips Discord (the desktop's app) and never yields to a game
+# from a file store, the finder reads the Discord DMs and mentions the desktop relays and never yields to a game
 K4SH="$HOME/.local/share/k4"; PISECRET="$HOME/repos/dotfiles/pi/.local/bin/k4-secret"
 if [ -f "$K4SH/k4host.py" ] && [ -x "$PISECRET" ]; then
   pdir=$(mktemp -d)
+  export K4_CARDS="$pdir/cards.jsonl"   # (the phone's copy of each card: never the real one)
   check "pi: a card waits in the outbox (no display there)" '|post	0	Todo	T	B	done' "$(K4_HOST=pi K4_OUTBOX="$pdir/out" python3 -c "import sys; sys.path.insert(0, '$K4SH'); import k4host; print(k4host.post('post\t0\tTodo\tT\tB\tdone'))")|$(jq -r .line "$pdir/out")"
+  # the phone's copy: numbered, the last 200 kept, the line read as app, title, body, urgency, tag, buttons
+  K4_HOST=pi K4_OUTBOX="$pdir/out" python3 -c "import sys; sys.path.insert(0, '$K4SH'); import k4host
+for i in range(205): k4host.post('post\t0\tPi-hole\tPi-hole isn’t answering\tlookups fail\twarn\t-1\t-1\tDOWN\t\t\topen:Open,pause:Pause\tk4-pihole card\t')"
+  check "pi: the phone's cards: numbered, the last 200, read for the phone" "200|206|Pi-hole|warn|DOWN|open:Open pause:Pause" "$(python3 -c "import sys; sys.path.insert(0, '$K4SH'); import k4host
+r = k4host.cards(); p = k4host.parse(r[-1]['line'])
+print('%d|%d|%s|%s|%s|%s' % (len(r), r[-1]['seq'], p['app'], p['urgency'], p['tag'], ' '.join(a['key'] + ':' + a['label'] for a in p['actions'])))")"
   printf 'tok' | K4_SECRETS_DIR="$pdir/sec" "$PISECRET" store google k4-google-tasks
   check "pi: k4-secret's file store (0600, by name)" "tok|600|k4-google-tasks" "$(K4_SECRETS_DIR="$pdir/sec" "$PISECRET" lookup google k4-google-tasks)|$(stat -c %a "$pdir"/sec/google/*)|$(K4_SECRETS_DIR="$pdir/sec" "$PISECRET" names google)"
   cp -r ../events "$pdir/f"
   K4_HOST=pi K4_OUTBOX="$pdir/out2" K4_EVENTS_FAKE="$pdir/f" K4_EVENTS_STATE="$pdir/st" K4_CAL_DIR="$pdir/f/cal" K4_EVENTS_GAMING=1 K4_EVENTS_NOW=1793352734 python3 -I "$K4SH/events.py" scan >/dev/null
-  check "pi: the finder leaves Discord out" "0" "$(grep -c '· discord ·' "$pdir/f/prompt")"
+  check "pi: the finder reads the desktop's Discord DMs and mentions" "1" "$(grep -c '· discord ·' "$pdir/f/prompt")"
+  unset K4_CARDS
   rm -rf "$pdir"
+fi
+
+# k4-pihole (pihole.py from the dotfiles, when installed) against a fake Pi-hole v6 (tests/pihole/api)
+PH_PY="$HOME/.local/share/k4/pihole.py"
+if [ -f "$PH_PY" ]; then
+  phd=$(mktemp -d); cp -r ../pihole/api "$phd/api"
+  ph() { K4_PIHOLE_FAKE="$phd/api" K4_PIHOLE_PASSWORD=app-pw K4_PIHOLE_NOW="${PHNOW:-1793352734}" XDG_RUNTIME_DIR="$phd/api" python3 -I "$PH_PY" "$@"; }
+  phj() { python3 -c "import json,sys; json.dump(json.loads(sys.argv[2]), open(sys.argv[1], 'w'))" "$phd/api/$1.json" "$2"; }
+  check "pihole: a wrong app password is refused, the right one connects" "Pi-hole: wrong password · Apps › Pi-hole|Connected to Pi-hole on kr4nkenhole" "$(K4_INPUT=nope ph setup-password | head -1)|$(K4_INPUT=app-pw ph setup-password)"
+  check "pihole: the bar: the shield and today's blocked share (KPiholeBar)" '{"shape": "shield-on", "text": "18%"}' "$(ph bar | python3 -c 'import json,sys; o=json.load(sys.stdin); o.pop("tooltip"); print(json.dumps(o, ensure_ascii=False))')"
+  ph pause 300 >/dev/null; phj dns_blocking '{"blocking": "disabled", "timer": 272}'; ph tick
+  check "pihole: paused: the call, the bar counts down in yellow at a fixed width, a card" 'POST /api/dns/blocking {"blocking": false, "timer": 300}|OFF 4:32 yellow 86 shield-off|Ad blocking is off · back on in 5 min ' "$(tail -1 "$phd/api/log")|$(ph bar | jq -r '.text + " " + .icon_tone + " " + (.minw|tostring) + " " + .shape')|$(tail -1 "$phd/api/posts.log" | cut -d'|' -f1)"
+  phj dns_blocking '{"blocking": "enabled", "timer": null}'; ph tick
+  check "pihole: back on: a card with how long it was off" "Ad blocking is back on | Off for 0 min · 0 queries passed unfiltered meanwhile | done" "$(tail -1 "$phd/api/posts.log")"
+  touch "$phd/api/down"; ph tick; ph tick; ph tick
+  check "pihole: not answering twice: the red block, a cracked shield, one card (not one a minute)" "DNS down critical shield-broken|1" "$(ph bar | jq -r '.text + " " + .class + " " + .shape')|$(grep -c "isn’t answering" "$phd/api/posts.log")"
+  rm "$phd/api/down"
+  phj unbound '{"ok": false, "resolves": true, "dnssec": false, "why": "DNSSEC validation failing"}'; PHNOW=1793353100 ph tick
+  check "pihole: unbound's DNSSEC failing: a card, the bar's red ! shield (no fill)" "unbound: DNSSEC validation failing | Lookups still resolve, but answers aren’t verified · a broken-signature test domain resolved | warn|DNSSEC shield-unsafe red" "$(tail -1 "$phd/api/posts.log")|$(PHNOW=1793353100 ph bar | jq -r '.text + " " + .shape + " " + .text_tone')"
+  phj info_messages '{"messages": [{"id": 7, "timestamp": 1, "type": "LOAD", "plain": "Long-term load is high"}]}'; PHNOW=1793353100 ph tick; PHNOW=1793353100 ph tick
+  check "pihole: Pi-hole's own message, once" "1" "$(grep -c 'Long-term load' "$phd/api/posts.log")"
+  touch "$phd/api/certchanged"; ph tick
+  check "pihole: a changed certificate: refused, the page asks to trust it" "Trust the new certificate" "$(ph page | grep -o 'Trust the new certificate')"
+  rm -rf "$phd"
+fi
+
+# Group bar items (the KGroups board): each group one chip, the most urgent member speaking for it
+grp() { K4_BAR_PINS=/nonexistent K4_BAR_WORKSPACES=one-output.json "$K4" --bar --dump -w 1400 "$@" 2>&1 | sed -n 3p; }
+check "bar groups · quiet: a transfer's %, the unread sum, the pinned weather and volume; WoW's yellow gold isn't trouble; the battery stays" \
+  "right: <status 68%> <apps badge:6> <info 6°> <network> <system 62%> [bat:78 78%]" "$(grp < groups.txt)"
+check "bar groups · busy: recording in red, a red mention, CPU yellow, DNS down fills, a muted mic and the layout join System" \
+  "right: <status 02:14 red> <apps badge:8 red/red> <info 84% yellow> <network DNS down fill> <system · X se red> [bat:78 78%]" "$(grp < groups-busy.txt)"
+check "bar groups: off, the modules as they are" "right: [n] [d 68%] [m badge:3] [e badge:3] [w 452g] [c 18% · 6.2G] [p 6°] [◇ 18%] [W] [M] [V 62%] [us (dim)] [bat:78 78%]" "$(sed 's/groups=1/groups=0/' groups.txt | grp)"
+check "bar groups: a pinned member's value on the quiet chip (the pins file)" "right: <status 68%> <apps badge:6> <info 18%> <network> <system 62%> [bat:78 78%]" \
+  "$(printf 'info perf\n' > "$tmp/pins"; K4_BAR_PINS="$tmp/pins" K4_BAR_WORKSPACES=one-output.json "$K4" --bar --dump -w 1400 < groups.txt 2>&1 | sed -n 3p)"
+# a group's drawer (k4 --bardrawer): members with their chips, attention first, ON CHIP, not showing
+bdr() { (cat ../bardrawer/info.txt; printf 'R\tsh ../youtube/runner.sh\n') | "$K4" --bardrawer --dump "$@" 2>&1; }
+check "bar drawer: the summary, the groups, members (attention first), ON CHIP, not showing" "drawer Info · Chip shows Performance · 84%|groups Status Apps [Info] Network System|* Performance [84%] sev2|  Weather [6°] ON CHIP|-- not showing" \
+  "$("$K4" --bardrawer --dump < ../bardrawer/info.txt | grep -a '^drawer\|^groups\|Performance\|Weather\|^--' | paste -sd'|')"
+check "bar drawer: ↵ opens the member's popup, ← → the next group, ⌃P puts it on the chip" "toast (open perf)|toast (nav 1)|toast (pin perf)" \
+  "$(bdr --keys "<enter>" | grep -a '^toast')|$(bdr --keys "<right>" | grep -a '^toast')|$(bdr --keys "<ctrl-p>" | grep -a '^toast')"
+
+# the Pi-hole popup (k4 --pihole, the KPihole board): pihole.py window-data's lines from the fake Pi-hole
+phw() { local f="$1"; shift; "$K4" --pihole --dump "$@" < "../pihole/window-$f.txt" 2>&1; }
+phr() { local f="$1"; shift; (cat "../pihole/window-$f.txt"; printf 'R\tsh ../youtube/runner.sh\n') | "$K4" --pihole --dump "$@" 2>&1; }
+check "pihole popup: status, today's numbers, unbound; PAUSE picked" "status Blocking on · 18240 queries · 3362 blocked · 18.4% · 9 clients|unbound ok · 24 ms · 71% hits|* pause 5 min" "$(phw normal | sed -n '2p;3p;5p' | paste -sd'|')"
+check "pihole popup: ← → picks how long, ↵ pauses" "toast (pause 1800)" "$(phr normal --keys "<right><enter>" | grep '^toast')"
+check "pihole popup: a blocked query: ↵ allows it; an allowed one: ⌃B blocks it" "toast (allow ads.tracker.example)|toast (block news.example.org)" "$(phr normal --keys "<down><down><enter>" | grep '^toast')|$(phr normal --keys "<down><down><down><ctrl-b>" | grep '^toast')"
+check "pihole popup: typing filters the log by domain or device" "find tv|* × metrics.tv.example [YOUR DENY] · 192.168.1.60" "$(phw normal --keys "tv<down>" | grep '^find\|^\*' | paste -sd'|')"
+check "pihole popup: paused: Resume picked, the countdown" "status Blocking off 4:12 · 18240 queries · 3362 blocked · 18.4% · 9 clients|* pause resume" "$(phw paused | sed -n '2p;5p' | paste -sd'|')"
+check "pihole popup: DNS down: Restart FTL (unbound answers)" "  unbound restart FTL" "$(phw down | grep 'unbound restart')"
+check "pihole popup: DNSSEC failing: Restart picked first" "* unbound restart" "$(phw dnssec | grep 'unbound restart')"
+check "pihole popup: setup: the pasted password masked, ↵ connects with it as the secret" "field ••••••|toast (setup-password)" "$(K4_MESSENGER_CLIPBOARD=app-pw phw setup --keys "<ctrl-v>" | grep '^field')|$(K4_MESSENGER_CLIPBOARD=app-pw phr setup --keys "<ctrl-v><enter>" | grep '^toast')"
+check "pihole popup: a changed certificate: both fingerprints, Trust first" "fp TRUSTED|fp NEW|* c1" "$(phw cert | grep -o '^fp [A-Z]*\|^\* c1' | paste -sd'|')"
+
+# Toggles › Bar items: a module switched off is not in the bar's spec at all; k4-bar items says it's off
+if command -v k4-bar >/dev/null; then
+  bh=$(mktemp -d); mkdir -p "$bh/.local/state/sway"; printf 'weather\npihole\n' > "$bh/.local/state/sway/bar-hidden"
+  check "bar items: switched off modules are left out of the spec, items reports them off" "0|weather off|audio on|pihole off" \
+    "$(HOME="$bh" PATH="$HOME/.local/bin:$PATH" k4-bar spec 2>/dev/null | awk -F'\t' '$1 == "M" && ($2 == "weather" || $2 == "pihole")' | wc -l)|$(HOME="$bh" PATH="$HOME/.local/bin:$PATH" k4-bar items 2>/dev/null | awk -F'\t' '$1 == "weather" || $1 == "pihole" || $1 == "audio" { print $1 " " $5 }' | paste -sd'|')"
+  rm -rf "$bh"
 fi
 
 echo "bar tests: $pass passed, $fail failed"

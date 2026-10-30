@@ -1,0 +1,68 @@
+{
+ "Items": [
+  {
+   "Id": "e0000000000000000000000000000001",
+   "Type": "Episode",
+   "Name": "Static",
+   "SeriesName": "Northern Static",
+   "SeriesId": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+   "ParentIndexNumber": 1,
+   "IndexNumber": 1,
+   "RunTimeTicks": 28800000000,
+   "UserData": {
+    "PlaybackPositionTicks": 0
+   },
+   "ImageTags": {
+    "Primary": "x"
+   }
+  },
+  {
+   "Id": "e0000000000000000000000000000002",
+   "Type": "Episode",
+   "Name": "Carrier Wave",
+   "SeriesName": "Northern Static",
+   "SeriesId": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+   "ParentIndexNumber": 1,
+   "IndexNumber": 2,
+   "RunTimeTicks": 28800000000,
+   "UserData": {
+    "PlaybackPositionTicks": 0
+   },
+   "ImageTags": {
+    "Primary": "x"
+   }
+  },
+  {
+   "Id": "e0000000000000000000000000000003",
+   "Type": "Episode",
+   "Name": "Signal Loss",
+   "SeriesName": "Northern Static",
+   "SeriesId": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+   "ParentIndexNumber": 1,
+   "IndexNumber": 3,
+   "RunTimeTicks": 28800000000,
+   "UserData": {
+    "PlaybackPositionTicks": 0
+   },
+   "ImageTags": {
+    "Primary": "x"
+   }
+  },
+  {
+   "Id": "e0000000000000000000000000000004",
+   "Type": "Episode",
+   "Name": "Echoes",
+   "SeriesName": "Northern Static",
+   "SeriesId": "a1b2c3d4e5f60718293a4b5c6d7e8f90",
+   "ParentIndexNumber": 1,
+   "IndexNumber": 4,
+   "RunTimeTicks": 28800000000,
+   "UserData": {
+    "PlaybackPositionTicks": 0
+   },
+   "ImageTags": {
+    "Primary": "x"
+   }
+  }
+ ]
+}

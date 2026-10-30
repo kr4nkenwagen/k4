@@ -1,0 +1,4 @@
+k4-jellyfin's test fixtures. api/ is a fake Jellyfin server for jellyfin.py (K4_JELLYFIN_FAKE=a copy of
+this dir with api/ as the dir: files named by the request's path, / as _; search.json answers any search;
+the key is $K4_JELLYFIN_KEY). The window fixtures (home.txt, results.txt, show.txt, playing.txt) are
+jellyfin.py data's output from it (invented titles), fed to k4 --jellyfin --dump in tests/bar.sh.

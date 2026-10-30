@@ -1,0 +1,12 @@
+{
+ "ok": true,
+ "resolves": true,
+ "dnssec": true,
+ "ms": 24,
+ "hit": 71,
+ "rec_ms": 88,
+ "servfail": 3,
+ "queries": 9800,
+ "uptime": 864000,
+ "why": ""
+}

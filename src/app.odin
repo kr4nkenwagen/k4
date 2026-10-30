@@ -45,6 +45,9 @@ Options :: struct {
 	send_ctl:      string, // --send-ctl CMD
 	messenger:     bool,   // --messenger
 	youtube:       bool,   // --youtube
+	jellyfin:      bool,   // --jellyfin (youtube too: the same window)
+	pihole:        bool,   // --pihole
+	bardrawer:     bool,   // --bardrawer
 	mail:          bool,   // --mail
 	wow:           bool,   // --wow
 	clock:         bool,   // --clock

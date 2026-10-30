@@ -37,7 +37,7 @@ YT_W, YT_H :: 900, 600
 YT_PW, YT_PH :: 760, 520
 YT_COLS :: 4
 
-Yt_Video :: struct { id, title, channel, thumb: string, secs, views, pos, index: int, current, is_chan: bool, ts: i64 } // is_chan: a channel (id UC…, channel: its @handle, views: its subscribers)
+Yt_Video :: struct { id, title, channel, thumb, section: string, secs, views, pos, index: int, current, is_chan: bool, ts: i64 } // is_chan: a channel (id UC…, channel: its @handle, views: its subscribers)
 Yt_Tab :: enum { Results, Queue, History }
 
 YouTube :: struct {
@@ -55,12 +55,19 @@ YouTube :: struct {
 	top: int,            // the first row shown
 	field: bool,         // the keys go to the search field
 	more_at: int,        // the home page's length when more was last asked for (once a length)
+	// the wording (a T line; none: YouTube's): its name, the field's placeholder, the home page's title,
+	// the source shown at the right, what a C tile is, what a C tile's view lists, the hint under the field
+	label, placeholder, home_title, source, chan_word, chan_items, search_note: string,
 }
+
+// The wording a T line gives (Jellyfin's); YouTube sends none.
+@(private = "file")
+yt_word :: proc(s, dflt: string) -> string { return s != "" ? s : dflt }
 
 youtube_setup :: proc(a: ^App, data: string) {
 	y := new(YouTube)
 	y.mode = {draw = yt_draw, key = yt_key, click = yt_click, scroll = yt_scroll, loaded = yt_loaded, dump = yt_dump}
-	panel_init(a, &y.pn, "youtube", data)
+	panel_init(a, &y.pn, a.opts.jellyfin ? "jellyfin" : "youtube", data)
 	y.refresh_ms = 1500
 	a.width, a.height = y.popup ? YT_PW : YT_W, y.popup ? YT_PH : YT_H
 	y.field = !y.searched || len(y.vids) == 0
@@ -71,7 +78,7 @@ Y :: proc(a: ^App) -> ^YouTube { return (^YouTube)(a.pn) }
 
 @(private = "file")
 yt_free :: proc(list: ^[dynamic]Yt_Video) {
-	for &v in list { delete(v.id); delete(v.title); delete(v.channel); delete(v.thumb) }
+	for &v in list { delete(v.id); delete(v.title); delete(v.channel); delete(v.thumb); delete(v.section) }
 	clear(list)
 }
 
@@ -95,13 +102,18 @@ yt_loaded :: proc(a: ^App, data: string) {
 			delete(y.query); delete(y.took); delete(y.view); delete(y.view_name)
 			y.query, y.took, y.searched = strings.clone(fget(f, 1)), strings.clone(fget(f, 3)), true
 			y.view, y.view_name = strings.clone(fget(f, 4)), strings.clone(fget(f, 5))
+		case "T": // the wording (another source in this window: Jellyfin)
+			delete(y.label); delete(y.placeholder); delete(y.home_title); delete(y.source); delete(y.chan_word); delete(y.chan_items); delete(y.search_note)
+			y.label, y.placeholder, y.home_title, y.source = strings.clone(fget(f, 1)), strings.clone(fget(f, 2)), strings.clone(fget(f, 3)), strings.clone(fget(f, 4))
+			y.chan_word, y.chan_items, y.search_note = strings.clone(fget(f, 5)), strings.clone(fget(f, 6)), strings.clone(fget(f, 7))
 		case "C": // the search named a channel: it, first among the results
 			append(&y.vids, Yt_Video{id = strings.clone(fget(f, 1)), title = strings.clone(fget(f, 2)), channel = strings.clone(fget(f, 3)), views = num(fget(f, 4)), thumb = strings.clone(fget(f, 5)), is_chan = true})
 		case "F":
 			delete(y.home_browser); delete(y.home_why)
 			y.home, y.home_browser, y.home_why = strings.clone(fget(f, 1)), strings.clone(fget(f, 2)), strings.clone(fget(f, 3))
 		case "W":
-			append(&y.feed, Yt_Video{id = strings.clone(fget(f, 1)), title = strings.clone(fget(f, 2)), channel = strings.clone(fget(f, 3)), secs = num(fget(f, 4)), views = num(fget(f, 5)), thumb = strings.clone(fget(f, 6))})
+			append(&y.feed, Yt_Video{id = strings.clone(fget(f, 1)), title = strings.clone(fget(f, 2)), channel = strings.clone(fget(f, 3)), secs = num(fget(f, 4)), views = num(fget(f, 5)), thumb = strings.clone(fget(f, 6)),
+				section = strings.clone(fget(f, 7)), pos = num(fget(f, 8))}) // (Jellyfin's: a section, resume, nextup or latest, and where it stopped)
 		case "V":
 			append(&y.vids, Yt_Video{id = strings.clone(fget(f, 1)), title = strings.clone(fget(f, 2)), channel = strings.clone(fget(f, 3)), secs = num(fget(f, 4)), views = num(fget(f, 5)), thumb = strings.clone(fget(f, 6))})
 		case "N":
@@ -400,12 +412,13 @@ yt_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	// the head: the crumb, the title, the state at the right
 	hh := (y.popup ? 40 : 48) * S
 	cf := y.popup ? y.f11b : y.f12b
-	crumb := y.tab == .Results ? (y.view == "channel" ? "YOUTUBE › CHANNEL" : "YOUTUBE") : fmt.tprintf("YOUTUBE › %s", y.tab == .Queue ? "QUEUE" : "HISTORY")
+	nm := strings.to_upper(yt_word(y.label, "YouTube"), context.temp_allocator)
+	crumb := y.tab == .Results ? (y.view == "channel" ? fmt.tprintf("%s › %s", nm, yt_word(y.chan_word, "CHANNEL")) : nm) : fmt.tprintf("%s › %s", nm, y.tab == .Queue ? "QUEUE" : "HISTORY")
 	cw, ch := tw(cf, crumb) + (y.popup ? 12 : 16) * S, (y.popup ? 20 : 24) * S
 	fill_rect(cv, px, (hh - ch) / 2, cw, ch, argb(H.acc, 0xff))
 	text_in(cv, cf, crumb, px + (cw - tw(cf, crumb)) / 2, (hh - ch) / 2, ch, argb(H.bg, 0xff))
 	searching := yt_searching(y) && y.tab == .Results
-	st, stc := "yt-dlp · mpv", H.dim
+	st, stc := yt_word(y.source, "yt-dlp · mpv"), H.dim
 	switch {
 	case y.state == "missing": st, stc = "not installed", th.red
 	case y.state == "installing": st, stc = "installing", H.acc
@@ -423,7 +436,7 @@ yt_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	case y.tab == .History: title = fmt.tprintf("%d watched", len(y.hist))
 	case searching: title = fmt.tprintf("“%s”", panel_text(&y.pn) != "" ? strings.trim_space(panel_text(&y.pn)) : y.query)
 	case y.state == "offline" || y.state == "error": title = fmt.tprintf("“%s” · not sent", y.query)
-	case y.view == "channel": title = fmt.tprintf("%s · %d newest videos", y.view_name, len(y.vids))
+	case y.view == "channel": title = fmt.tprintf("%s · %d %s", y.view_name, len(y.vids), yt_word(y.chan_items, "newest videos"))
 	case y.searched:
 		n := 0
 		for v in y.vids do if !v.is_chan do n += 1
@@ -476,7 +489,7 @@ yt_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	hint := searching ? "searching · 2–5 s" : (setup ? "needs yt-dlp" : (y.field && q != "" ? "↵ search" : (q == "" ? "type anywhere" : "")))
 	hw := tw(y.f10, hint)
 	text_in(cv, y.f10, hint, px + fw - 12 * S - hw, yy, fhh, argb(searching ? H.acc : H.dim, 0xff))
-	if q == "" do text_in(cv, y.f12, "Search YouTube…", qx, yy, fhh, argb(H.faint, setup ? 0x80 : 0xff))
+	if q == "" do text_in(cv, y.f12, yt_word(y.placeholder, "Search YouTube…"), qx, yy, fhh, argb(H.faint, setup ? 0x80 : 0xff))
 	shown := q
 	for tw(y.f12, shown) > fw - (qx - px) - hw - 24 * S && len(shown) > 0 do shown = shown[1:]
 	text_in(cv, y.f12, shown, qx, yy, fhh, argb(H.fg, 0xff))
@@ -510,7 +523,7 @@ yt_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	}
 	home_feed := y.tab == .Results && !y.searched && len(y.feed) > 0 && !yt_setup(y)
 	if !y.popup || home_feed { // (the home page says whose it is here, where the grid does not lose a row to it)
-		note := home_feed ? fmt.tprintf("YOUR YOUTUBE HOME · %s", yt_browser(y)) : "Tab · Alt+1–3"
+		note := home_feed ? (y.home_title != "" ? y.home_title : fmt.tprintf("YOUR YOUTUBE HOME · %s", yt_browser(y))) : "Tab · Alt+1–3"
 		text_in(cv, y.f10, note, w - px - tw(y.f10, note), yy, tabh, argb(H.dim, 0xff))
 	}
 	yy += tabh
@@ -524,28 +537,28 @@ yt_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	case y.tab == .Results && searching: yt_grid(a, cv, S, H, nil, px, body_top + 12 * S, w - 2 * px, body_bot - body_top - 12 * S, true)
 	case y.tab == .Results && (y.state == "offline" || y.state == "error"):
 		offline := y.state == "offline"
-		yt_card(a, cv, S, H, px, body_top, w - 2 * px, body_bot - body_top, 560, th.yellow, true, offline ? "Can’t reach YouTube" : "The search failed",
-			{y.note != "" ? fmt.tprintf("yt-dlp: %s", y.note) : "yt-dlp could not reach YouTube", "Queue and History still work, and the video that is loaded keeps playing."},
+		yt_card(a, cv, S, H, px, body_top, w - 2 * px, body_bot - body_top, 560, th.yellow, true, offline ? fmt.tprintf("Can’t reach %s", yt_word(y.label, "YouTube")) : "The search failed",
+			{y.note != "" ? (y.label != "" ? y.note : fmt.tprintf("yt-dlp: %s", y.note)) : "yt-dlp could not reach YouTube", "Queue and History still work, and the video that is loaded keeps playing."},
 			{{"Retry", "^R"}, {"Queue", "Alt+2"}}, true)
 	case y.tab == .Results && y.searched && len(y.vids) == 0:
 		yt_card(a, cv, S, H, px, body_top, w - 2 * px, body_bot - body_top, 520, H.fg, false, fmt.tprintf("Nothing for “%s”", y.query),
-			{"yt-dlp searched and found no videos. Try fewer or different words."}, {{"Edit the search", "Esc"}, {"History", "Alt+3"}}, false)
+			{y.label != "" ? "Nothing matched. Try fewer or different words." : "yt-dlp searched and found no videos. Try fewer or different words."}, {{"Edit the search", "Esc"}, {"History", "Alt+3"}}, false)
 	case home_feed: yt_grid(a, cv, S, H, y.feed[:], px, body_top + 12 * S, w - 2 * px, body_bot - body_top - 12 * S, false, yt_more_loading(y)) // your home page: as much room as results
 	case y.tab == .Results && !y.searched: // nothing searched: a hint, then continue watching
 		hy := body_top + 12 * S
 		hb := 34 * S
 		panel_dashed(cv, px, hy, w - 2 * px, hb, S, argb(H.faint, 0xff))
 		text_in(cv, y.f11, "Type, then ↵ to search.", px + 12 * S, hy, hb, argb(soft, 0xff))
-		text_in(cv, y.f11, "yt-dlp, no account · a search takes 2–5 s", px + 12 * S + tw(y.f11, "Type, then ↵ to search.") + 10 * S, hy, hb, argb(H.dim, 0xff))
+		text_in(cv, y.f11, yt_word(y.search_note, "yt-dlp, no account · a search takes 2–5 s"), px + 12 * S + tw(y.f11, "Type, then ↵ to search.") + 10 * S, hy, hb, argb(H.dim, 0xff))
 		hy += hb + 12 * S
 		bname := yt_browser(y)
 		switch {
 		case y.home == "loading" || y.home == "":
-			spaced(cv, y.f10b, fmt.tprintf("YOUR YOUTUBE HOME · %s · loading", bname), px, hy, 14 * S, H.dim, S)
+			spaced(cv, y.f10b, y.home_title != "" ? fmt.tprintf("%s · loading", y.home_title) : fmt.tprintf("YOUR YOUTUBE HOME · %s · loading", bname), px, hy, 14 * S, H.dim, S)
 			hy += 14 * S + 8 * S
 			yt_grid(a, cv, S, H, nil, px, hy, w - 2 * px, body_bot - hy, true)
 		case:
-			why := y.home == "signedout" ? fmt.tprintf("Sign in to YouTube in %s to see your home page here · ^R tries again", bname) : fmt.tprintf("Your home page did not load%s · ^R tries again", y.home_why != "" ? fmt.tprintf(": %s", y.home_why) : "")
+			why := y.home == "signedout" ? (y.label != "" ? fmt.tprintf("%s · ^R tries again", y.home_why) : fmt.tprintf("Sign in to YouTube in %s to see your home page here · ^R tries again", bname)) : fmt.tprintf("Your home page did not load%s · ^R tries again", y.home_why != "" ? fmt.tprintf(": %s", y.home_why) : "")
 			text_in(cv, y.f11, ellipsize(y.f11, why, w - 2 * px), px, hy, 16 * S, argb(th.yellow, 0xff))
 			hy += 16 * S + 12 * S
 			if len(y.hist) > 0 {
@@ -644,7 +657,7 @@ yt_grid :: proc(a: ^App, cv: ^Canvas, S: int, H: HUD, l: []Yt_Video, x, y, w, h:
 		on := i == cur && !yt.field
 		is_now := v.id == yt.now.id
 		hit_add(a, tx, ty, tw_, rh - gy, .Item, i, 0)
-		yt_thumb(a, cv, S, H, v.thumb, tx, ty, tw_, th_, yt_watched(yt, v.id) if v.ts > 0 else 0)
+		yt_thumb(a, cv, S, H, v.thumb, tx, ty, tw_, th_, yt_watched(yt, v.id) if v.ts > 0 else (v.pos > 0 && v.secs > 0 ? clamp(v.pos * 100 / v.secs, 1, 100) : 0))
 		// the outline: picked (2 px, the accent, a glow), playing (the accent, faint), else the line
 		if on {
 			rounded_rect(cv, tx - 3 * S, ty - 3 * S, tw_ + 6 * S, th_ + 6 * S, 0, 0, f32(S), argb(H.acc, 0x30))
@@ -667,12 +680,13 @@ yt_grid :: proc(a: ^App, cv: ^Canvas, S: int, H: HUD, l: []Yt_Video, x, y, w, h:
 				}
 			}
 			rounded_rect(cv, tx, ty, tw_, th_, 0, 0, on ? 2 * f32(S) : f32(S), on ? argb(H.acc, 0xff) : argb(H.acc, 0x66))
-			bw := tw(yt.f10b, "CHANNEL") + 10 * S
+			cword := yt_word(yt.chan_word, "CHANNEL")
+			bw := tw(yt.f10b, cword) + 10 * S
 			fill_rect(cv, tx + 5 * S, ty + 5 * S, bw, 15 * S, argb(H.acc, 0xff))
-			text_in(cv, yt.f10b, "CHANNEL", tx + 10 * S, ty + 5 * S, 15 * S, argb(H.bg, 0xff))
+			text_in(cv, yt.f10b, cword, tx + 10 * S, ty + 5 * S, 15 * S, argb(H.bg, 0xff))
 			if on {
 				fill_rect(cv, tx, ty + th_ - 22 * S, tw_, 22 * S, argb(0x04070c, 0xcc))
-				text_in(cv, yt.f9, "↵ its videos  o browser", tx + 6 * S, ty + th_ - 22 * S, 22 * S, argb(H.fg, 0xff))
+				text_in(cv, yt.f9, fmt.tprintf("↵ its %s  o browser", yt.chan_items != "" ? yt.chan_items : "videos"), tx + 6 * S, ty + th_ - 22 * S, 22 * S, argb(H.fg, 0xff))
 			}
 			text_in(cv, tf, ellipsize(tf, v.title, tw_), tx, ty + th_ + 6 * S, tlh, argb(on ? H.acc : H.fg, 0xff))
 			subs := v.views >= 1_000_000 ? fmt.tprintf("%.1fM subscribers", f64(v.views) / 1e6) : (v.views >= 1000 ? fmt.tprintf("%dK subscribers", v.views / 1000) : "")
@@ -688,6 +702,11 @@ yt_grid :: proc(a: ^App, cv: ^Canvas, S: int, H: HUD, l: []Yt_Video, x, y, w, h:
 		badge := ""
 		if is_now do badge = yt.paused ? "‖ PAUSED" : "▶ PLAYING"
 		else do for q, qi in yt_items(yt, .Queue) do if q.id == v.id { badge = fmt.tprintf("QUEUE %d", qi + 1); break }
+		if badge == "" do switch v.section { // (Jellyfin's home: which list it came from)
+		case "resume": badge = "CONTINUE"
+		case "nextup": badge = "NEXT UP"
+		case "latest": badge = "NEW"
+		}
 		if badge != "" {
 			bw := tw(yt.f10b, badge) + 10 * S
 			fill_rect(cv, tx + 5 * S, ty + 5 * S, bw, 15 * S, is_now ? argb(H.acc, 0xff) : argb(0x04070c, 0xdd))
@@ -951,7 +970,7 @@ yt_setup_card :: proc(a: ^App, cv: ^Canvas, S: int, H: HUD, x, y, w, h: int) {
 yt_dump :: proc(a: ^App) -> string {
 	y := Y(a)
 	sb := strings.builder_make(context.temp_allocator)
-	fmt.sbprintfln(&sb, "youtube %s%s", y.state, y.note != "" ? fmt.tprintf(" · %s", y.note) : "")
+	fmt.sbprintfln(&sb, "%s %s%s", y.label != "" ? strings.to_lower(y.label, context.temp_allocator) : "youtube", y.state, y.note != "" ? fmt.tprintf(" · %s", y.note) : "")
 	if yt_setup(y) {
 		fmt.sbprintfln(&sb, "card %s · yt-dlp %s · mpv %s", y.state == "installing" ? "Installing" : "Missing", y.ytv != "" ? y.ytv : "missing", y.mpvv != "" ? y.mpvv : "missing")
 		panel_dump_toast(&y.pn, &sb)
@@ -967,10 +986,16 @@ yt_dump :: proc(a: ^App) -> string {
 	}
 	for v, i in l {
 		mark := i == y.cur[y.tab] && !y.field ? "*" : " "
-		if v.is_chan { fmt.sbprintfln(&sb, "%s [channel] %s · %s · %d subscribers", mark, v.title, v.channel, v.views); continue }
+		if v.is_chan {
+			if y.chan_word != "" do fmt.sbprintfln(&sb, "%s [%s] %s · %s", mark, strings.to_lower(y.chan_word, context.temp_allocator), v.title, v.channel)
+			else do fmt.sbprintfln(&sb, "%s [channel] %s · %s · %d subscribers", mark, v.title, v.channel, v.views)
+			continue
+		}
 		extra := y.tab == .History ? "" : fmt.tprintf(" · %s", yt_secs(v.secs))
 		if v.id == y.now.id do extra = strings.concatenate({extra, " · playing"}, context.temp_allocator)
 		if pc := yt_watched(y, v.id); pc > 0 && v.ts > 0 do extra = strings.concatenate({extra, pc < 100 ? fmt.tprintf(" · %d%%", pc) : " · watched"}, context.temp_allocator)
+		if v.section != "" do extra = strings.concatenate({extra, fmt.tprintf(" · [%s]", v.section)}, context.temp_allocator)
+		if v.pos > 0 && v.secs > 0 && v.ts == 0 do extra = strings.concatenate({extra, fmt.tprintf(" · at %d%%", v.pos * 100 / v.secs)}, context.temp_allocator)
 		fmt.sbprintfln(&sb, "%s %s · %s%s%s", mark, v.title, v.channel, extra, v.thumb != "" ? "" : " · nothumb")
 	}
 	if y.now.id != "" do fmt.sbprintfln(&sb, "now %s %s · %s / %s · %s", y.paused ? "‖" : "▶", y.now.title, yt_clock(y.pos), yt_secs(y.dur), y.hidden ? "PiP HIDDEN" : "PiP · TOP LEFT")

@@ -22,7 +22,7 @@ echo "data (live, what each window waits for)"
 for w in clock wow releases messenger mail youtube claude bus keymap; do
   command -v "k4-$w" >/dev/null && row "k4-$w data" "k4-$w data"
 done
-for p in discord parcels events todo; do
+for p in discord parcels events todo jellyfin pihole; do
   command -v "k4-$p" >/dev/null && row "k4-$p page" "k4-$p section"
 done
 row "launcher tree" "sway-menu k4-tree"

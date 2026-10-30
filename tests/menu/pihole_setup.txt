@@ -1,0 +1,5 @@
+D	Pi-hole on kr4nkenhole · ads blocked for the whole network	not connected	Search Pi-hole…
+Y	↑↓	Step	↵	Do it	⌃V	Paste	⌫	Back
+N	Connect your Pi-hole	Pi-hole’s web page › Settings › Web interface / API › Configure app password: copy it and paste it here. It stays in the keyring; your login password stays yours.	accent	
+A	azQtcGlob2xlIHJ1biBZbWNnZUdSbkxXOXdaVzRnYUhSMGNITTZMeTlyY2pSdWEyVnVhRzlzWlM5aFpHMXBiaTl6WlhSMGFXNW5jeTloY0drPQ==	Open Pi-hole’s settings	the web page		stay;mark=1;markc=accent
+A	azQtcGlob2xlIHJ1biBMMmh2YldVdmEzSTBibXN2TG14dlkyRnNMM05vWVhKbEx5NHVMMkpwYmk5ck5DMXdhV2h2YkdVZ2MyVjBkWEF0Y0dGemMzZHZjbVE9	Paste the app password	kept in the keyring		stay;mark=2;markc=accent;input=Pi-hole app password|Settings › Web interface / API › app password|password

@@ -1,0 +1,14 @@
+{
+ "clients": [
+  {
+   "ip": "192.168.1.20",
+   "name": "desktop.lan",
+   "count": 7200
+  },
+  {
+   "ip": "192.168.1.50",
+   "name": "phone.lan",
+   "count": 3100
+  }
+ ]
+}

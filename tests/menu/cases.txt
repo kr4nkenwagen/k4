@@ -123,3 +123,12 @@ todo_type	todo	oat milk · fri<enter>	-
 todo_setup	todosetup	-	-
 todo-typed	-	todo buy milk · fri	-
 todo-typed-run	-	todo buy milk<enter>	-
+pihole_page	pihole	-	-
+pihole_pause	pihole	<enter>	-
+pihole_paused	piholepaused	-	-
+pihole_setup	piholesetup	-	-
+pihole_filter	pihole	ads.trac	-
+pihole-allow-typed	-	allow ads.tracker.example	-
+pihole-allow-run	-	block metrics.tv.example<enter>	-
+baritems_page	baritems	-	-
+baritems_toggle	baritems	<space>	-

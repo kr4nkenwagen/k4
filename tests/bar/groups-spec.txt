@@ -1,0 +1,10 @@
+B	height=26	groups=1
+G	net	N	Network
+G	apps	A	Apps
+M	clk	center	clock	T1;D1	0	-	-	-	-	-	-
+M	msg	right	exec	echo "{\"icon\":\"M\",\"badge\":3}"	30	-	-	-	-	-	-	group=apps
+M	mail	right	exec	echo "{\"icon\":\"E\",\"badge\":2,\"badge_tone\":\"red\"}"	30	-	-	-	-	-	-	group=apps
+M	dc	right	exec	echo "{\"icon\":\"D\"}"	30	-	-	-	-	-	-	group=apps
+M	ph	right	exec	echo "{\"icon\":\"P\",\"text\":\"18%\"}"	30	-	-	-	-	-	-	group=net
+M	net	right	exec	echo "{\"icon\":\"W\",\"text\":\"home\",\"class\":\"critical\"}"	30	-	-	-	-	-	-	group=net
+M	bat	right	exec	echo "{\"battery\":80,\"text\":\"80%\"}"	30	-	-	-	-	-	-

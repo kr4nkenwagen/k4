@@ -1,0 +1,10 @@
+S	ok			
+T	Jellyfin	Search Jellyfin…	FROM YOUR SERVER · JELLYFIN.KR4NK.NET	jellyfin.kr4nk.net	SHOW	episodes	movies, shows and episodes on jellyfin.kr4nk.net
+F	ok		
+W	c0000000000000000000000000000001	The Quiet Harbour	2024 · Movie	6600	0		resume	2400
+W	e0000000000000000000000000000003	Northern Static · Signal Loss	S1 · E3	2880	0		resume	600
+W	e0000000000000000000000000000004	Northern Static · Echoes	S1 · E4	2820	0		nextup	0
+W	c0000000000000000000000000000002	Paper Lanterns	2025 · Movie	5760	0		latest	0
+P	0	c0000000000000000000000000000001	The Quiet Harbour	2024 · Movie	6600	1	
+P	1	e0000000000000000000000000000004	Northern Static · Echoes	S1 · E4	2880	0	
+N	c0000000000000000000000000000001	The Quiet Harbour	2024 · Movie	play	2500	6600	shown	

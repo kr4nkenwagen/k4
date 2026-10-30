@@ -1,0 +1,20 @@
+B	height=26	groups=1
+G	status	S	Status	-	drawer status
+G	apps	A	Apps	-	drawer apps
+G	info	I	Info	weather	drawer info
+G	network	N	Network	-	drawer network
+G	system	Y	System	audio	drawer system
+M	clk	center	clock	T1;D1	0	-	-	-	-	-	-
+M	night	right	exec	echo '{"icon":"n"}'	30	-	-	-	-	-	-	group=status
+M	share	right	exec	echo '{"icon":"d","icon_tone":"accent","text":"68%","text_tone":"accent"}'	30	-	-	-	-	-	-	group=status
+M	messenger	right	exec	echo '{"icon":"m","badge":3}'	30	-	-	-	-	-	-	group=apps
+M	mail	right	exec	echo '{"icon":"e","badge":3}'	30	-	-	-	-	-	-	group=apps
+M	wow	right	exec	echo '{"icon":"w","text":"452g","text_tone":"yellow"}'	30	-	-	-	-	-	-	group=apps
+M	perf	right	exec	echo '{"icon":"c","text":"18%","text2":"6.2G"}'	30	-	-	-	-	-	-	group=info
+M	weather	right	exec	echo '{"icon":"p","text":"6°"}'	30	-	-	-	-	-	-	group=info
+M	pihole	right	exec	echo '{"shape":"shield-on","text":"18%"}'	30	-	-	-	-	-	-	group=network
+M	network	right	exec	echo '{"icon":"W"}'	30	-	-	-	-	-	-	group=network
+M	microphone	right	exec	echo '{"icon":"M"}'	30	-	-	-	-	-	-	group=system
+M	audio	right	exec	echo '{"icon":"V","text":"62%"}'	30	-	-	-	-	-	-	group=system
+M	keyboard	right	exec	echo '{"text":"us","class":"dim"}'	30	-	-	-	-	-	-	group=system
+M	battery	right	exec	echo '{"battery":78,"text":"78%"}'	30	-	-	-	-	-	-	-

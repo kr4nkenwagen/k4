@@ -1,0 +1,24 @@
+{
+ "lists": [
+  {
+   "address": "https://lists.example.net/hosts.txt",
+   "comment": "the default list",
+   "enabled": true,
+   "type": "block",
+   "number": 400000,
+   "groups": [
+    0
+   ]
+  },
+  {
+   "address": "https://lists.example.net/extra.txt",
+   "comment": "",
+   "enabled": false,
+   "type": "block",
+   "number": 12377,
+   "groups": [
+    0
+   ]
+  }
+ ]
+}

@@ -1,0 +1,24 @@
+D	Pi-hole on kr4nkenhole · 18240 queries today · 18% blocked · 9 clients	off · 4:32	Filter queries…
+Y	↑↓	Move	↵	Run · allow	⌃B	Block	Del	Remove	type	Filter	⌫	Back
+H	Blocking	
+A	azQtcGlob2xlIHJ1biBMMmh2YldVdmEzSTBibXN2TG14dlkyRnNMM05vWVhKbEx5NHVMMkpwYmk5ck5DMXdhV2h2YkdVZ2NtVnpkVzFs	Resume blocking	back on in 4:32		stay;mark=▶;markc=yellow;chip=OFF;chipc=yellow
+H	unbound	ok
+A	azQtcGlob2xlIHJ1biBPZz09	unbound resolves · DNSSEC validates	24 ms · checked just now		mark=✓;markc=green;l2=cache hits 71% · recursion 88 ms · 3 SERVFAIL · up 10d;l2c=dim
+A	azQtcGlob2xlIHJ1biBMMmh2YldVdmEzSTBibXN2TG14dlkyRnNMM05vWVhKbEx5NHVMMkpwYmk5ck5DMXdhV2h2YkdVZ2NtVnpkR0Z5ZEMxMWJtSnZkVzVr	Restart unbound	sudo systemctl restart unbound		stay;mark=↻;markc=dim
+H	Recent queries	3
+A	azQtcGlob2xlIHJ1biBMMmh2YldVdmEzSTBibXN2TG14dlkyRnNMM05vWVhKbEx5NHVMMkpwYmk5ck5DMXdhV2h2YkdVZ1lXeHNiM2NnWVdSekxuUnlZV05yWlhJdVpYaGhiWEJzWlE9PQ==	ads.tracker.example	↵ allows		stay;mark=⊘;markc=red;l2=phone.lan · 10:31:54 · adlist;l2c=dim;find=ads.tracker.example phone.lan;metac=red
+A	azQtcGlob2xlIHJ1biBPZz09	news.example.org	AAAA		mark=·;markc=dim;l2=desktop.lan · 10:31:34;l2c=dim;find=news.example.org desktop.lan;k^b=azQtcGlob2xlIHJ1biBMMmh2YldVdmEzSTBibXN2TG14dlkyRnNMM05vWVhKbEx5NHVMMkpwYmk5ck5DMXdhV2h2YkdVZ1lteHZZMnNnYm1WM2N5NWxlR0Z0Y0d4bExtOXladz09;dim
+A	azQtcGlob2xlIHJ1biBMMmh2YldVdmEzSTBibXN2TG14dlkyRnNMM05vWVhKbEx5NHVMMkpwYmk5ck5DMXdhV2h2YkdVZ1lXeHNiM2NnYldWMGNtbGpjeTUwZGk1bGVHRnRjR3hs	metrics.tv.example	↵ allows		stay;mark=⊘;markc=red;l2=192.168.1.60 · 10:31:14 · your deny list;l2c=dim;find=metrics.tv.example 192.168.1.60;metac=red
+H	Top clients today	
+A	azQtcGlob2xlIHJ1biBPZz09	desktop.lan	7200 queries		mark=◦;markc=dim;l2=192.168.1.20;l2c=dim
+A	azQtcGlob2xlIHJ1biBPZz09	phone.lan	3100 queries		mark=◦;markc=dim;l2=192.168.1.50;l2c=dim
+H	Adlists	2
+A	azQtcGlob2xlIHJ1biBMMmh2YldVdmEzSTBibXN2TG14dlkyRnNMM05vWVhKbEx5NHVMMkpwYmk5ck5DMXdhV2h2YkdVZ1ozSmhkbWwwZVE9PQ==	Update gravity	412 377 domains · updated 3 d ago		stay;mark=↻;markc=accent
+A	azQtcGlob2xlIHJ1biBMMmh2YldVdmEzSTBibXN2TG14dlkyRnNMM05vWVhKbEx5NHVMMkpwYmk5ck5DMXdhV2h2YkdVZ2JHbHpkQzEwYjJkbmJHVWdhSFIwY0hNNkx5OXNhWE4wY3k1bGVHRnRjR3hsTG01bGRDOW9iM04wY3k1MGVIUT0=	lists.example.net/hosts.txt	400 000 domains		stay;toggle=on;l2=the default list;l2c=dim
+A	azQtcGlob2xlIHJ1biBMMmh2YldVdmEzSTBibXN2TG14dlkyRnNMM05vWVhKbEx5NHVMMkpwYmk5ck5DMXdhV2h2YkdVZ2JHbHpkQzEwYjJkbmJHVWdhSFIwY0hNNkx5OXNhWE4wY3k1bGVHRnRjR3hsTG01bGRDOWxlSFJ5WVM1MGVIUT0=	lists.example.net/extra.txt	12 377 domains		stay;toggle=off;l2=;l2c=dim
+H	Your allow and deny entries	2
+A	azQtcGlob2xlIHJ1biBPZz09	cdn.shop.example	allowed		mark=✓;markc=green;del=azQtcGlob2xlIHJ1biBMMmh2YldVdmEzSTBibXN2TG14dlkyRnNMM05vWVhKbEx5NHVMMkpwYmk5ck5DMXdhV2h2YkdVZ2RXNXNhWE4wSUdGc2JHOTNJR1Y0WVdOMElHTmtiaTV6YUc5d0xtVjRZVzF3YkdVPQ==
+A	azQtcGlob2xlIHJ1biBPZz09	metrics.tv.example	blocked		mark=⊘;markc=red;del=azQtcGlob2xlIHJ1biBMMmh2YldVdmEzSTBibXN2TG14dlkyRnNMM05vWVhKbEx5NHVMMkpwYmk5ck5DMXdhV2h2YkdVZ2RXNXNhWE4wSUdSbGJua2daWGhoWTNRZ2JXVjBjbWxqY3k1MGRpNWxlR0Z0Y0d4bA==
+H	More	
+A	azQtcGlob2xlIHJ1biBZbWNnZUdSbkxXOXdaVzRnYUhSMGNITTZMeTlyY2pSdWEyVnVhRzlzWlM5aFpHMXBiaTg9	Open Pi-hole’s web page	Pi-hole v6.2 · FTL v6.3		mark=↗;markc=dim
+A	azQtcGlob2xlIHJ1biBMMmh2YldVdmEzSTBibXN2TG14dlkyRnNMM05vWVhKbEx5NHVMMkpwYmk5ck5DMXdhV2h2YkdVZ2RHbGphdz09	Look now	checked just now · every minute		stay;mark=↻;markc=dim

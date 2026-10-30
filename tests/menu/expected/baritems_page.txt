@@ -1,0 +1,55 @@
+focus Sub
+crumb NETWORK › BAR ITEMS
+query (Search bar items…)
+count 1 hidden
+hints ↑↓ Move · Space On / off · ⌫ Back · Esc Close
+title Bar items · Each module on the bar · Space or ↵ switches it · the bar restarts with the change (full width)
+== LEFT
+* Menu | [on]
+  Workspaces | [on]
+  Window title | [on]
+== CENTRE
+  Clock | [on]
+  Todo | [on]
+  Media | [on]
+== STATUS
+  Do not disturb | only while on [on]
+  Night light | only while on [on]
+  Recording | only while recording [on]
+  Stay awake | only while on [on]
+  Reminder | a meeting soon [on]
+  Calendar sync | only when the calendar can't sync [on]
+  LocalSend | only while sending [on]
+  Drives | only with a drive in [on]
+== APPS
+  Pinned tray app 1 | a tray app you pin [on]
+  Pinned tray app 2 | a tray app you pin [on]
+  Pinned tray app 3 | a tray app you pin [on]
+  Messenger | [on]
+  Mail | [on]
+  Parcels | [on]
+  Discord | [on]
+  WoW | [on]
+  Tray | [on]
+== INFO
+  Updates | only with updates [on]
+  Performance | [on]
+  Claude | [on]
+  Bus | [on]
+  Weather | [off]
+== SOUND
+  Microphone | [on]
+  Audio | [on]
+== NETWORK
+  Pi-hole | [on]
+  Network | [on]
+  Router | [on]
+  Bluetooth | [on]
+== SYSTEM
+  Brightness | only on a laptop [on]
+  Battery | only on a laptop [on]
+  Keyboard layout | [on]
+== MORE
+  Show all | 1 hidden (mark ↺)
+exit 1
+log: load apps

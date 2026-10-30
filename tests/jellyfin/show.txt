@@ -1,0 +1,7 @@
+S	ok			
+T	Jellyfin	Search Jellyfin…	FROM YOUR SERVER · JELLYFIN.KR4NK.NET	jellyfin.kr4nk.net	SHOW	episodes	movies, shows and episodes on jellyfin.kr4nk.net
+Q	static	4	0.0	channel	Northern Static
+V	e0000000000000000000000000000001	Static	S1 · E1	2880	0	
+V	e0000000000000000000000000000002	Carrier Wave	S1 · E2	2880	0	
+V	e0000000000000000000000000000003	Signal Loss	S1 · E3	2880	0	
+V	e0000000000000000000000000000004	Echoes	S1 · E4	2880	0	

@@ -1,0 +1,6 @@
+S	ok			
+T	Jellyfin	Search Jellyfin…	FROM YOUR SERVER · JELLYFIN.KR4NK.NET	jellyfin.kr4nk.net	SHOW	episodes	movies, shows and episodes on jellyfin.kr4nk.net
+Q	static	3	0.0	search	
+C	a1b2c3d4e5f60718293a4b5c6d7e8f90	Northern Static	2025 · 5 unwatched	0	
+V	c0000000000000000000000000000003	Static Bloom	2023 · Movie	6060	0	
+V	e0000000000000000000000000000001	Northern Static · Static	S1 · E1	3000	0	

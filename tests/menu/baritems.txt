@@ -1,0 +1,49 @@
+D	Each module on the bar · Space or ↵ switches it · the bar restarts with the change	1 hidden	Search bar items…
+Y	↑↓	Move	Space	On / off	⌫	Back
+H	Left	
+A	azQtYmFyIGhpZGUgbWVudSB0b2dnbGU=	Menu			stay;toggle=on
+A	azQtYmFyIGhpZGUgd29ya3NwYWNlcyB0b2dnbGU=	Workspaces			stay;toggle=on
+A	azQtYmFyIGhpZGUgd2luZG93IHRvZ2dsZQ==	Window title			stay;toggle=on
+H	Centre	
+A	azQtYmFyIGhpZGUgY2xvY2sgdG9nZ2xl	Clock			stay;toggle=on
+A	azQtYmFyIGhpZGUgdG9kbyB0b2dnbGU=	Todo			stay;toggle=on
+A	azQtYmFyIGhpZGUgbWVkaWEgdG9nZ2xl	Media			stay;toggle=on
+H	Status	
+A	azQtYmFyIGhpZGUgZG5kIHRvZ2dsZQ==	Do not disturb	only while on		stay;toggle=on
+A	azQtYmFyIGhpZGUgbmlnaHQgdG9nZ2xl	Night light	only while on		stay;toggle=on
+A	azQtYmFyIGhpZGUgcmVjIHRvZ2dsZQ==	Recording	only while recording		stay;toggle=on
+A	azQtYmFyIGhpZGUgYXdha2UgdG9nZ2xl	Stay awake	only while on		stay;toggle=on
+A	azQtYmFyIGhpZGUgcmVtaW5kZXIgdG9nZ2xl	Reminder	a meeting soon		stay;toggle=on
+A	azQtYmFyIGhpZGUgY2Fsc3luYyB0b2dnbGU=	Calendar sync	only when the calendar can't sync		stay;toggle=on
+A	azQtYmFyIGhpZGUgc2hhcmUgdG9nZ2xl	LocalSend	only while sending		stay;toggle=on
+A	azQtYmFyIGhpZGUgZHJpdmVzIHRvZ2dsZQ==	Drives	only with a drive in		stay;toggle=on
+H	Apps	
+A	azQtYmFyIGhpZGUgcGluMCB0b2dnbGU=	Pinned tray app 1	a tray app you pin		stay;toggle=on
+A	azQtYmFyIGhpZGUgcGluMSB0b2dnbGU=	Pinned tray app 2	a tray app you pin		stay;toggle=on
+A	azQtYmFyIGhpZGUgcGluMiB0b2dnbGU=	Pinned tray app 3	a tray app you pin		stay;toggle=on
+A	azQtYmFyIGhpZGUgbWVzc2VuZ2VyIHRvZ2dsZQ==	Messenger			stay;toggle=on
+A	azQtYmFyIGhpZGUgbWFpbCB0b2dnbGU=	Mail			stay;toggle=on
+A	azQtYmFyIGhpZGUgcGFyY2VscyB0b2dnbGU=	Parcels			stay;toggle=on
+A	azQtYmFyIGhpZGUgZGlzY29yZCB0b2dnbGU=	Discord			stay;toggle=on
+A	azQtYmFyIGhpZGUgd293IHRvZ2dsZQ==	WoW			stay;toggle=on
+A	azQtYmFyIGhpZGUgdHJheSB0b2dnbGU=	Tray			stay;toggle=on
+H	Info	
+A	azQtYmFyIGhpZGUgdXBkYXRlcyB0b2dnbGU=	Updates	only with updates		stay;toggle=on
+A	azQtYmFyIGhpZGUgcGVyZiB0b2dnbGU=	Performance			stay;toggle=on
+A	azQtYmFyIGhpZGUgY2xhdWRlIHRvZ2dsZQ==	Claude			stay;toggle=on
+A	azQtYmFyIGhpZGUgYnVzIHRvZ2dsZQ==	Bus			stay;toggle=on
+A	azQtYmFyIGhpZGUgd2VhdGhlciB0b2dnbGU=	Weather			stay;toggle=off
+H	Sound	
+A	azQtYmFyIGhpZGUgbWljcm9waG9uZSB0b2dnbGU=	Microphone			stay;toggle=on
+A	azQtYmFyIGhpZGUgYXVkaW8gdG9nZ2xl	Audio			stay;toggle=on
+H	Network	
+A	azQtYmFyIGhpZGUgcGlob2xlIHRvZ2dsZQ==	Pi-hole			stay;toggle=on
+A	azQtYmFyIGhpZGUgbmV0d29yayB0b2dnbGU=	Network			stay;toggle=on
+A	azQtYmFyIGhpZGUgcm91dGVyIHRvZ2dsZQ==	Router			stay;toggle=on
+A	azQtYmFyIGhpZGUgYmx1ZXRvb3RoIHRvZ2dsZQ==	Bluetooth			stay;toggle=on
+H	System	
+A	azQtYmFyIGhpZGUgYnJpZ2h0bmVzcyB0b2dnbGU=	Brightness	only on a laptop		stay;toggle=on
+A	azQtYmFyIGhpZGUgYmF0dGVyeSB0b2dnbGU=	Battery	only on a laptop		stay;toggle=on
+A	azQtYmFyIGhpZGUga2V5Ym9hcmQgdG9nZ2xl	Keyboard layout			stay;toggle=on
+H	More	
+A	azQtYmFyIGhpZGUgYWxsLW9u	Show all	1 hidden		stay;mark=↺;markc=accent

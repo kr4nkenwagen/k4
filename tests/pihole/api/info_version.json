@@ -1,0 +1,19 @@
+{
+ "version": {
+  "core": {
+   "local": {
+    "version": "v6.2"
+   }
+  },
+  "web": {
+   "local": {
+    "version": "v6.2"
+   }
+  },
+  "ftl": {
+   "local": {
+    "version": "v6.3"
+   }
+  }
+ }
+}

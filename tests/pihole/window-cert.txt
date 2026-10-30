@@ -1,0 +1,3 @@
+S	cert	0	kr4nkenhole	kr4nkenhole · k4 stopped talking to it at 09:12
+F	TRUSTED	since 2 Sep	SHA-256  3A:91:0F:6C:E2:44:B7:1D:9A:0B:11:42:77:EE:01:9C:44:21:8C:20:5A:E1
+F	NEW	seen 09:12	SHA-256  7C:1E:A4:09:5B:D0:63:F2:00:AB:CD:EF:12:34:56:78:D2:5B:88:3F

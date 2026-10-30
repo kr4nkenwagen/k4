@@ -1,0 +1,10 @@
+D	info	Info	Chip shows Performance · 84%	yellow
+G	status	Status	S	0
+G	apps	Apps	A	0
+G	info	Info	I	1
+G	net	Network	N	0
+G	system	System	Y	0
+M	perf	Performance	c		84%	7.0G	yellow	yellow		0		CPU 84% · cargo build · 72 °C	2	1	0	open
+M	updates	Updates	u		12		blue			0		12 updates waiting	0	1	0	open
+M	weather	Weather	p		6°					0		partly cloudy · 6°	0	1	1	open
+M	bus	Bus								0		not showing now	0	0	0	open
