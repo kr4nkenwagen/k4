@@ -1,0 +1,17 @@
+{
+ "id": "m6",
+ "threadId": "t4",
+ "snippet": "Your parcel is on its way",
+ "payload": {
+  "headers": [
+   {
+    "name": "From",
+    "value": "Trailshop <orders@trailshop.example>"
+   },
+   {
+    "name": "Subject",
+    "value": "Order 48213 shipped"
+   }
+  ]
+ }
+}

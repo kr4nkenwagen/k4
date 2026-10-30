@@ -1,0 +1,191 @@
+S	ok	
+B	Corne v4	LAYOUT_split_3x6_3_ex2	keyboard_config	122fd5f	keymap.c
+G	0	0	0.3	1	1
+G	1	1	0.3	1	1
+G	2	2	0.1	1	1
+G	3	3	0	1	1
+G	4	4	0.1	1	1
+G	5	5	0.2	1	1
+G	6	6	0.7	1	1
+G	7	8	0.7	1	1
+G	8	9	0.2	1	1
+G	9	10	0.1	1	1
+G	10	11	0	1	1
+G	11	12	0.1	1	1
+G	12	13	0.3	1	1
+G	13	14	0.3	1	1
+G	14	0	1.3	1	1
+G	15	1	1.3	1	1
+G	16	2	1.1	1	1
+G	17	3	1	1	1
+G	18	4	1.1	1	1
+G	19	5	1.2	1	1
+G	20	6	1.7	1	1
+G	21	8	1.7	1	1
+G	22	9	1.2	1	1
+G	23	10	1.1	1	1
+G	24	11	1	1	1
+G	25	12	1.1	1	1
+G	26	13	1.3	1	1
+G	27	14	1.3	1	1
+G	28	0	2.3	1	1
+G	29	1	2.3	1	1
+G	30	2	2.1	1	1
+G	31	3	2	1	1
+G	32	4	2.1	1	1
+G	33	5	2.2	1	1
+G	34	9	2.2	1	1
+G	35	10	2.1	1	1
+G	36	11	2	1	1
+G	37	12	2.1	1	1
+G	38	13	2.3	1	1
+G	39	14	2.3	1	1
+G	40	4	3.7	1	1
+G	41	5	3.7	1	1
+G	42	6	3.2	1	1.5
+G	43	8	3.2	1	1.5
+G	44	9	3.7	1	1
+G	45	10	3.7	1	1
+Y	0	Base		46
+Y	1	Layer 1		46
+Y	2	Layer 2		46
+Y	3	Layer 3	missing	0
+K	0	0	Tab		key	-1	KC_TAB
+K	0	1	Q		key	-1	KC_Q
+K	0	2	W		key	-1	KC_W
+K	0	3	E		key	-1	KC_E
+K	0	4	R		key	-1	KC_R
+K	0	5	T		key	-1	KC_T
+K	0	6	Vol+		media	-1	KC_VOLU
+K	0	7	Bri+		media	-1	KC_BRIU
+K	0	8	Y		key	-1	KC_Y
+K	0	9	U		key	-1	KC_U
+K	0	10	I		key	-1	KC_I
+K	0	11	O		key	-1	KC_O
+K	0	12	P		key	-1	KC_P
+K	0	13	⌫		key	-1	KC_BSPC
+K	0	14	Esc		key	-1	KC_ESC
+K	0	15	A	Ctrl	mod	-1	MT(MOD_LCTL, KC_A)
+K	0	16	S	Shift	mod	-1	MT(MOD_LSFT, KC_S)
+K	0	17	D	Super	mod	-1	MT(MOD_LGUI, KC_D)
+K	0	18	F	Alt	mod	-1	MT(MOD_LALT, KC_F)
+K	0	19	G		key	-1	KC_G
+K	0	20	Vol−		media	-1	KC_VOLD
+K	0	21	Bri−		media	-1	KC_BRID
+K	0	22	H	Ctrl	mod	-1	MT(MOD_RCTL, KC_H)
+K	0	23	J	Shift	mod	-1	MT(MOD_RSFT, KC_J)
+K	0	24	K	Super	mod	-1	MT(MOD_RGUI, KC_K)
+K	0	25	L	AltGr	mod	-1	MT(MOD_RALT, KC_L)
+K	0	26	;		key	-1	KC_SCLN
+K	0	27	'		key	-1	KC_QUOT
+K	0	28			none	-1	XXXXXXX
+K	0	29	Z		key	-1	KC_Z
+K	0	30	X		key	-1	KC_X
+K	0	31	C		key	-1	KC_C
+K	0	32	V		key	-1	KC_V
+K	0	33	B		key	-1	KC_B
+K	0	34	N		key	-1	KC_N
+K	0	35	M		key	-1	KC_M
+K	0	36	,		key	-1	KC_COMM
+K	0	37	.		key	-1	KC_DOT
+K	0	38	/		key	-1	KC_SLSH
+K	0	39	PrtSc		key	-1	KC_PRINT_SCREEN
+K	0	40	Esc		key	-1	KC_ESC
+K	0	41	L1	hold	layer	1	MO(1)
+K	0	42	Space		key	-1	KC_SPC
+K	0	43	↵		key	-1	KC_ENT
+K	0	44	L2	hold	layer	2	MO(2)
+K	0	45			none	-1	XXXXXXX
+K	1	0	Esc		key	-1	KC_ESC
+K	1	1	1		key	-1	KC_1
+K	1	2	2		key	-1	KC_2
+K	1	3	3		key	-1	KC_3
+K	1	4	4		key	-1	KC_4
+K	1	5	5		key	-1	KC_5
+K	1	6	Vol+		media	-1	KC_VOLU
+K	1	7	Bri+		media	-1	KC_BRIU
+K	1	8	6		key	-1	KC_6
+K	1	9	7		key	-1	KC_7
+K	1	10	8		key	-1	KC_8
+K	1	11	9		key	-1	KC_9
+K	1	12	0		key	-1	KC_0
+K	1	13	⌫		key	-1	KC_BSPC
+K	1	14	Ctrl		mod	-1	KC_LCTL
+K	1	15			none	-1	XXXXXXX
+K	1	16	PrtSc		key	-1	KC_PRINT_SCREEN
+K	1	17			none	-1	XXXXXXX
+K	1	18			none	-1	XXXXXXX
+K	1	19			none	-1	XXXXXXX
+K	1	20	Vol−		media	-1	KC_VOLD
+K	1	21	Bri−		media	-1	KC_BRID
+K	1	22	←		key	-1	KC_LEFT
+K	1	23	↓		key	-1	KC_DOWN
+K	1	24	↑		key	-1	KC_UP
+K	1	25	→		key	-1	KC_RIGHT
+K	1	26			none	-1	XXXXXXX
+K	1	27			none	-1	XXXXXXX
+K	1	28	Shift		mod	-1	KC_LSFT
+K	1	29			none	-1	XXXXXXX
+K	1	30			none	-1	XXXXXXX
+K	1	31			none	-1	XXXXXXX
+K	1	32			none	-1	XXXXXXX
+K	1	33			none	-1	XXXXXXX
+K	1	34			none	-1	XXXXXXX
+K	1	35			none	-1	XXXXXXX
+K	1	36			none	-1	XXXXXXX
+K	1	37			none	-1	XXXXXXX
+K	1	38			none	-1	XXXXXXX
+K	1	39			none	-1	XXXXXXX
+K	1	40	Super		mod	-1	KC_LGUI
+K	1	41			trans	-1	_______
+K	1	42	Space		key	-1	KC_SPC
+K	1	43	↵		key	-1	KC_ENT
+K	1	44	L3	hold	layer	3	MO(3)
+K	1	45	AltGr		mod	-1	KC_RALT
+K	2	0	Tab		key	-1	KC_TAB
+K	2	1	!		key	-1	KC_EXLM
+K	2	2	@		key	-1	KC_AT
+K	2	3	#		key	-1	KC_HASH
+K	2	4	$		key	-1	KC_DLR
+K	2	5	%		key	-1	KC_PERC
+K	2	6	Wh↑		mouse	-1	QK_MOUSE_WHEEL_UP
+K	2	7	Play		media	-1	KC_MEDIA_PLAY_PAUSE
+K	2	8	^		key	-1	KC_CIRC
+K	2	9	&		key	-1	KC_AMPR
+K	2	10	*		key	-1	KC_ASTR
+K	2	11	(		key	-1	KC_LPRN
+K	2	12	)		key	-1	KC_RPRN
+K	2	13	⌫		key	-1	KC_BSPC
+K	2	14	Ctrl		mod	-1	KC_LCTL
+K	2	15	M←		mouse	-1	QK_MOUSE_CURSOR_LEFT
+K	2	16	M↓		mouse	-1	QK_MOUSE_CURSOR_DOWN
+K	2	17	M↑		mouse	-1	QK_MOUSE_CURSOR_UP
+K	2	18	M→		mouse	-1	QK_MOUSE_CURSOR_RIGHT
+K	2	19			none	-1	XXXXXXX
+K	2	20	Wh↓		mouse	-1	QK_MOUSE_WHEEL_DOWN
+K	2	21	Mute		media	-1	KC_MUTE
+K	2	22	-		key	-1	KC_MINS
+K	2	23	=		key	-1	KC_EQL
+K	2	24	[		key	-1	KC_LBRC
+K	2	25	]		key	-1	KC_RBRC
+K	2	26	\		key	-1	KC_BSLS
+K	2	27	`		key	-1	KC_GRV
+K	2	28	Shift		mod	-1	KC_LSFT
+K	2	29	Undo		key	-1	KC_UNDO
+K	2	30	Cut		key	-1	KC_CUT
+K	2	31	Copy		key	-1	KC_COPY
+K	2	32	Paste		key	-1	KC_PASTE
+K	2	33			none	-1	XXXXXXX
+K	2	34	_		key	-1	KC_UNDS
+K	2	35	+		key	-1	KC_PLUS
+K	2	36	{		key	-1	KC_LCBR
+K	2	37	}		key	-1	KC_RCBR
+K	2	38	|		key	-1	KC_PIPE
+K	2	39	~		key	-1	KC_TILD
+K	2	40	Click L		mouse	-1	QK_MOUSE_BUTTON_1
+K	2	41			trans	-1	_______
+K	2	42	Space		key	-1	KC_SPC
+K	2	43	↵		key	-1	KC_ENT
+K	2	44			trans	-1	_______
+K	2	45	Click R		mouse	-1	QK_MOUSE_BUTTON_2
+U	https://github.com/kr4nkenwagen/keyboard_config

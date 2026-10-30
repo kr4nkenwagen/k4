@@ -35,7 +35,8 @@ import "core:time"
 //   M <id> <unix time> <sender> <mine 1|0> <text|image|video|audio|file|emote> <text> [preview]
 //                               preview: a picture file (a photo's thumbnail, a video's frame), once
 //                               made; until then the text ([photo], [video]) shows
-// The runner's verbs: open ROOM, close, more, send ROOM ($K4_INPUT), read ROOM, media ID, search QUERY
+// Links in messages are underlined in the accent; a click opens one in the browser, ^L the newest.
+// The runner's verbs: open ROOM, close, more, send ROOM ($K4_INPUT), read ROOM, media ID, url URL, search QUERY
 // (k4:person ID NAME lines), start ID NAME (k4:open ROOM), setup (its steps in $XDG_RUNTIME_DIR/k4-messenger-setup.log),
 // login ($K4_INPUT: the cookies), unlock, retry, web, log, journal.
 
@@ -244,6 +245,58 @@ msg_activate :: proc(a: ^App) {
 msg_open_media :: proc(a: ^App, i: int) {
 	m := M(a)
 	if i >= 0 && i < len(m.msgs) && (m.msgs[i].kind == "image" || m.msgs[i].kind == "video") do panel_run(a, "media", m.msgs[i].id)
+}
+
+// The links in a text (http://, https://, www.), trailing punctuation left out.
+msg_urls :: proc(text: string) -> []string {
+	out := make([dynamic]string, 0, 2, context.temp_allocator)
+	for w in strings.fields(text, context.temp_allocator) {
+		i := strings.index(w, "http://")
+		if j := strings.index(w, "https://"); j >= 0 && (i < 0 || j < i) do i = j
+		if i < 0 && strings.has_prefix(w, "www.") do i = 0
+		if i < 0 do continue
+		u := strings.trim_right(w[i:], ".,;:!?)]}'\"»”’>")
+		if len(u) > 8 do append(&out, u)
+	}
+	return out[:]
+}
+
+// A link opens in the browser (k4-messenger act url).
+msg_open_url :: proc(a: ^App, u: string) {
+	panel_run(a, "url", strings.has_prefix(u, "www.") ? strings.concatenate({"https://", u}, context.temp_allocator) : u)
+}
+
+// The newest link in the open chat ("": none).
+@(private = "file")
+msg_last_url :: proc(m: ^Messenger) -> string {
+	#reverse for l in m.msgs do if us := msg_urls(l.text); len(us) > 0 do return us[len(us) - 1]
+	return ""
+}
+
+// One wrapped line of a message: the pieces of its links (a long one wraps over lines) in the
+// accent, underlined, each a hit (.Item, a: the message, b: 10 + the link's index).
+msg_draw_text_line :: proc(a: ^App, cv: ^Canvas, S: int, f: ^Font, line: string, urls: []string, mi, x, y, h: int, fg, acc: u32) {
+	if len(urls) == 0 { text_in(cv, f, line, x, y, h, argb(fg, 0xff)); return }
+	rest := line
+	off := 0
+	for len(rest) > 0 { // word by word, so a link has its own colour (the font is monospaced: no kerning lost)
+		sp := strings.index_byte(rest, ' ')
+		word := sp < 0 ? rest : rest[:sp]
+		t := strings.trim_right(word, ".,;:!?)]}'\"»”’>")
+		px := x + tw(f, line[:off])
+		link := -1
+		if len(t) >= 4 do for u, k in urls do if strings.contains(u, t) && (len(t) >= 8 || strings.has_prefix(u, t) || strings.has_suffix(u, t)) { link = k; break }
+		if link >= 0 { // the link itself (or its piece) in the accent, underlined; what trails it plain
+			ww := tw(f, t)
+			text_in(cv, f, t, px, y, h, argb(acc, 0xff))
+			fill_rect(cv, px, y + h - 3 * S, ww, S, argb(acc, 0xcc))
+			hit_add(a, px, y, ww, h, .Item, mi, 10 + link)
+			if len(t) < len(word) do text_in(cv, f, word[len(t):], px + ww, y, h, argb(fg, 0xff))
+		} else do text_in(cv, f, word, px, y, h, argb(fg, 0xff))
+		if sp < 0 do break
+		off += sp + 1
+		rest = rest[sp + 1:]
+	}
 }
 
 // The newest message with a photo or video (-1: none).
@@ -463,6 +516,10 @@ msg_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> boo
 	case ctrl && ch == 'n' && msg_ready(m): m.newchat = true; m.writing = false; if m.popup do m.chat = false; return true
 	case ctrl && ch == 'i' || k == .Tab && ctrl: m.members = !m.members; return true
 	case ctrl && ch == 'o': msg_open_media(a, msg_last_media(m)); return true
+	case ctrl && ch == 'l':
+		if u := msg_last_url(m); u != "" do msg_open_url(a, u)
+		else do panel_say(&m.pn, "No link in this chat")
+		return true
 	case ctrl && ch == 'r':
 		if m.state == "error" do panel_run(a, "retry")
 		else if m.open != "" do panel_run(a, "read", m.open)
@@ -504,7 +561,6 @@ msg_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> boo
 
 // What the clipboard holds, as text on one line (a pasted "Copy as cURL" spans several; the field
 // is one line). K4_MESSENGER_CLIPBOARD stands in for it in tests.
-@(private = "file")
 msg_clipboard :: proc() -> string {
 	text := os.get_env("K4_MESSENGER_CLIPBOARD", context.temp_allocator)
 	if text == "" {
@@ -537,6 +593,11 @@ msg_click :: proc(a: ^App, x, y, button: int) -> bool {
 	case .Row: m.cur = h.a; msg_activate(a)
 	case .Item:
 		if h.b == 1 { msg_open_media(a, h.a); return true }
+		if h.b >= 10 && h.a < len(m.msgs) { // a link in that message
+			us := msg_urls(m.msgs[h.a].text)
+			if h.b - 10 < len(us) do msg_open_url(a, us[h.b - 10])
+			return true
+		}
 		if m.newchat && h.a < len(m.people) {
 			if h.a == m.pcur do panel_run(a, "start", m.people[h.a][0], m.people[h.a][1])
 			else do m.pcur = h.a
@@ -586,16 +647,13 @@ msg_ran :: proc(a: ^App, verb, line: string) -> bool {
 // ---------- drawing ----------
 
 // The design's colours beyond the HUD: soft text, and the theme's yellow, green and red.
-@(private = "file")
 Msg_Tones :: struct { soft, yellow, green, red: u32 }
 
-@(private = "file")
 msg_tones :: proc(a: ^App, H: HUD) -> Msg_Tones {
 	return {soft = mix(H.fg, H.bg, 0.2), yellow = a.theme.yellow, green = a.theme.green, red = a.theme.red}
 }
 
 // A day's line: TODAY, YESTERDAY, MON 12 OCT.
-@(private = "file")
 msg_day :: proc(ts, now: i64) -> string {
 	switch now / 86400 - ts / 86400 {
 	case 0: return "TODAY"
@@ -604,14 +662,12 @@ msg_day :: proc(ts, now: i64) -> string {
 	return strings.to_upper(msg_date(ts, true), context.temp_allocator)
 }
 
-@(private = "file")
 msg_clock :: proc(ts: i64) -> string {
 	h, mi, _ := time.clock(time.unix(ts, 0))
 	return fmt.tprintf("%02d:%02d", h, mi)
 }
 
 // "Mon 12 Oct" (with_day) or "12 Oct".
-@(private = "file")
 msg_date :: proc(ts: i64, with_day: bool) -> string {
 	t := time.unix(ts, 0)
 	_, mo, dd := time.date(t)
@@ -622,7 +678,6 @@ msg_date :: proc(ts: i64, with_day: bool) -> string {
 }
 
 // When the last message came: 2 min, 3 h, yesterday, Mon, 12 Oct.
-@(private = "file")
 msg_ago :: proc(ts, now: i64) -> string {
 	d := now - ts
 	days := now / 86400 - ts / 86400
@@ -637,7 +692,6 @@ msg_ago :: proc(ts, now: i64) -> string {
 }
 
 // Initials: the first letters of the first two words.
-@(private = "file")
 msg_initials :: proc(name: string) -> string {
 	sb := strings.builder_make(context.temp_allocator)
 	n := 0
@@ -759,7 +813,6 @@ msg_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 }
 
 // The keys as a list the caller keeps (a literal would live in this frame).
-@(private = "file")
 msg_keys :: proc(k: ..[2]string) -> [][2]string { return slice.clone(k, context.temp_allocator) }
 
 @(private = "file")
@@ -776,6 +829,7 @@ msg_hints :: proc(m: ^Messenger, view: Msg_View) -> [][2]string {
 	if m.newchat do return msg_keys({"↵", len(m.people) > 0 && strings.trim_space(string(m.who[:])) == m.searched ? "Open chat" : "Search"}, {"↑↓", "Pick"}, {"Esc", "Back"})
 	if m.writing {
 		if msg_last_media(m) >= 0 do return msg_keys({"↵", "Send"}, {"Esc", "Chats"}, {"^O", "Photo"}, {"PgUp", "Older"})
+		if msg_last_url(m) != "" do return msg_keys({"↵", "Send"}, {"Esc", "Chats"}, {"^L", "Open link"}, {"PgUp", "Older"})
 		return msg_keys({"↵", "Send"}, {"Esc", "Chats"}, {"PgUp", "Older"}, {"^I", "Members"})
 	}
 	if m.popup do return msg_keys({"type", "Find"}, {"↑↓", "Chat"}, {"↵", "Open"}, {"^N", "New"}, {"Esc", "Close"})
@@ -1248,7 +1302,8 @@ msg_draw_chat :: proc(a: ^App, cv: ^Canvas, S: int, H: HUD, x, y, w, h: int, now
 				if inside(iy + img.h + 2 * S, 13 * S, top, bottom) do text_in(cv, m.f9, tm, bx + bw - 8 * S - tw(m.f9, tm), iy + img.h + 2 * S, 13 * S, argb(H.faint, 0xff))
 				continue
 			}
-			for s, k in it.lines do if inside(yy + 6 * S + k * 17 * S, 17 * S, top, bottom) do text_in(cv, m.f12, s, bx + 10 * S, yy + 6 * S + k * 17 * S, 17 * S, argb(fg, 0xff))
+			urls := msg_urls(l.text)
+			for s, k in it.lines do if inside(yy + 6 * S + k * 17 * S, 17 * S, top, bottom) do msg_draw_text_line(a, cv, S, m.f12, s, urls, it.i, bx + 10 * S, yy + 6 * S + k * 17 * S, 17 * S, fg, l.mine ? H.fg : H.acc)
 			ty := it.inline ? yy + 6 * S + (len(it.lines) - 1) * 17 * S : yy + 6 * S + len(it.lines) * 17 * S
 			if inside(ty, 17 * S, top, bottom) do text_in(cv, m.f9, tm, bx + bw - 10 * S - tw(m.f9, tm), ty, 17 * S, argb(H.faint, 0xff))
 		}

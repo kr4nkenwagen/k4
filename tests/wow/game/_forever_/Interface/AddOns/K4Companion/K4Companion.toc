@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: K4 Companion
+## Notes: Saves your characters' state (gold, level, rested, played, lockouts, cooldowns) for k4 on the desktop.
+## Author: k4
+## Version: 2
+## SavedVariables: K4CompanionDB
+
+K4Companion.lua

@@ -1,0 +1,58 @@
+{
+ "id": "t3",
+ "historyId": "970",
+ "messages": [
+  {
+   "id": "m5",
+   "threadId": "t3",
+   "labelIds": [
+    "INBOX"
+   ],
+   "internalDate": "1793100000000",
+   "snippet": "Here are the best ones",
+   "payload": {
+    "mimeType": "multipart/mixed",
+    "headers": [
+     {
+      "name": "From",
+      "value": "Erik Svensson <erik@example.com>"
+     },
+     {
+      "name": "To",
+      "value": "me@example.com"
+     },
+     {
+      "name": "Subject",
+      "value": "Photos from the trip"
+     },
+     {
+      "name": "Content-Type",
+      "value": "multipart/mixed; boundary=y"
+     }
+    ],
+    "parts": [
+     {
+      "mimeType": "text/plain",
+      "body": {
+       "data": "SGVyZSBhcmUgdGhlIGJlc3Qgb25lcy4"
+      }
+     },
+     {
+      "mimeType": "image/jpeg",
+      "filename": "summit.jpg",
+      "headers": [
+       {
+        "name": "Content-Disposition",
+        "value": "attachment; filename=\"summit.jpg\""
+       }
+      ],
+      "body": {
+       "attachmentId": "att1",
+       "size": 204800
+      }
+     }
+    ]
+   }
+  }
+ ]
+}

@@ -1,0 +1,7 @@
+S	ok	0	Jon	
+C	!anna	Anna Berg	0	1793179880		see this	0	0	1	Anna Berg
+O	!anna
+M	$1	1793179000	Anna Berg	0	text	Have you seen https://example.com/bikes. It is great
+M	$2	1793179100	Anna Berg	0	text	https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLabcdefghijklmnopqrstuvwxyz0123456789&index=12
+M	$3	1793179200	you	1	text	Thanks! Mine is at www.example.org/route
+M	$4	1793179300	Anna Berg	0	text	no link here, just text

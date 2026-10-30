@@ -44,6 +44,11 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --send-ctl CMD          a command to k4-localsend's service (its ctl, arguments tab-separated; prints its reply)
   --messenger             Facebook Messenger: conversations, messages, writing (k4-messenger data, messenger.odin)
   --youtube               YouTube: search, results as a grid, the queue, history; plays in a corner (k4-youtube data, youtube.odin)
+  --mail                  Gmail: labels, threads, reading and replying (k4-mail data, mail.odin)
+  --wow                   World of Warcraft Forever: your characters (k4-wow data, wow.odin)
+  --clock                 Clock: world clocks, timers, alarms, a stopwatch (k4-clock data, clock.odin)
+  --keymap                your keyboard's QMK layout, full screen, following its layer (k4-keymap data, keymap.odin)
+  --peek                  with --keymap: small, bottom middle, no input, gone 5 s after the last layer key
   --clip                  the clipboard history: search, preview, paste (Super+Ctrl+V; entries on stdin, clip.odin)
   --tray                  the system tray's apps and their menus (Super+.; k4-tray list on stdin, tray.odin)
   --perf                  performance, processes and utilities (Super+Shift+Esc; utilities on stdin, perf.odin)
@@ -163,6 +168,11 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--send-ctl": o.send_ctl = value(args, &i, inline, has_inline)
 		case "--messenger": o.messenger = true
 		case "--youtube": o.youtube = true
+		case "--mail": o.mail = true
+		case "--wow": o.wow = true
+		case "--clock": o.clock = true
+		case "--keymap": o.keymap = true
+		case "--peek": o.peek = true
 		case "--osd": o.osd = value(args, &i, inline, has_inline)
 		case "--config": _ = value(args, &i, inline, has_inline)
 		case "--dry-run": o.dry_run = value(args, &i, inline, has_inline)
@@ -224,6 +234,7 @@ main :: proc() {
 			nd_fixture(a, string(data))
 		}
 		a.width, a.height = nd_size(a)
+		if nd_full(a.nd) do a.width, a.height = 1920, 1050
 		a.width, a.height = max(a.width, 1), max(a.height, 1)
 	} else if opts.send {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
@@ -247,6 +258,18 @@ main :: proc() {
 	} else if opts.youtube {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		youtube_setup(a, string(data))
+	} else if opts.mail {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		mail_setup(a, string(data))
+	} else if opts.clock {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		clock_setup(a, string(data))
+	} else if opts.wow {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		wow_setup(a, string(data))
+	} else if opts.keymap {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		keymap_setup(a, string(data))
 	} else if opts.pass || opts.keyring || opts.media || opts.drives || opts.snap || opts.bus || opts.claude {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		switch {
@@ -343,6 +366,7 @@ main :: proc() {
 		}
 		if opts.dry_run != "" {
 			if a.nd != nil { w, h := nd_size(a); a.width, a.height = max(w, 1), max(h, 1) } // the popups as the keys left them
+			if a.nd != nil && nd_full(a.nd) do a.width, a.height = 1920, 1050 // (an immersive box: an output's worth, under the bar)
 			cv := Canvas{make([]u32, a.width * a.height * s * s), a.width * s, a.height * s}
 			app_draw(a, &cv, s)
 			if os.get_env("K4_DRY_SHADERS", context.temp_allocator) != "" {   // the shaders too, offscreen
@@ -390,7 +414,7 @@ main :: proc() {
 		if app_plain(a) do app_move(a, opts.select)
 		if a.menu != nil do a.width, a.height = menu_size(a)
 		if a.osd != nil do osd_listen(a.osd)
-		menu_like := a.bar == nil && a.osd == nil && a.nd == nil // the service is not a menu
+		menu_like := a.bar == nil && a.osd == nil && a.nd == nil && !a.passive // the service and the keymap peek are not menus
 		if menu_like do single_take()
 		ok := run_wayland(a)
 		if menu_like do single_drop()

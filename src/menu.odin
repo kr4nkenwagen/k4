@@ -1,6 +1,7 @@
 package k4
 
 import "core:c/libc"
+import "core:encoding/base64"
 import "core:encoding/json"
 import "core:fmt"
 import "core:math"
@@ -233,6 +234,7 @@ Menu :: struct {
 	sug_off:  bool,               // tests and dry runs: no network
 	// the search's Files group: fd (or plocate) over $HOME, in the background
 	files:    [dynamic]string,
+	clock_rows: [dynamic][3]string, // search: "timer 10m tea", "alarm 7:30": label, meta, the shell action
 	files_q, files_want: string,  // the query they are for; the one to look up once typing settles
 	files_at: time.Tick,
 	files_proc: os.Process,
@@ -763,6 +765,7 @@ has_fold :: proc(hay, needle: string) -> bool {
 
 FILES_MAX :: 8
 FILE_SEC :: -2 // Result.sec of a file: Result.act indexes m.files
+CLOCK_SEC :: -3 // Result.sec of a Clock row: Result.act indexes m.clock_rows
 
 menu_refilter :: proc(a: ^App) {
 	m := a.menu
@@ -851,7 +854,9 @@ menu_search :: proc(m: ^Menu, q: string) {
 		for j > 0 && items[j - 1].score < items[j].score { items[j - 1], items[j] = items[j], items[j - 1]; j -= 1 }
 	}
 	for it in items { if len(m.results) >= 60 do break; append(&m.results, it.r) }
+	defer if !m.settings do group_results(m)
 	if m.settings || len(strings.trim_space(q)) < 2 do return
+	menu_clock_rows(m, q)
 	for r in always do append(&m.results, r)
 	// the files the last lookup found that still hold every word, after everything else
 	n := 0
@@ -862,6 +867,74 @@ menu_search :: proc(m: ^Menu, q: string) {
 		append(&m.results, Result{FILE_SEC, i})
 		n += 1
 	}
+}
+
+// "timer 10m tea", "25m timer", "alarm 7:30 gym": a row that starts the timer or sets the alarm
+// (k4-clock), first in the results.
+@(private)
+menu_clock_rows :: proc(m: ^Menu, q: string) {
+	for r in m.clock_rows do for x in r do delete(x)
+	clear(&m.clock_rows)
+	ql := strings.to_lower(strings.trim_space(q), context.temp_allocator)
+	sh :: proc(s: string) -> string { r, _ := strings.replace_all(s, "'", "'\\''", context.temp_allocator); return strings.concatenate({"'", r, "'"}, context.temp_allocator) }
+	wd, now := clock_local_now()
+	body := ""
+	if strings.has_prefix(ql, "timer ") do body = ql[6:]
+	else if strings.has_suffix(ql, " timer") && len(ql) > 0 && ql[0] >= '0' && ql[0] <= '9' do body = ql[:len(ql) - 6]
+	if body != "" {
+		if secs, label, ok := clock_parse_dur(body); ok {
+			end := (now + i64(secs)) % 86400
+			cmd := fmt.tprintf("notify Clock \"$(k4-clock act timer add %d%s | head -1)\"", secs, label != "" ? strings.concatenate({" ", sh(label)}, context.temp_allocator) : "")
+			append(&m.clock_rows, [3]string{fmt.aprintf("Start a %s timer%s", clock_dur(f64(secs)), label != "" ? fmt.tprintf(" · %s", label) : ""),
+				fmt.aprintf("ends %02d:%02d · the bar counts down", end / 3600, end / 60 % 60), strings.clone(cmd)})
+		}
+	}
+	if strings.has_prefix(ql, "alarm ") {
+		if h, mi, days, rep, label, ok := clock_parse_alarm(ql[6:]); ok {
+			in_ := clock_alarm_in(h, mi, days, wd, now)
+			day := in_ + now < 86400 ? "today" : "tomorrow"
+			if days != "0000000" do day = rep
+			cmd := fmt.tprintf("notify Clock \"$(k4-clock act alarm add %d %d %s%s | head -1)\"", h, mi, days, label != "" ? strings.concatenate({" ", sh(label)}, context.temp_allocator) : "")
+			append(&m.clock_rows, [3]string{fmt.aprintf("Set an alarm for %02d:%02d%s", h, mi, label != "" ? fmt.tprintf(" · %s", label) : ""),
+				fmt.aprintf("%s · %s", day, clock_in_words(in_)), strings.clone(cmd)})
+		}
+	}
+	if len(m.clock_rows) == 0 do return
+	rest := make([dynamic]Result, 0, len(m.results), context.temp_allocator)
+	for r in m.results do append(&rest, r)
+	clear(&m.results)
+	for _, i in m.clock_rows do append(&m.results, Result{CLOCK_SEC, i})
+	for r in rest do append(&m.results, r)
+}
+
+// A search result's group (its heading): the tag the row shows.
+result_group :: proc(m: ^Menu, r: Result) -> string {
+	switch {
+	case r.sec == FILE_SEC: return "Files"
+	case r.sec == CLOCK_SEC: return "Clock"
+	case r.act < 0: return "Sections"
+	}
+	act := m.sections[r.sec].actions[r.act]
+	return act.tag != "" ? act.tag : m.sections[r.sec].name
+}
+
+// The results by group: the groups in the order their best result came, each one's rows in
+// their order.
+@(private)
+group_results :: proc(m: ^Menu) {
+	if len(m.results) < 2 do return
+	order := make([dynamic]string, 0, 8, context.temp_allocator)
+	for r in m.results {
+		g := result_group(m, r)
+		seen := false
+		for x in order do if x == g { seen = true; break }
+		if !seen do append(&order, g)
+	}
+	if len(order) < 2 do return
+	all := make([]Result, len(m.results), context.temp_allocator)
+	copy(all, m.results[:])
+	clear(&m.results)
+	for g in order do for r in all do if result_group(m, r) == g do append(&m.results, r)
 }
 
 // The words of s (split at spaces, commas and |) include one starting with t (lower case).
@@ -1196,6 +1269,7 @@ menu_run :: proc(a: ^App) {
 			if m.si >= len(m.results) do return
 			r := m.results[m.si]
 			if r.sec == FILE_SEC { finish(a, strings.concatenate({a.shift ? "reveal:" : "file:", m.files[r.act]})); return } // ⇧↵ shows it in its folder
+			if r.sec == CLOCK_SEC { finish(a, base64.encode(transmute([]u8)m.clock_rows[r.act][2], allocator = context.temp_allocator)); return }
 			if r.act < 0 do menu_enter(a, r.sec)
 			else do run_action(a, r.sec, r.act)
 		} else do menu_enter(a, m.cur)
@@ -2127,7 +2201,7 @@ menu_hints :: proc(a: ^App, sc: bool) -> (hints: [][2]string) {
 		if m.si < len(m.results) { // what ⇧↵ does to the picked one
 			r := m.results[m.si]
 			if r.sec == FILE_SEC do hints = {{"↑↓", "Move"}, {"↵", "Open"}, {"⇧↵", "Show in folder"}, {"⌃1–9", "Nth"}, {"Esc", "Shortcuts"}}
-			else if r.act >= 0 && m.sections[r.sec].actions[r.act].app do hints = {{"↑↓", "Move"}, {"↵", "Open"}, {"⇧↵", "Keep open"}, {"⌃1–9", "Nth"}, {"Esc", "Shortcuts"}}
+			else if r.sec >= 0 && r.act >= 0 && m.sections[r.sec].actions[r.act].app do hints = {{"↑↓", "Move"}, {"↵", "Open"}, {"⇧↵", "Keep open"}, {"⌃1–9", "Nth"}, {"Esc", "Shortcuts"}}
 		}
 	case m.focus == .Menu: hints = {{"↑↓", "Move"}, {"→ ↵", "Open"}, {"type", "Search all"}, {"Esc", "Shortcuts"}}
 	case m.focus == .Sub && on_slider(m) && m.sections[m.open].actions[m.sel_actions[m.si]].toggle: hints = {{"↑↓", "Move"}, {"← →", "Adjust"}, {"↵ ␣", "Mute"}, {"⌫", "Back"}}
@@ -2680,20 +2754,50 @@ draw_results :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		text_in(cv, m.f_body, "Nothing found. Try g␣ to search the web.", x0 + 20 * S, py, rh, argb(dim, 0xff))
 		return
 	}
-	visible := max((fy - 8 * S - py) / rh, 1)
+	// a heading over each group (the first row's always, so the top says what it is)
+	gh := m.settings ? 0 : 24 * S
+	span :: proc(m: ^Menu, from, to, rh, gh: int) -> int {
+		h := gh
+		for n in from ..= to do if n > from && result_group(m, m.results[n]) != result_group(m, m.results[n - 1]) do h += gh
+		return h + (to - from + 1) * rh
+	}
 	if m.si < m.scroll do m.scroll = m.si
-	if m.si >= m.scroll + visible do m.scroll = m.si - visible + 1
+	for m.scroll < m.si && span(m, m.scroll, m.si, rh, gh) > fy - 8 * S - py do m.scroll += 1
 	home := os.get_env("HOME", context.temp_allocator)
-	for n in m.scroll ..< min(m.scroll + visible, len(m.results)) {
+	for n in m.scroll ..< len(m.results) {
 		r := m.results[n]
+		grp := result_group(m, r)
+		if !m.settings && (n == m.scroll || grp != result_group(m, m.results[n - 1])) {
+			if py + gh + rh > fy - 8 * S do break
+			cnt := 0
+			for x in m.results do if result_group(m, x) == grp do cnt += 1
+			gl := strings.to_upper(grp, context.temp_allocator)
+			spaced(cv, m.f_tiny, gl, x0 + 20 * S, py + 6 * S, gh - 6 * S, mix(bg, dim, 0.8), S)
+			text_in(cv, m.f_tiny, fmt.tprint(cnt), x0 + 20 * S + spaced_w(m.f_tiny, gl, S) + 8 * S, py + 6 * S, gh - 6 * S, argb(mix(bg, dim, 0.5), 0xff))
+			py += gh
+		}
+		if py + rh > fy - 8 * S do break
 		on := n == m.si
 		hit_add(a, x0, py, bw, rh, .Result, n, 0)
 		lc, mc, tc := fgb, dim, acc
 		if on { fill_rect(cv, x0, py, bw, rh, argb(acc, 0xff)); mark_sel(a, x0, py, bw, rh); lc, mc, tc = bg, bg, bg }
 		if n < 9 { // ⌃1–9 runs it: the number left of the tag
-			tg := r.sec == FILE_SEC ? "file" : (r.act >= 0 ? (m.sections[r.sec].actions[r.act].tag != "" ? m.sections[r.sec].actions[r.act].tag : m.sections[r.sec].name) : "section")
+			tg := r.sec == FILE_SEC ? "file" : r.sec == CLOCK_SEC ? "Clock" : (r.act >= 0 ? (m.sections[r.sec].actions[r.act].tag != "" ? m.sections[r.sec].actions[r.act].tag : m.sections[r.sec].name) : "section")
 			kn := fmt.tprintf("^%d", n + 1)
 			text_in(cv, m.f_tiny, kn, x1 - 20 * S - tw(m.f_tiny, tg) - 8 * S - tw(m.f_tiny, kn), py, rh, argb(on ? bg : mix(bg, dim, 0.6), 0xff))
+		}
+		if r.sec == CLOCK_SEC {
+			row := m.clock_rows[r.act]
+			x := x0 + 20 * S
+			text_in(cv, m.f_row, "󰥔", x, py, rh, argb(lc, 0xff))
+			x += 15 * S + 12 * S
+			text_in(cv, m.f_tiny, "Clock", x1 - 20 * S - tw(m.f_tiny, "Clock"), py, rh, argb(tc, 0xff))
+			tag_x := x1 - 20 * S - 90 * S
+			mw := min(tw(m.f_small, row[1]), (tag_x - x) * 44 / 100)
+			text_in(cv, m.f_small, ellipsize(m.f_small, row[1], mw), tag_x - 12 * S - mw, py, rh, argb(mc, 0xff))
+			text_in(cv, m.f_row, ellipsize(m.f_row, row[0], tag_x - 24 * S - mw - x), x, py, rh, argb(lc, 0xff))
+			py += rh
+			continue
 		}
 		if r.sec == FILE_SEC {
 			f := m.files[r.act]
@@ -3252,7 +3356,9 @@ menu_dump :: proc(a: ^App) -> string {
 	case .Menu:
 		if searching(m, a) {
 			for r, i in m.results {
+				if g := result_group(m, r); !m.settings && (i == 0 || g != result_group(m, m.results[i - 1])) do fmt.sbprintfln(&b, "— %s", g)
 				if r.sec == FILE_SEC { fmt.sbprintfln(&b, "%s %s | file", i == m.si ? "*" : " ", m.files[r.act]); continue }
+				if r.sec == CLOCK_SEC { fmt.sbprintfln(&b, "%s %s · %s | Clock", i == m.si ? "*" : " ", m.clock_rows[r.act][0], m.clock_rows[r.act][1]); continue }
 				sec := m.sections[r.sec]
 				label := r.act >= 0 ? result_label(sec.actions[r.act], q_of(a)) : sec.name
 				tag := r.act >= 0 ? (sec.actions[r.act].tag != "" ? sec.actions[r.act].tag : sec.name) : "section"

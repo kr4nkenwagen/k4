@@ -1,0 +1,16 @@
+S	offline	2	me@example.com	no connection	2	1793309900
+V	INBOX		1
+G	INBOX	Inbox	1	system	128
+G	STARRED	Starred	0	system	0
+G	SENT	Sent	0	system	0
+G	DRAFT	Drafts	0	system	0
+G	SPAM	Spam	0	system	0
+G	TRASH	Trash	0	system	0
+G	Label_7	Bills	1	user	14
+T	t1	Maja Lind, me	Saturday ride?	Great, Erik joins too	1793307200	0	1	3	0	
+T	t2	Nordbank	Your October statement	Your statement is ready	1793200000	1	0	1	0	Bills
+T	t3	Erik Svensson	Photos from the trip	Here are the best ones	1793100000	0	0	1	1	
+O	t1	Saturday ride?		1
+M	m1	Maja Lind	maja@example.com	me		1793300000	0	Thinking of the north trails at 9, bring lights. Route: https://example.com/route/12		
+M	m2	me	me@example.com	Maja Lind		1793303600	0	Sounds good, I'll be there.	> Thinking of the north trails at 9, bring lights.	On Fri 30 Oct, Maja Lind wrote:
+M	m3	Maja Lind	maja@example.com	me	Erik Svensson	1793307200	0	Great, Erik joins too. Vi ses på lördag!	> Sounds good, I'll be there.	

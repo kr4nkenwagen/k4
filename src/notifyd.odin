@@ -43,6 +43,7 @@ Note :: struct {
 	timeout: int, // ms the popup shows, -1 until acted on (asked for: -1 the default, 0 stays)
 	left: int, // ms it has left
 	popup, transient: bool,
+	small: bool, // came while a fullscreen window had the output: a card even in immersive mode
 }
 
 Nd :: struct {
@@ -57,6 +58,9 @@ Nd :: struct {
 	cards: [dynamic]Nd_Card, // as drawn: the visible popups
 	more: int,
 	f9, f9b, f10, f10b, f11b, f12, f13, f13b: ^Font,
+	f11, f12b, f14, f22b: ^Font, // (the immersive box's)
+	immersive: bool, // the newest in the middle, over the dimmed desktop (immersive.odin)
+	qi: int,         // the box shown, among the ones waiting
 	want_w, want_h: int,
 	focus: bool, // the popups have the keyboard (focus): sel is the picked card
 	sel: int,
@@ -84,6 +88,12 @@ nd_setup :: proc(a: ^App) -> bool {
 	a.nd = n
 	n.next_id, n.sock, n.bus_fd = 1, -1, -1
 	n.f9, n.f9b, n.f10, n.f10b, n.f11b, n.f12, n.f13, n.f13b = nd_fonts(a)
+	n.f11, n.f14 = font_sized(&a.font, 11), font_sized(&a.font, 14)
+	n.f12b, n.f22b = font_sized(&a.font, 12), font_sized(&a.font, 22)
+	if b, ok := bold_font(a, 12); ok do n.f12b = b
+	if b, ok := bold_font(a, 22); ok do n.f22b = b
+	append(&a.fonts, n.f11, n.f14, n.f12b, n.f22b)
+	nd_imm_load(n)
 	n.last = time.tick_now()
 	if os.get_env("K4_NOTIFY_FIXTURE", context.temp_allocator) != "" do return true // tests: notes from stdin
 	err: DBus_Error
@@ -145,6 +155,7 @@ nd_add :: proc(a: ^App, x: Note) -> u32 {
 	note.left = note.timeout
 	note.popup = !n.dnd || note.urgency == 2
 	note.at = time.to_unix_seconds(time.now())
+	if n.immersive && note.popup && note.progress < 0 do note.small = nd_imm_fullscreen()
 	if note.image != "" && note.cmd == "" && nd_have_share() { // a screenshot: Send to… (LocalSend)
 		have := false
 		for p in note.actions do if p[0] == "k4-send" do have = true
@@ -245,6 +256,7 @@ nd_tick :: proc(a: ^App) -> int {
 	for i := len(n.notes) - 1; i >= 0; i -= 1 {
 		x := &n.notes[i]
 		if !x.popup || x.timeout < 0 do continue
+		if n.immersive && !x.small do continue // (a box stays until it is dismissed)
 		if !n.hover && !n.focus do x.left -= dt
 		if x.left <= 0 {
 			x.popup = false
@@ -264,6 +276,9 @@ nd_popups_visible :: proc(n: ^Nd) -> bool {
 	for x in n.notes do if x.popup do return true
 	return false
 }
+
+// The surface fills the output: an immersive box is up.
+nd_full :: proc(n: ^Nd) -> bool { return nd_imm_active(n) }
 
 nd_unread :: proc(n: ^Nd) -> int { return len(n.notes) }
 
@@ -615,10 +630,21 @@ nd_command :: proc(a: ^App, line: string) -> (reply: string, changed: bool) {
 		if len(f) > 2 do if id, ok := strconv.parse_uint(f[1]); ok do nd_act(a, u32(id), strings.trim_space(rest[len(f[1]):]))
 		return "ok\n", true
 	case "focus": // the popups take the keyboard (Super+Shift+N)
+		if nd_imm_active(n) do return nd_imm_command(a, "keys")
 		cards, _ := nd_visible(n)
 		if len(cards) == 0 do return "none\n", false
 		n.focus, n.sel, n.reply = true, 0, false
 		return "ok\n", true
+	case "immersive": // immersive on|off|toggle|status (Toggle › Immersive notifications)
+		v := len(f) > 1 ? f[1] : "status"
+		if v != "status" {
+			n.immersive = v == "on" ? true : (v == "off" ? false : !n.immersive)
+			nd_imm_save(n)
+			if n.focus do nd_unfocus(a)
+		}
+		return n.immersive ? "on\n" : "off\n", v != "status"
+	case "imm": // the keys Hyprland binds: imm enter|esc|keys|next|prev ("none": no box is up)
+		return nd_imm_command(a, len(f) > 1 ? f[1] : "")
 	case "dnd":
 		v := len(f) > 1 ? f[1] : "toggle"
 		n.dnd = v == "on" ? true : (v == "off" ? false : !n.dnd)
@@ -743,7 +769,7 @@ nd_visible :: proc(n: ^Nd) -> (cards: []Nd_Card, more: int) {
 		}
 	}
 	order := make([dynamic]int, 0, 8, context.temp_allocator)
-	for x, i in n.notes do if x.popup do append(&order, i)
+	for x, i in n.notes do if x.popup && (!n.immersive || x.small) do append(&order, i)
 	// newest first, critical before the rest
 	sorted := make([dynamic]int, 0, len(order), context.temp_allocator)
 	for crit in ([]bool{true, false}) do #reverse for i in order do if (n.notes[i].urgency == 2) == crit do append(&sorted, i)
@@ -957,6 +983,7 @@ nd_size :: proc(a: ^App) -> (int, int) {
 
 nd_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	n := a.nd
+	if nd_imm_active(n) { nd_imm_draw(a, cv, S); return }
 	canvas_clear(cv)
 	cards, more := nd_visible(n)
 	H := hud(a.theme)
@@ -992,6 +1019,7 @@ nd_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 nd_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> bool {
 	n := a.nd
 	if !n.focus do return false
+	if nd_imm_active(n) do return nd_imm_key(a, k, ctrl, ch, text)
 	cards, _ := nd_visible(n)
 	if len(cards) == 0 { nd_unfocus(a); return true }
 	n.sel = clamp(n.sel, 0, len(cards) - 1)
@@ -1084,6 +1112,7 @@ nd_pointer_move :: proc(a: ^App, x, y: int) -> bool {
 
 nd_click :: proc(a: ^App, x, y, button: int) -> bool {
 	n := a.nd
+	if nd_imm_active(n) do return nd_imm_click(a, x, y, button)
 	h, ok := hit_at(a, x, y)
 	if !ok do return false
 	id := u32(h.a)
@@ -1122,7 +1151,7 @@ nd_fixture :: proc(a: ^App, data: string) {
 	text := data
 	for line in strings.split_lines_iterator(&text) {
 		if strings.has_prefix(line, "post\t") { nd_command(a, line); continue } // as k4's services post
-		if line == "focus" { nd_command(a, line); continue } // as Super+Shift+N
+		if line == "focus" || strings.has_prefix(line, "imm") { nd_command(a, line); continue } // as Super+Shift+N, the immersive keys and toggle
 		f := strings.split(line, "\t", context.temp_allocator)
 		if len(f) < 2 do continue
 		get :: proc(f: []string, i: int) -> string { return i < len(f) ? f[i] : "" }
@@ -1141,7 +1170,14 @@ nd_dump :: proc(a: ^App) -> string {
 	n := a.nd
 	sb := strings.builder_make(context.temp_allocator)
 	cards, more := nd_visible(n)
-	fmt.sbprintfln(&sb, "notify %d · dnd %s", nd_unread(n), n.dnd ? "on" : "off")
+	fmt.sbprintfln(&sb, "notify %d · dnd %s%s", nd_unread(n), n.dnd ? "on" : "off", n.immersive ? " · immersive" : "")
+	if x, qi, qn := nd_imm_note(n); x != nil {
+		fmt.sbprintfln(&sb, "%sbox %s · %s%s", n.focus ? "* " : "", x.app, x.title, qn > 1 ? fmt.tprintf(" · %d of %d", qi + 1, qn) : "")
+		sb2 := strings.builder_make(context.temp_allocator)
+		for b, i in nd_imm_acts(x) do fmt.sbprintf(&sb2, "%s%s%s", i > 0 ? " · " : "", b.label, i == 0 ? " (Super+↵)" : (b.letter != 0 ? fmt.tprintf(" (%c)", b.letter) : ""))
+		fmt.sbprintfln(&sb, "  buttons %s", strings.to_string(sb2))
+		if n.reply do fmt.sbprintfln(&sb, "  reply: %s", string(a.query[:]))
+	}
 	for c, k in cards {
 		x := n.notes[nd_find(n, c.id)]
 		fmt.sbprintf(&sb, "%spopup %s · %s", n.focus ? (k == n.sel ? "* " : "  ") : "", x.app, x.title)

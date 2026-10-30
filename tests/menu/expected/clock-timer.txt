@@ -1,0 +1,9 @@
+focus Menu
+crumb SEARCH
+query timer 1h30 bread
+count 1 result
+hints ↑↓ Move · → ↵ Open · Esc Shortcuts n a r t w x
+— Clock
+* Start a 1:30:00 timer · bread · ends 11:39 · the bar counts down | Clock
+exit 1
+log: load apps

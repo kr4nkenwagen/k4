@@ -1,0 +1,2 @@
+immersive on
+System	Battery critically low	Plug in, or hibernate to keep your work safe.	2	5	hibernate:Hibernate,saver:Power saver

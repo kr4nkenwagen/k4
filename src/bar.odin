@@ -61,6 +61,7 @@ Module :: struct {
 	compact, slim, wide, flash: bool,
 	tip: string, // flags' tip=: the tooltip when the module prints none
 	next_file: string, // clock flag next=PATH: today's meetings (start end title video, TSV)
+	timers_file: string, // clock flag timers=PATH: k4-clock's timers, stopwatch, next alarm (bar.tsv)
 	last_line: string, // the line it shows: the same one again changes nothing (no redraw)
 	// what it shows
 	text, tooltip, class, icon, icon_tone, text_tone, text2, text2_tone: string,
@@ -179,6 +180,10 @@ bar_setup :: proc(a: ^App, data: string) {
 					p := v
 					if strings.has_prefix(p, "~/") do p = strings.concatenate({os.get_env("HOME", context.temp_allocator), p[1:]}, context.temp_allocator)
 					m.next_file = strings.clone(p)
+				case "timers":
+					p := v
+					if strings.has_prefix(p, "~/") do p = strings.concatenate({os.get_env("HOME", context.temp_allocator), p[1:]}, context.temp_allocator)
+					m.timers_file = strings.clone(p)
 				}
 			}
 			append(&b.mods, m)
@@ -374,7 +379,16 @@ bar_tick :: proc(a: ^App) -> int {
 			t := clock_text(tf, utc)
 			d := utc ? "UTC" : clock_text(df, false)
 			tone := utc ? "accent" : ""
-			if !utc && m.next_file != "" do if md, mt, ok := clock_meeting(m.next_file); ok do d, tone = md, mt
+			if !utc {
+				// what replaces the date: something ringing, a timer, the stopwatch, a meeting, tonight's alarm
+				cd, ct, cw := clock_timers(m.timers_file)
+				md, mt, mok := clock_meeting(m.next_file)
+				switch {
+				case cw >= 3: d, tone = cd, ct
+				case mok: d, tone = md, mt
+				case cw > 0: d, tone = cd, ct
+				}
+			}
 			// m.text outlives this frame's temp allocator: keep heap copies
 			if t != m.text { if len(m.text) > 0 do delete(m.text); m.text = strings.clone(t); b.redraw = true }
 			if d != m.text2 { if len(m.text2) > 0 do delete(m.text2); m.text2 = strings.clone(d); b.redraw = true }
@@ -407,6 +421,50 @@ clock_meeting :: proc(path: string) -> (text, tone: string, ok: bool) {
 		if st <= now && now < en do return fmt.tprintf("%s · %s", f[2], video ? "j join" : "now"), "accent", true
 		if now < st && st - now <= 600 do return fmt.tprintf("%s in %d min", f[2], (st - now + 59) / 60), "yellow", true
 	}
+	return
+}
+
+// The clock's timers file (k4-clock's bar.tsv): "⏰ Call the garage" in red while an alarm
+// rings, "⏱ Tea · done" in yellow, "⏱ 1:12 Tea +1" (the soonest running timer, the accent),
+// "◷ 04:52" (the stopwatch), after 21:00 "Fri 30 Oct · ⏰ 06:45" (the next alarm within 12 h).
+// weight: 3 ringing or running (before a meeting), 1 the alarm tonight (after one), 0 nothing.
+@(private)
+clock_timers :: proc(path: string) -> (text, tone: string, weight: int) {
+	if path == "" do return
+	data, err := os.read_entire_file(path, context.temp_allocator)
+	if err != nil do return
+	now := f64(time.to_unix_nanoseconds(time.now())) / 1e9
+	timer, watch, alarm: string
+	text_ := string(data)
+	for line in strings.split_lines_iterator(&text_) {
+		f := strings.split(line, "\t", context.temp_allocator)
+		switch f[0] {
+		case "ring":
+			if len(f) < 3 do continue
+			if f[1] == "alarm" do return fmt.tprintf("⏰ %s", f[2]), "red", 3
+			return fmt.tprintf("⏱ %s · done", f[2] != "" ? f[2] : "Timer"), "yellow", 3
+		case "timer":
+			if len(f) < 4 || timer != "" do continue
+			end, _ := strconv.parse_f64(f[1])
+			n, _ := strconv.parse_int(f[3])
+			timer = fmt.tprintf("⏱ %s%s%s", clock_dur(end - now), f[2] != "" ? fmt.tprintf(" %s", f[2]) : "", n > 0 ? fmt.tprintf(" +%d", n) : "")
+		case "watch":
+			if len(f) < 3 do continue
+			t0, _ := strconv.parse_f64(f[1])
+			base, _ := strconv.parse_f64(f[2])
+			el := int(base + now - t0)
+			watch = el >= 3600 ? fmt.tprintf("◷ %d:%02d:%02d", el / 3600, el / 60 % 60, el % 60) : fmt.tprintf("◷ %02d:%02d", el / 60, el % 60)
+		case "alarm":
+			if len(f) < 3 do continue
+			at, _ := strconv.parse_f64(f[1])
+			if at - now > 12 * 3600 do continue
+			t := libc.time(nil)
+			if libc.localtime(&t).tm_hour >= 21 do alarm = fmt.tprintf("%s · ⏰ %s", clock_text("%a %d %b"), f[2])
+		}
+	}
+	if timer != "" do return timer, "accent", 3
+	if watch != "" do return watch, "", 3
+	if alarm != "" do return alarm, "", 1
 	return
 }
 

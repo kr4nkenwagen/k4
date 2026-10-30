@@ -1,0 +1,149 @@
+{
+ "id": "t1",
+ "historyId": "990",
+ "messages": [
+  {
+   "id": "m1",
+   "threadId": "t1",
+   "labelIds": [
+    "INBOX"
+   ],
+   "internalDate": "1793300000000",
+   "snippet": "Thinking of the north trails at 9",
+   "payload": {
+    "mimeType": "multipart/alternative",
+    "headers": [
+     {
+      "name": "From",
+      "value": "Maja Lind <maja@example.com>"
+     },
+     {
+      "name": "To",
+      "value": "me@example.com"
+     },
+     {
+      "name": "Subject",
+      "value": "Saturday ride?"
+     },
+     {
+      "name": "Message-ID",
+      "value": "<a1@example.com>"
+     },
+     {
+      "name": "Content-Type",
+      "value": "multipart/alternative; boundary=x"
+     }
+    ],
+    "parts": [
+     {
+      "mimeType": "text/plain",
+      "headers": [
+       {
+        "name": "Content-Type",
+        "value": "text/plain; charset=utf-8"
+       }
+      ],
+      "body": {
+       "data": "VGhpbmtpbmcgb2YgdGhlIG5vcnRoIHRyYWlscyBhdCA5LCBicmluZyBsaWdodHMuClJvdXRlOiBodHRwczovL2V4YW1wbGUuY29tL3JvdXRlLzEy"
+      }
+     },
+     {
+      "mimeType": "text/html",
+      "body": {
+       "data": "PHA-VGhpbmtpbmcgb2YgdGhlIDxiPm5vcnRoIHRyYWlsczwvYj48L3A-"
+      }
+     }
+    ]
+   }
+  },
+  {
+   "id": "m2",
+   "threadId": "t1",
+   "labelIds": [
+    "INBOX",
+    "SENT"
+   ],
+   "internalDate": "1793303600000",
+   "snippet": "Sounds good",
+   "payload": {
+    "mimeType": "text/plain",
+    "headers": [
+     {
+      "name": "From",
+      "value": "Me <me@example.com>"
+     },
+     {
+      "name": "To",
+      "value": "Maja Lind <maja@example.com>"
+     },
+     {
+      "name": "Subject",
+      "value": "Re: Saturday ride?"
+     },
+     {
+      "name": "Message-ID",
+      "value": "<a2@example.com>"
+     },
+     {
+      "name": "References",
+      "value": "<a1@example.com>"
+     },
+     {
+      "name": "Content-Type",
+      "value": "text/plain; charset=utf-8"
+     }
+    ],
+    "body": {
+     "data": "U291bmRzIGdvb2QsIEknbGwgYmUgdGhlcmUuCgpPbiBGcmkgMzAgT2N0LCBNYWphIExpbmQgd3JvdGU6Cj4gVGhpbmtpbmcgb2YgdGhlIG5vcnRoIHRyYWlscyBhdCA5LCBicmluZyBsaWdodHMu"
+    }
+   }
+  },
+  {
+   "id": "m3",
+   "threadId": "t1",
+   "labelIds": [
+    "INBOX",
+    "UNREAD",
+    "STARRED"
+   ],
+   "internalDate": "1793307200000",
+   "snippet": "Great, Erik joins too",
+   "payload": {
+    "mimeType": "text/plain",
+    "headers": [
+     {
+      "name": "From",
+      "value": "Maja Lind <maja@example.com>"
+     },
+     {
+      "name": "To",
+      "value": "me@example.com"
+     },
+     {
+      "name": "Cc",
+      "value": "Erik Svensson <erik@example.com>"
+     },
+     {
+      "name": "Subject",
+      "value": "Re: Saturday ride?"
+     },
+     {
+      "name": "Message-ID",
+      "value": "<a3@example.com>"
+     },
+     {
+      "name": "References",
+      "value": "<a1@example.com> <a2@example.com>"
+     },
+     {
+      "name": "Content-Type",
+      "value": "text/plain; charset=iso-8859-1"
+     }
+    ],
+    "body": {
+     "data": "R3JlYXQsIEVyaWsgam9pbnMgdG9vLiBWaSBzZXMgcOUgbPZyZGFnIQoKPiBTb3VuZHMgZ29vZCwgSSdsbCBiZSB0aGVyZS4"
+    }
+   }
+  }
+ ]
+}

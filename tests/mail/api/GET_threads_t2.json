@@ -1,0 +1,41 @@
+{
+ "id": "t2",
+ "historyId": "980",
+ "messages": [
+  {
+   "id": "m4",
+   "threadId": "t2",
+   "labelIds": [
+    "INBOX",
+    "Label_7",
+    "UNREAD"
+   ],
+   "internalDate": "1793200000000",
+   "snippet": "Your statement is ready",
+   "payload": {
+    "mimeType": "text/html",
+    "headers": [
+     {
+      "name": "From",
+      "value": "Nordbank <noreply@nordbank.example>"
+     },
+     {
+      "name": "To",
+      "value": "me@example.com"
+     },
+     {
+      "name": "Subject",
+      "value": "Your October statement"
+     },
+     {
+      "name": "Content-Type",
+      "value": "text/html; charset=utf-8"
+     }
+    ],
+    "body": {
+     "data": "PGh0bWw-PGhlYWQ-PHN0eWxlPnB7Y29sb3I6cmVkfTwvc3R5bGU-PC9oZWFkPjxib2R5PjxwPkhlbGxvLDwvcD48cD5Zb3VyIHN0YXRlbWVudCBpcyByZWFkeS4gPGEgaHJlZj0naHR0cHM6Ly9ub3JkYmFuay5leGFtcGxlL3MvMTAnPlZpZXcgaXQ8L2E-PC9wPjxibG9ja3F1b3RlPkVhcmxpZXIgbm90aWNlPC9ibG9ja3F1b3RlPjx1bD48bGk-QmFsYW5jZTogMSAyMDAga3I8L2xpPjwvdWw-PC9ib2R5PjwvaHRtbD4"
+    }
+   }
+  }
+ ]
+}

@@ -37,13 +37,14 @@ YT_W, YT_H :: 900, 600
 YT_PW, YT_PH :: 760, 520
 YT_COLS :: 4
 
-Yt_Video :: struct { id, title, channel, thumb: string, secs, views, pos, index: int, current: bool, ts: i64 }
+Yt_Video :: struct { id, title, channel, thumb: string, secs, views, pos, index: int, current, is_chan: bool, ts: i64 } // is_chan: a channel (id UC…, channel: its @handle, views: its subscribers)
 Yt_Tab :: enum { Results, Queue, History }
 
 YouTube :: struct {
 	using pn: Panel,
 	state, note, query, took, ytv, mpvv: string,
 	searched: bool,      // a search was made (a Q line came)
+	view, view_name: string, // what the results are: "search", or "channel" (that channel's videos, opened from the search)
 	vids, queue, hist, feed: [dynamic]Yt_Video, // results, mpv's playlist, watched, the home page
 	home, home_browser, home_why: string,        // the home page: ok, loading, signedout, error; whose session
 	now: Yt_Video,       // what plays (id "": nothing)
@@ -91,8 +92,11 @@ yt_loaded :: proc(a: ^App, data: string) {
 			delete(y.state); delete(y.note); delete(y.ytv); delete(y.mpvv)
 			y.state, y.note, y.ytv, y.mpvv = strings.clone(fget(f, 1)), strings.clone(fget(f, 2)), strings.clone(fget(f, 3)), strings.clone(fget(f, 4))
 		case "Q":
-			delete(y.query); delete(y.took)
+			delete(y.query); delete(y.took); delete(y.view); delete(y.view_name)
 			y.query, y.took, y.searched = strings.clone(fget(f, 1)), strings.clone(fget(f, 3)), true
+			y.view, y.view_name = strings.clone(fget(f, 4)), strings.clone(fget(f, 5))
+		case "C": // the search named a channel: it, first among the results
+			append(&y.vids, Yt_Video{id = strings.clone(fget(f, 1)), title = strings.clone(fget(f, 2)), channel = strings.clone(fget(f, 3)), views = num(fget(f, 4)), thumb = strings.clone(fget(f, 5)), is_chan = true})
 		case "F":
 			delete(y.home_browser); delete(y.home_why)
 			y.home, y.home_browser, y.home_why = strings.clone(fget(f, 1)), strings.clone(fget(f, 2)), strings.clone(fget(f, 3))
@@ -183,6 +187,7 @@ yt_play :: proc(a: ^App) {
 	v, ok := yt_picked(y)
 	if !ok do return
 	switch {
+	case v.is_chan: panel_run(a, "channel", v.id) // its videos, in place of the search
 	case y.tab == .Queue: panel_run(a, "jump", fmt.tprint(v.index))
 	case y.tab == .History || (!y.searched && len(y.feed) == 0): panel_run(a, "play", v.id, "resume")
 	case: panel_run(a, "play", v.id)
@@ -222,6 +227,7 @@ yt_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bool
 		case k == .Escape:
 			switch {
 			case len(y.input) > 0: panel_clear(&y.pn)
+			case y.view == "channel": panel_run(a, "back") // back to the search
 			case y.searched: panel_run(a, "clear") // back to the home page
 			case: panel_close(a)
 			}
@@ -245,7 +251,9 @@ yt_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bool
 	case k == .End: c^ = max(n - 1, 0)
 	case k == .Enter: yt_play(a)
 	case ctrl && k == .Backspace: if y.tab == .History do panel_run(a, "forget")
-	case text == "a": if v, ok := yt_picked(y); ok do panel_run(a, "queue", v.id)
+	case text == "a":
+		if v, ok := yt_picked(y); ok && v.is_chan do panel_say(&y.pn, "A channel: ↵ opens its videos, a queues one of them")
+		else if ok do panel_run(a, "queue", v.id)
 	case text == " ": panel_run(a, "pause")
 	case text == "n": panel_run(a, "next")
 	case text == "p": panel_run(a, "prev")
@@ -392,7 +400,7 @@ yt_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	// the head: the crumb, the title, the state at the right
 	hh := (y.popup ? 40 : 48) * S
 	cf := y.popup ? y.f11b : y.f12b
-	crumb := y.tab == .Results ? "YOUTUBE" : fmt.tprintf("YOUTUBE › %s", y.tab == .Queue ? "QUEUE" : "HISTORY")
+	crumb := y.tab == .Results ? (y.view == "channel" ? "YOUTUBE › CHANNEL" : "YOUTUBE") : fmt.tprintf("YOUTUBE › %s", y.tab == .Queue ? "QUEUE" : "HISTORY")
 	cw, ch := tw(cf, crumb) + (y.popup ? 12 : 16) * S, (y.popup ? 20 : 24) * S
 	fill_rect(cv, px, (hh - ch) / 2, cw, ch, argb(H.acc, 0xff))
 	text_in(cv, cf, crumb, px + (cw - tw(cf, crumb)) / 2, (hh - ch) / 2, ch, argb(H.bg, 0xff))
@@ -415,7 +423,11 @@ yt_draw :: proc(a: ^App, cv: ^Canvas, S: int) {
 	case y.tab == .History: title = fmt.tprintf("%d watched", len(y.hist))
 	case searching: title = fmt.tprintf("“%s”", panel_text(&y.pn) != "" ? strings.trim_space(panel_text(&y.pn)) : y.query)
 	case y.state == "offline" || y.state == "error": title = fmt.tprintf("“%s” · not sent", y.query)
-	case y.searched: title = len(y.vids) > 0 ? fmt.tprintf("%d results · “%s”", len(y.vids), y.query) : "0 results"
+	case y.view == "channel": title = fmt.tprintf("%s · %d newest videos", y.view_name, len(y.vids))
+	case y.searched:
+		n := 0
+		for v in y.vids do if !v.is_chan do n += 1
+		title = len(y.vids) > 0 ? fmt.tprintf("%d results · “%s”", n, y.query) : "0 results"
 	}
 	tx := px + cw + 10 * S
 	text_in(cv, y.f13b, ellipsize(y.f13b, title, w - px - sw - 30 * S - tx), tx, 0, hh, argb(H.fg, 0xff))
@@ -639,6 +651,36 @@ yt_grid :: proc(a: ^App, cv: ^Canvas, S: int, H: HUD, l: []Yt_Video, x, y, w, h:
 			rounded_rect(cv, tx, ty, tw_, th_, 0, 0, 2 * f32(S), argb(H.acc, 0xff))
 			mark_sel(a, tx, ty, tw_, th_)
 		} else do rounded_rect(cv, tx, ty, tw_, th_, 0, 0, f32(S), is_now ? argb(H.acc, 0x99) : argb(H.line, 0xff))
+		if v.is_chan { // a channel: its picture round in the middle, CHANNEL, @handle · subscribers
+			fill_rect(cv, tx, ty, tw_, th_, argb(H.panel, 0xff))
+			as := th_ - 18 * S
+			ax, ay := tx + (tw_ - as) / 2, ty + 9 * S
+			if v.thumb != "" {
+				if img := image_cover(a, v.thumb, as, as); img.ok {
+					blit_image(cv, img.px, img.w, img.h, ax, ay)
+					// round: the corners in the tile's colour
+					r := f32(as) / 2
+					for yy in 0 ..< as do for xx in 0 ..< as {
+						dx, dy := f32(xx) - r + 0.5, f32(yy) - r + 0.5
+						if dx * dx + dy * dy > r * r do fill_rect(cv, ax + xx, ay + yy, 1, 1, argb(H.panel, 0xff))
+					}
+				}
+			}
+			rounded_rect(cv, tx, ty, tw_, th_, 0, 0, on ? 2 * f32(S) : f32(S), on ? argb(H.acc, 0xff) : argb(H.acc, 0x66))
+			bw := tw(yt.f10b, "CHANNEL") + 10 * S
+			fill_rect(cv, tx + 5 * S, ty + 5 * S, bw, 15 * S, argb(H.acc, 0xff))
+			text_in(cv, yt.f10b, "CHANNEL", tx + 10 * S, ty + 5 * S, 15 * S, argb(H.bg, 0xff))
+			if on {
+				fill_rect(cv, tx, ty + th_ - 22 * S, tw_, 22 * S, argb(0x04070c, 0xcc))
+				text_in(cv, yt.f9, "↵ its videos  o browser", tx + 6 * S, ty + th_ - 22 * S, 22 * S, argb(H.fg, 0xff))
+			}
+			text_in(cv, tf, ellipsize(tf, v.title, tw_), tx, ty + th_ + 6 * S, tlh, argb(on ? H.acc : H.fg, 0xff))
+			subs := v.views >= 1_000_000 ? fmt.tprintf("%.1fM subscribers", f64(v.views) / 1e6) : (v.views >= 1000 ? fmt.tprintf("%dK subscribers", v.views / 1000) : "")
+			sub := v.channel
+			if subs != "" do sub = sub != "" ? fmt.tprintf("%s · %s", sub, subs) : subs
+			text_in(cv, yt.f10, ellipsize(yt.f10, sub, tw_), tx, ty + th_ + 6 * S + 2 * tlh + 6 * S, 13 * S, argb(H.dim, 0xff))
+			continue
+		}
 		d := yt_secs(v.secs)
 		dw := tw(yt.f10b, d) + 10 * S
 		fill_rect(cv, tx + tw_ - 5 * S - dw, ty + th_ - 5 * S - 15 * S, dw, 15 * S, argb(v.secs <= 0 ? a.theme.red : 0x04070c, 0xdd))
@@ -917,6 +959,7 @@ yt_dump :: proc(a: ^App) -> string {
 	}
 	fmt.sbprintfln(&sb, "find %s%s", panel_text(&y.pn), y.field ? "|" : "")
 	l := yt_items(y, y.tab)
+	if y.view == "channel" do fmt.sbprintfln(&sb, "channel %s", y.view_name)
 	fmt.sbprintfln(&sb, "tab %v %d%s", y.tab, len(l), y.tab == .Results && !y.searched ? (len(y.feed) > 0 ? " · home" : fmt.tprintf(" · continue watching · home %s", y.home)) : "")
 	switch {
 	case y.tab == .Results && (y.state == "offline" || y.state == "error"): fmt.sbprintfln(&sb, "card Offline")
@@ -924,6 +967,7 @@ yt_dump :: proc(a: ^App) -> string {
 	}
 	for v, i in l {
 		mark := i == y.cur[y.tab] && !y.field ? "*" : " "
+		if v.is_chan { fmt.sbprintfln(&sb, "%s [channel] %s · %s · %d subscribers", mark, v.title, v.channel, v.views); continue }
 		extra := y.tab == .History ? "" : fmt.tprintf(" · %s", yt_secs(v.secs))
 		if v.id == y.now.id do extra = strings.concatenate({extra, " · playing"}, context.temp_allocator)
 		if pc := yt_watched(y, v.id); pc > 0 && v.ts > 0 do extra = strings.concatenate({extra, pc < 100 ? fmt.tprintf(" · %d%%", pc) : " · watched"}, context.temp_allocator)

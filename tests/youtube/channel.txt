@@ -1,0 +1,7 @@
+S	ok		2026.08.19	0.41.0
+Q	focus music	9
+C	UCabc	Rope Lab	@RopeLab	350000	@DIR@/thumb.png
+V	a1	Rainy night jazz for focus	Café Sounds	5400	1200000	@DIR@/thumb.png
+V	a2	Learn Odin in one hour	Ginger Codes	3721	48000	@DIR@/thumb.png
+V	a3	Live: harbour webcam	Port Cam	0	900	
+V	a4	Ten knots every climber should know	Rope Lab	842	350000	@DIR@/thumb.png

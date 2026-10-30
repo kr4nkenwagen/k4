@@ -1,0 +1,13 @@
+focus Menu
+crumb SEARCH
+query re
+count 3 results
+hints ↑↓ Move · → ↵ Open · Esc Shortcuts n a r t w x
+— Network
+  Reboot | Network
+— GitHub
+* Fix scaling | GitHub
+— Toggle
+  Firefox | Toggle
+exit 1
+log: load apps

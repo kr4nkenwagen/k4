@@ -3,6 +3,7 @@ crumb SEARCH
 query annika
 count 2 results
 hints ↑↓ Move · → ↵ Open · Esc Shortcuts n a r t w x
+— Messenger
 * Annika Lund (2) | Messenger
   Annika Lund, Maja Holm [3] | Messenger
 exit 1

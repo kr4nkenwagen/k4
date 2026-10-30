@@ -1,0 +1,19 @@
+S	ok	5	me@example.com		0	1793309900
+V	ALL		0
+Y	gmail	me@example.com	Gmail
+Y	home	Alex Holm <alex@home.example>	Home
+Y	work	Alex Holm <alex@work.example>	Work
+G	ALL	All inboxes	5	system	0	all
+G	INBOX	Inbox	2	system	128	gmail
+G	STARRED	Starred	0	system	3	gmail
+G	SENT	Sent	0	system	40	gmail
+G	Label_7	Bills	1	user	14	gmail
+G	home:INBOX	Inbox	2	system	900	home
+G	home:Sent	Sent	0	system	80	home
+G	home:Archive	Archive	0	system	300	home
+G	work:INBOX	Inbox	1	system	50	work
+G	work:Trash	Trash	0	system	2	work
+T	t1	Maja Lind, me	Saturday ride?	Great, Erik joins too	1793307200	1	1	3	0		gmail
+T	home:INBOX:812	Lina Ek	Book for December	I vote for the short one this time	1793306000	1	0	1	0		home
+T	work:INBOX:44	Buildbot	main passed · 41 checks	All green on a1b2c3d	1793305000	1	0	1	0		work
+T	home:INBOX:811	Fika Club	November meetup	We're at the usual place on the 12th	1793200000	0	0	1	1		home

@@ -94,3 +94,6 @@ net_tab_esc_closes	neteth	<tab><esc>	COMPACT=1
 net_copy_ip	neteth	y	COMPACT=1
 net_action_chip_moves	netwifi	<down><right><right>	COMPACT=1
 net_action_chip_runs	netwifi	<down><right><enter>	COMPACT=1
+clock-timer	-	timer 1h30 bread	-
+clock-alarm	-	alarm 6:45 weekdays gym<enter>	-
+search_groups	-	re<down>	-

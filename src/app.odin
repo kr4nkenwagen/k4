@@ -45,6 +45,11 @@ Options :: struct {
 	send_ctl:      string, // --send-ctl CMD
 	messenger:     bool,   // --messenger
 	youtube:       bool,   // --youtube
+	mail:          bool,   // --mail
+	wow:           bool,   // --wow
+	clock:         bool,   // --clock
+	keymap:        bool,   // --keymap
+	peek:          bool,   // --peek (with --keymap): the small one, a few seconds after a layer key
 	clip:          bool,   // --clip
 	tray:          bool,   // --tray
 	perf:          bool,   // --perf
@@ -72,6 +77,8 @@ Icon :: struct { px: []u32, w, h: int, ok: bool }
 
 App :: struct {
 	opts:     Options,
+	fullscreen: bool, // a panel over the whole output (--keymap): the overview's surface
+	passive: bool, // a panel that takes no input (--keymap --peek): bottom middle, like the OSD
 	theme:    logic.Theme,
 	bg_alpha: u8, // the backgrounds' alpha: Ghostty's background-opacity
 	font:     Font,

@@ -1,0 +1,2 @@
+S	syncing	0	me@example.com		0	0
+V	INBOX		0

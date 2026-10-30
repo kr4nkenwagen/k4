@@ -1,0 +1,6 @@
+S	ok	1.60.1.70685	wowf	0	1
+P	0	0	0
+W	realm	Silverpine	UP	HIGH	1
+W	token	42100000
+T	1793440800	1793310000
+A	2	0

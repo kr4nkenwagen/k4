@@ -1,0 +1,5 @@
+## Interface: 16001
+## Title: Details! Damage Meter
+## Version: 1.2
+## Author: Terciob
+## X-Wago-ID: aBc123

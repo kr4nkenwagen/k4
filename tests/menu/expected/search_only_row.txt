@@ -3,6 +3,7 @@ crumb SEARCH
 query zephyr
 count 1 result
 hints ↑↓ Move · → ↵ Open · Esc Shortcuts n a r t w x
+— Toggle
 * Zephyr chat | Toggle
 exit 1
 log: load apps

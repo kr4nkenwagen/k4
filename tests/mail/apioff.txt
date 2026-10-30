@@ -1,0 +1,2 @@
+S	error	0	me@example.com	The Gmail API is off in your Google Cloud project · turn it on (↵ opens the page), wait a minute	0	0
+V	INBOX		0

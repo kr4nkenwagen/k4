@@ -1,0 +1,24 @@
+N	1793352734.000	Stockholm	CET	44	3600
+C	Stockholm	Sweden	3600	1		Europe/Stockholm
+C	London	United Kingdom	0	0		Europe/London
+C	New York	USA · EDT	-14400	0	goes to −6 h on Sun 1 Nov	America/New_York
+C	San Francisco	USA · PDT	-25200	0	goes to −9 h on Sun 1 Nov	America/Los_Angeles
+C	Tokyo	Japan	32400	0		Asia/Tokyo
+C	Sydney	Australia · AEDT	39600	0		Australia/Sydney
+Z	Berlin	Germany	3600
+Z	Dubai	UAE	14400
+Z	Los Angeles	USA	-25200
+Z	Mumbai	India	19800
+Z	Reykjavik	Iceland	0
+Z	Sao Paulo	Brazil	-10800
+Z	Singapore	Singapore	28800
+Z	Toronto	Canada	-14400
+T	1	Bread · second rise	2700	1793354395.0	0.0	0.0
+T	2	Tea	240	1793352806.0	0.0	0.0
+T	3	Focus · 25 min	1500	0.0	663.0	0.0
+A	4	6	45	1111100	1	Wake up	1793598300
+A	5	8	30	0000011	1	Weekend run	1793431800
+A	6	14	0	0000000	1	Pick up the parcel · Trailshop	1793365200
+A	7	22	30	1111111	0	Wind down	0
+W	1	1793352442.39	0.00	74.31,71.88,73.02,69.95
+G	alarm	6	Call the garage	1793352600.0	10:30

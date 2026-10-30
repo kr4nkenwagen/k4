@@ -51,6 +51,7 @@ Wl :: struct {
 	compose:    ^xkb_compose_state,
 	repeat_rate, repeat_delay: int,
 	nd_kb: bool, // the notification popups have asked for the keyboard
+	nd_full: bool, // the notification surface fills the output (an immersive box)
 	anim_at: time.Tick, // the last frame drawn only for a shader's animation
 	repeat_key: u32,
 	repeat_at:  time.Tick,
@@ -442,7 +443,26 @@ popup_place :: proc(a: ^App) {
 }
 
 // The popups' size changed: the surface follows (1×1 and click-through when there are none).
+// An immersive box: the whole output, clear of the bar, all of it taking clicks (outside the
+// box they dismiss it); the compositor says how big.
 nd_resize :: proc(a: ^App) {
+	TOP, BOTTOM, LEFT, RIGHT :: i32(1), i32(2), i32(4), i32(8)
+	full := nd_full(a.nd)
+	if full != W.nd_full {
+		W.nd_full = full
+		wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor(full ? TOP | BOTTOM | LEFT | RIGHT : TOP | RIGHT))
+		if full do wlr.layer_surface_v1_set_margin(W.layer, 0, 0, 0, 0)
+		else do wlr.layer_surface_v1_set_margin(W.layer, 4, 6, 0, 0)
+	}
+	if full {
+		wlr.layer_surface_v1_set_size(W.layer, 0, 0)
+		r := wl.compositor_create_region(W.compositor)
+		wl.region_add(r, 0, 0, 1 << 15, 1 << 15)
+		wl.surface_set_input_region(W.surface, r)
+		wl.region_destroy(r)
+		wl.surface_commit(W.surface)
+		return
+	}
 	w, h := nd_size(a)
 	W.width, W.height = max(w, 1), max(h, 1)
 	wlr.layer_surface_v1_set_size(W.layer, u32(W.width), u32(W.height))
@@ -525,10 +545,10 @@ run_wayland :: proc(a: ^App) -> bool {
 	W.surface = wl.compositor_create_surface(W.compositor)
 	wl.surface_add_listener(W.surface, &surface_listener, nil)
 	TOP, BOTTOM, LEFT, RIGHT :: i32(1), i32(2), i32(4), i32(8)
-	if a.ov != nil || a.pw != nil {
-		// the overview and the system menu: the focused output, every edge, clear of the bar;
-		// all of the keyboard
-		W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, nil, .overlay, a.pw != nil ? "k4-power" : "k4-overview")
+	if a.ov != nil || a.pw != nil || a.fullscreen {
+		// the overview, the system menu and full-screen panels (the keymap): the focused output,
+		// every edge, clear of the bar; all of the keyboard
+		W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, nil, .overlay, a.pw != nil ? "k4-power" : (a.fullscreen ? "k4-keymap" : "k4-overview"))
 		wlr.layer_surface_v1_add_listener(W.layer, &layer_listener, nil)
 		W.width, W.height = 0, 0
 		wlr.layer_surface_v1_set_size(W.layer, 0, 0)
@@ -545,6 +565,18 @@ run_wayland :: proc(a: ^App) -> bool {
 		wlr.layer_surface_v1_set_margin(W.layer, 4, 6, 0, 0)
 		wlr.layer_surface_v1_set_keyboard_interactivity(W.layer, .none)
 		nd_resize(a)
+	} else if a.passive {
+		// a passive panel (the keymap's peek): bottom middle, over everything, no input at all
+		W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, nil, .overlay, "k4-peek")
+		wlr.layer_surface_v1_add_listener(W.layer, &layer_listener, nil)
+		W.width, W.height = a.width, a.height
+		wlr.layer_surface_v1_set_size(W.layer, u32(a.width), u32(a.height))
+		wlr.layer_surface_v1_set_anchor(W.layer, wlr.layer_surface_v1_anchor(BOTTOM))
+		wlr.layer_surface_v1_set_margin(W.layer, 0, 0, 56, 0)
+		r := wl.compositor_create_region(W.compositor)
+		wl.surface_set_input_region(W.surface, r)
+		wl.region_destroy(r)
+		wl.surface_commit(W.surface)
 	} else if a.osd != nil {
 		// the feedback box: centred above the bottom of the focused output, no input at all
 		W.layer = wlr.layer_shell_v1_get_layer_surface(W.shell, W.surface, nil, .overlay, "k4-osd")
@@ -679,11 +711,15 @@ run_wayland :: proc(a: ^App) -> bool {
 				wl.surface_commit(W.surface)
 				W.dirty = true
 			}
-			w, h := nd_size(a)
-			if max(w, 1) != W.width || max(h, 1) != W.height do nd_resize(a)
+			full := nd_full(a.nd)
+			if full != W.nd_full do nd_resize(a) // an immersive box came, or went
+			else if !full {
+				w, h := nd_size(a)
+				if max(w, 1) != W.width || max(h, 1) != W.height do nd_resize(a)
+			}
 			if nd_popups_visible(a.nd) do W.dirty = true
 		}
-		if (a.bar != nil || a.ov != nil || a.pw != nil) && W.configured && !W.bar_gpu && W.width > 0 {
+		if (a.bar != nil || a.ov != nil || a.pw != nil || a.fullscreen) && W.configured && !W.bar_gpu && W.width > 0 {
 			// Ghostty's shaders on the bar and the overview too, once their size is known
 			W.bar_gpu = true
 			if gpu_init_window(W.display, W.surface, W.width * W.scale, W.height * W.scale) do W.dirty = true

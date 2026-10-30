@@ -1,0 +1,30 @@
+{
+ "labels": [
+  {
+   "id": "INBOX"
+  },
+  {
+   "id": "STARRED"
+  },
+  {
+   "id": "SENT"
+  },
+  {
+   "id": "DRAFT"
+  },
+  {
+   "id": "SPAM"
+  },
+  {
+   "id": "TRASH"
+  },
+  {
+   "id": "CATEGORY_SOCIAL"
+  },
+  {
+   "id": "Label_7",
+   "name": "Bills",
+   "type": "user"
+  }
+ ]
+}

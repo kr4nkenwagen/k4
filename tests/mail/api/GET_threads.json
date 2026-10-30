@@ -1,0 +1,17 @@
+{
+ "threads": [
+  {
+   "id": "t1",
+   "historyId": "990"
+  },
+  {
+   "id": "t2",
+   "historyId": "980"
+  },
+  {
+   "id": "t3",
+   "historyId": "970"
+  }
+ ],
+ "nextPageToken": "p2"
+}

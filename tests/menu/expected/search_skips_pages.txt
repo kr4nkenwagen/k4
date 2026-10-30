@@ -3,6 +3,7 @@ crumb SEARCH
 query fix
 count 1 result
 hints ↑↓ Move · → ↵ Open · Esc Shortcuts n a r t w x
+— GitHub
 * Fix scaling | GitHub
 exit 1
 log: load apps
