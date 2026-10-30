@@ -38,6 +38,7 @@ Note :: struct {
 	actions: [dynamic][2]string, // key, label ("default": a click on the card)
 	urgency: int, // 0 low, 1 normal, 2 critical
 	warn: bool, // posted with urgency warn: normal, drawn yellow
+	wait, done: bool, // posted with urgency wait (the edge lit, the tag in the accent: RINGING, 20:00) or done (the tag green: UP)
 	progress: int, // 0–100 from the "value" hint, -1 none
 	at: i64, // unix seconds
 	timeout: int, // ms the popup shows, -1 until acted on (asked for: -1 the default, 0 stays)
@@ -658,6 +659,8 @@ nd_command :: proc(a: ^App, line: string) -> (reply: string, changed: bool) {
 		x.app, x.title, x.body = get(p, 1), get(p, 2), get(p, 3)
 		if u, ok := strconv.parse_int(get(p, 4)); ok do x.urgency = clamp(u, 0, 2)
 		else if get(p, 4) == "warn" do x.warn = true
+		else if get(p, 4) == "wait" do x.wait = true
+		else if get(p, 4) == "done" do x.done = true
 		if v, ok := strconv.parse_int(get(p, 5)); ok do x.progress = clamp(v, -1, 100)
 		if t, ok := strconv.parse_int(get(p, 6)); ok do x.timeout = t
 		x.tag, x.icon, x.quote = get(p, 7), get(p, 8), get(p, 9)
@@ -717,6 +720,8 @@ unix_ctl :: proc(path, cmd: string) -> (string, bool) {
 note_app_color :: proc(t: logic.Theme, app: string) -> u32 {
 	if app == "LocalSend" || app == "Capture" || app == "Drives" do return t.accent // as the design draws them
 	if app == "Snapshots" do return t.green
+	if app == "Clock" do return t.accent
+	if app == "WoW" do return 0xE8A33D
 	cs := [6]u32{t.blue, t.magenta, t.yellow, t.green, t.cyan, t.orange}
 	return cs[hash.fnv32a(transmute([]u8)app) % 6]
 }
@@ -833,7 +838,7 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 		rounded_rect(cv, x + 8 * S, y + h + 5 * S - 7 * S, w - 16 * S, 12 * S, 0, 0, f32(S), argb(H.line, 0xff))
 	}
 	cut := 10 * S
-	edge_on := hover || sel || note.urgency == 2 || note.warn || note.tag == "WAITING" || note.tag == "NEEDS YOU"
+	edge_on := hover || sel || note.urgency == 2 || note.warn || note.wait || note.tag == "WAITING" || note.tag == "NEEDS YOU"
 	if note.urgency == 2 do for k in 1 ..= 3 do cut_outline(cv, x - k * 2 * S, y - k * 2 * S, w + k * 4 * S, h + k * 4 * S, cut + k * S, 2 * S, argb(lvl, u8(0x0c / k + 1)))
 	cut_rect(cv, x + S, y + S, w - 2 * S, h - 2 * S, cut - S, argb(note.urgency == 2 ? mix(H.bg, H.hot, 0.08) : H.bg, a.bg_alpha))
 	cut_rect(cv, x + S, y + S, w - 2 * S, h - 2 * S, cut - S, argb(t.fg, 0x08))
@@ -863,7 +868,7 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 	right -= 18 * S + 8 * S
 	tag, tagc := "", H.dim
 	switch {
-	case note.tag != "": tag, tagc = note.tag, note.tag == "SAVED" ? t.green : H.acc
+	case note.tag != "": tag, tagc = note.tag, note.done || note.tag == "SAVED" ? t.green : H.acc
 	case count > 1: tag, tagc = fmt.tprintf("+%d", count - 1), H.acc
 	case note.urgency == 2: tag, tagc = "CRITICAL", H.hot
 	case note.warn: tag, tagc = "WARNING", t.yellow
@@ -1183,6 +1188,8 @@ nd_dump :: proc(a: ^App) -> string {
 		fmt.sbprintf(&sb, "%spopup %s · %s", n.focus ? (k == n.sel ? "* " : "  ") : "", x.app, x.title)
 		if c.count > 1 do fmt.sbprintf(&sb, " +%d", c.count - 1)
 		if x.warn do fmt.sbprint(&sb, " (warn)")
+		if x.wait do fmt.sbprint(&sb, " (wait)")
+		if x.done do fmt.sbprint(&sb, " (done)")
 		if n.focus && k == n.sel && n.reply do fmt.sbprintf(&sb, " (reply: %s)", string(a.query[:]))
 		fmt.sbprintln(&sb)
 	}

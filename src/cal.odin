@@ -30,6 +30,7 @@ Cal_Ev :: struct {
 }
 Cal_Data :: struct {
 	conn, status, cx: string,
+	wow_date, wow_hm: string, // CW: World of Warcraft's next weekly reset (local date, HH:MM)
 	cals: [dynamic]Cal_Cal,
 	evs:  [dynamic]Cal_Ev,
 }
@@ -56,6 +57,7 @@ cal_line :: proc(s: ^Section, f: []string) -> bool {
 	switch f[0] {
 	case "CS": d.conn, d.status = strings.clone(get(f, 1)), strings.clone(get(f, 2))
 	case "CX": d.cx = strings.clone(get(f, 1))
+	case "CW": d.wow_date, d.wow_hm = strings.clone(get(f, 2)), strings.clone(get(f, 3))
 	case "CC":
 		append(&d.cals, Cal_Cal{strings.clone(get(f, 1)), strings.clone(get(f, 2)), strings.clone(get(f, 3)), strings.clone(get(f, 4)), get(f, 5) != "0", get(f, 6) == "1"})
 	case "CE":
@@ -87,6 +89,7 @@ cal_reset :: proc(s: ^Section) {
 	clear(&s.cd.cals)
 	clear(&s.cd.evs)
 	s.cd.conn, s.cd.status = "", ""
+	s.cd.wow_date, s.cd.wow_hm = "", ""
 }
 
 @(private)
@@ -742,7 +745,12 @@ cal_draw_month :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 	sub := fmt.tprintf("w%d%s", iso_week(u.cur), u.cur == now_day ? " · today" : "")
 	if connected do sub = fmt.tprintf("%s · %s", sub, len(dl) > 0 ? plural_n(len(dl), "event") : "nothing scheduled")
 	draw_text_f(cv, m.f_tiny, sub, rx + 14 * S, ry, argb(dim, 0xff))
-	ry += int(m.f_tiny.line_h) + 6 * S
+	ry += int(m.f_tiny.line_h) + 2 * S
+	if wl := cal_wow_line(d, u.cur, now_day, now_m); wl != "" {
+		draw_text_f(cv, m.f_tiny, wl, rx + 14 * S, ry, argb(0xE8A33D, 0xff))
+		ry += int(m.f_tiny.line_h) + 2 * S
+	}
+	ry += 4 * S
 	// now / next
 	if u.cur == now_day && connected {
 		live, nx := -1, -1
@@ -1114,6 +1122,22 @@ cal_click :: proc(a: ^App, h: Hit) {
 
 // ---------- --dump ----------
 
+// The WoW line under the day (the design's WowCalendar): today "WoW · weekly reset in 22 h 51 m ·
+// Tue 09:00", on the reset's day "WoW · weekly reset at 09:00".
+@(private)
+cal_wow_line :: proc(d: ^Cal_Data, day, now_day, now_m: int) -> string {
+	if d.wow_date == "" do return ""
+	rd, rm := day_of(d.wow_date), hm(d.wow_hm)
+	if day == now_day {
+		left := (rd - now_day) * 1440 + rm - now_m
+		if left < 0 do return ""
+		span := left >= 1440 ? fmt.tprintf("%d d %d h", left / 1440, left / 60 % 24) : fmt.tprintf("%d h %d m", left / 60, left % 60)
+		return fmt.tprintf("WoW · weekly reset in %s · %s %s", span, DOW3[weekday(rd)], d.wow_hm)
+	}
+	if day == rd do return fmt.tprintf("WoW · weekly reset at %s", d.wow_hm)
+	return ""
+}
+
 cal_dump :: proc(a: ^App, b: ^strings.Builder) {
 	m := a.menu
 	d := &m.sections[m.open].cd
@@ -1124,6 +1148,8 @@ cal_dump :: proc(a: ^App, b: ^strings.Builder) {
 	fmt.sbprintfln(b, "hints %s", hints_text(cal_hints(m, d)))
 	switch u.view {
 	case .Month:
+		now_day, now_m := cal_now()
+		if wl := cal_wow_line(d, u.cur, now_day, now_m); wl != "" do fmt.sbprintfln(b, "%s", wl)
 		for o, i in cal_day(d, u.cur) {
 			e := d.evs[o.ev]
 			fmt.sbprintfln(b, "%s %s · %s · %s%s", u.list && i == u.ei ? "*" : " ", cal_time(e), e.title, cal_meta(d, o), cal_past(e, u.cur) ? " (past)" : "")

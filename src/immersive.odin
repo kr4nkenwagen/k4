@@ -263,8 +263,9 @@ nd_imm_box :: proc(a: ^App, cv: ^Canvas, S, x0, y0, w: int, x: ^Note, qi, qn: in
 		tag := x.tag != "" ? strings.to_upper(x.tag, context.temp_allocator) : (crit ? "CRITICAL" : "")
 		if tag != "" {
 			tw_ := tw(n.f10b, tag) + 14 * S
-			rounded_rect(cv, ax, y + (head - 18 * S) / 2, tw_, 18 * S, 0, 0, f32(S), argb(crit ? th.red : c, 0xff))
-			text_in(cv, n.f10b, tag, ax + 7 * S, y + (head - 18 * S) / 2, 18 * S, argb(crit ? th.red : c, 0xff))
+			tc := crit ? th.red : (x.done ? th.green : (x.app == "WoW" ? th.yellow : c)) // (the WoW boxes' tags: yellow)
+			rounded_rect(cv, ax, y + (head - 18 * S) / 2, tw_, 18 * S, 0, 0, f32(S), argb(tc, 0xff))
+			text_in(cv, n.f10b, tag, ax + 7 * S, y + (head - 18 * S) / 2, 18 * S, argb(tc, 0xff))
 		}
 		rx := x0 + w - 22 * S
 		stay := "stays until you dismiss it"

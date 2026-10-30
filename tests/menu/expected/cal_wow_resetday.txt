@@ -1,0 +1,10 @@
+focus Sub
+popup 644x474
+calendar Month · 2026-10-28 · ok · synced 09:05
+hints ←→↑↓ Day · ↵ Events · PgUp/Dn Month · Tab Agenda · n New · t Today
+WoW · weekly reset at 05:00
+  all day · k4 0.4 release · Work
+  14:00–14:45 · Dentist · Folktandvården S:t Eriksplan
+exit 1
+log: load apps
+log: cal sync

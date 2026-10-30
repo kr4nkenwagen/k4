@@ -97,3 +97,5 @@ net_action_chip_runs	netwifi	<down><right><enter>	COMPACT=1
 clock-timer	-	timer 1h30 bread	-
 clock-alarm	-	alarm 6:45 weekdays gym<enter>	-
 search_groups	-	re<down>	-
+cal_wow_today	gcalwow	-	COMPACT=1
+cal_wow_resetday	gcalwow	<right><right>	COMPACT=1

@@ -349,7 +349,7 @@ section_line :: proc(s: ^Section, f: []string) {
 	case "X": // the battery popup's charge: X <percent> <line> [charging]
 		p, _ := strconv.parse_int(get(f, 1))
 		append(&s.actions, Action{kind = .Hero, heading = true, pct = clamp(p, 0, 100), meta = strings.clone(get(f, 2)), active = get(f, 3) == "charging"})
-	case "CS", "CX", "CC", "CE", "CG", "CN": cal_line(s, f)
+	case "CS", "CX", "CW", "CC", "CE", "CG", "CN": cal_line(s, f)
 	case "WN":
 		for i in 0 ..< 6 do s.wx_now[i] = strings.clone(get(f, i + 1))
 	case "WD":

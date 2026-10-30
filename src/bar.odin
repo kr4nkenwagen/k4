@@ -23,7 +23,7 @@ import "logic"
 //      side: left center right · kind: workspaces, window, clock, text / icon (arg), exec
 //      (arg = a shell command: interval > 0 runs it every that many seconds and keeps its last
 //      line; 0 keeps it running and takes every line). Clock arg: "time;date|alt time;alt date"
-//      (strftime; the time bold, the date dim); right click switches, middle shows UTC for 3 s.
+//      (strftime; the time bold, the date dim); the wheel (or a right click without a command) switches, middle shows UTC for 3 s.
 //      An exec line is plain text or Waybar's JSON {"text","tooltip","class","percentage"}
 //      plus k4's "icon", "icon_tone", "text_tone", "text2" (dim, after the text), "text2_tone",
 //      "level" (a 4 px level bar, 0–100), "battery" (the battery glyph, 0–100) and "badge"
@@ -548,6 +548,7 @@ token :: proc(t: logic.Theme, name: string, def: u32) -> u32 {
 	case "cyan": return t.cyan
 	case "blue": return t.blue
 	case "magenta": return t.magenta
+	case "wow": return 0xE8A33D // World of Warcraft's orange (its raid nights calendar)
 	}
 	return def
 }
@@ -943,6 +944,7 @@ bar_pointer_scroll :: proc(a: ^App, n: int) -> bool {
 		return true
 	}
 	cmd := n < 0 ? m.on[3] : m.on[4]
+	if m.kind == .Clock && cmd == "" { m.alt = !m.alt; bar_tick(a); return true } // the wheel: the other format
 	if cmd == "" do return false
 	bar_run(a, m, cmd, false)
 	if m.flash do m.flash_until = time.tick_add(time.tick_now(), 1200 * time.Millisecond)
