@@ -1,0 +1,16 @@
+D	through the Discord app · mentions, DMs and voice · can’t read channels or send	🔊 Raid	Search Discord…
+Y	↑↓	Move	↵	Open / join	⌃M	Mute	⌃D	Deafen	⌃L	Leave	⌫	Back
+VP	🔊 Raid	Ember Pact · 4	MIC ON	ML~#3DF5FF~talk~Maja|ES~#FFC857~mute~Erik|Ti~#C69B6D~~Tilly|Te~#F2F2F2~me~you
+A	id4	Mute	⌃M		stay;mark=●;markc=dim;chip=OFF;chipc=dim
+A	id5	Deafen	⌃D		stay;mark=◎;markc=dim;chip=OFF;chipc=dim
+A	id6	Leave voice	⌃L		stay;mark=⏏
+KB	^m	key-m
+KB	^d	key-d
+KB	^l	key-l
+H	Mentions & DMs	2
+A	id11	Maja Lind	now		av=ML;avc=#3DF5FF;l2=MC tonight 20:00, invites 19:45;l2c=fg;sub= · #raid-signups · Ember Pact;subc=dim;chip=NEW;chipc=accent
+A	id12	Erik Svensson	33 m		av=ES;avc=#FFC857;l2=saw your screenshot, nice loot;l2c=fg;sub= · DM;subc=#5865F2;chip=NEW;chipc=accent
+H	Servers	
+A	id14	Ember Pact			mark=▾;markc=accent
+A	id15	   # raid-signups	↵ opens		mark= 
+A	id16	   🔊 Raid	you’re here		stay;mark= ;metac=accent

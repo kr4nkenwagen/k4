@@ -48,6 +48,7 @@ Options :: struct {
 	mail:          bool,   // --mail
 	wow:           bool,   // --wow
 	clock:         bool,   // --clock
+	releases:      bool,   // --releases
 	keymap:        bool,   // --keymap
 	peek:          bool,   // --peek (with --keymap): the small one, a few seconds after a layer key
 	clip:          bool,   // --clip
@@ -92,6 +93,8 @@ App :: struct {
 	font_px:  f32, // logical em size; the font is resized to font_px * scale for drawing
 	fonts:    [dynamic]^Font, // extra sizes (menu mode), resized with the buffer scale
 	family:   string,
+	bold_base: ^Font, // the bold face, loaded once (bold_font sizes it)
+	bold_failed: bool,
 	scale:    int, // buffer scale of the output (fonts are sized for it)
 	caret:    [4]int, // the text caret as last drawn (buffer pixels: x, y top, w, h; w 0 = none), for shaders
 	sel:      [4]int, // the highlighted selection as last drawn (same units): the shaders' cursor when set
@@ -375,6 +378,10 @@ app_edit_key :: proc(a: ^App, k: Key, ctrl: bool, ch: rune, text: string) -> boo
 		case 'h': if a.cursor > 0 { p := prev_cp(q[:], a.cursor); remove_range(q, p, a.cursor); a.cursor = p; app_rematch(a) }
 		case 'd': if a.cursor < len(q) { n := next_cp(q[:], a.cursor); remove_range(q, a.cursor, n); app_rematch(a) }
 		case 'u': remove_range(q, 0, a.cursor); a.cursor = 0; app_rematch(a)
+		case 'v': // paste (one line: newlines and tabs become spaces; K4_MESSENGER_CLIPBOARD in tests)
+			t := strings.trim_space(msg_clipboard())
+			t, _ = strings.replace_all(t, "\t", " ", context.temp_allocator)
+			if t != "" { app_insert(a, t); app_rematch(a) }
 		case 'k': resize(q, a.cursor); app_rematch(a)
 		case 'w':
 			p := a.cursor

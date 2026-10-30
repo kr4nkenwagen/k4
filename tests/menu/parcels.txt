@@ -1,0 +1,11 @@
+D	from Gmail and IMAP order mails, and numbers you paste · live: PostNord, DHL	1 to pick up · 1 today	Paste a tracking number…
+Q	add-number
+Y	↑↓	Move	↵	Tracking	⌃C	Copy code	Del	Archive	type	Add a number	⌫	Back
+H	Ready for pickup	1
+PU	id5	Trailshop	POSTNORD	#00A0D6	ICA Nära Fridhemsplan	PostNord · UA123456789SE	Pick up by Fri 6 Nov		4821	copy-code	archive-it
+H	Out for delivery today	1
+A	id7	Nordic Bikes	14–17		tag2=BUDBEE;tag2c=#B18CFF;l2=Out for delivery · AB12CD34;l2c=fg;bigmeta;metac=accent;del=del-row
+H	On the way	1
+A	id9	Webhallen	—		tag2=DHL;tag2c=#FFCC00;l2=In transit · 1234567890;l2c=dim;del=del-row
+H	Delivered	
+A	id11	Apotea	yesterday		mark=✓;markc=green;tag2=INSTABOX;tag2c=#FF6FA1;l2=Delivered;dim;del=del-row

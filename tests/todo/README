@@ -1,0 +1,4 @@
+k4-todo's test fixture (todo.py with K4_TODO_FAKE=this dir, K4_TODO_NOW=1793352734, Fri 30 Oct 2026):
+server.json is the fake Google Tasks API, state/k4.json marks k1 (open) and k2 (ticked off) as k4's own.
+tests/bar.sh copies it before use (sync writes cache/ and the API writes log). Regenerate the launcher
+fixtures with: K4_TODO_FAKE=<copy> K4_TODO_NOW=1793352734 todo.py page > tests/menu/todo.txt

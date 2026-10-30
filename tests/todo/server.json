@@ -1,0 +1,75 @@
+{
+ "lists": [
+  {
+   "id": "L1",
+   "title": "My Tasks"
+  },
+  {
+   "id": "L2",
+   "title": "Shopping"
+  }
+ ],
+ "tasks": {
+  "L1": [
+   {
+    "id": "a1",
+    "title": "Renew the passport",
+    "status": "needsAction",
+    "due": "2026-10-28T00:00:00.000Z",
+    "position": "1"
+   },
+   {
+    "id": "a2",
+    "title": "Call the plumber",
+    "status": "needsAction",
+    "due": "2026-10-30T00:00:00.000Z",
+    "notes": "about the kitchen sink",
+    "position": "2"
+   },
+   {
+    "id": "a3",
+    "title": "Book the car service",
+    "status": "needsAction",
+    "position": "3"
+   },
+   {
+    "id": "a4",
+    "title": "Ask for the quote",
+    "status": "needsAction",
+    "parent": "a3",
+    "position": "1"
+   },
+   {
+    "id": "a5",
+    "title": "Return the library books",
+    "status": "completed",
+    "completed": "2026-10-29T12:00:00.000Z",
+    "position": "4"
+   },
+   {
+    "id": "k1",
+    "title": "Betala elräkningen",
+    "status": "needsAction",
+    "due": "2026-11-10T00:00:00.000Z",
+    "notes": "from Elbolaget Norr · Mail",
+    "position": "5"
+   },
+   {
+    "id": "k2",
+    "title": "Review PR #12 · Fix the login redirect (lantern)",
+    "status": "completed",
+    "completed": "2026-10-30T09:00:00.000Z",
+    "position": "6"
+   }
+  ],
+  "L2": [
+   {
+    "id": "b1",
+    "title": "Oat milk",
+    "status": "needsAction",
+    "due": "2026-11-02T00:00:00.000Z",
+    "position": "1"
+   }
+  ]
+ }
+}

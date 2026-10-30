@@ -1,0 +1,10 @@
+D	Claude reads what’s new in your mail, Messenger and Discord and adds the plans to your calendar	4 added this week	Search events…
+Y	↑↓	Move	Del	Remove from calendar	⌃O	Source	↵	Add (waiting ones)	⌫	Back
+H	Added by k4 · this week	4
+A	row3	Pick up the Trailshop parcel · ICA Nära Fridhemsplan · code 4821	Wed 4 Nov		stay;mark=✓;markc=green;l2=from Parcels · Parcels · “last day to pick it up”;l2c=dim;del=remove3;k^o=source3
+A	row4	Tandläkaren	Thu 5 Nov 14:30		stay;mark=✓;markc=green;l2=from Folktandvården · Mail · “torsdag 5 november kl 14:30”;l2c=dim;del=remove4;k^o=source4
+A	row5	Cykla med Maja	Sat 31 Oct 10:00		stay;mark=✓;markc=green;l2=from Maja Lind · Messenger · “ses vid Hornstull kl 10 då”;l2c=dim;del=remove5;k^o=source5
+A	row6	MC raid	Fri 6 Nov 20:00–23:00		stay;mark=✓;markc=green;l2=from Brakk (#raid-signups, Ember Pact) · Discord · “MC on Friday 20:00”;l2c=dim;del=remove6;k^o=source6
+H	More	
+A	row8	Find events now	looked 3 h ago · 4 new items · asked Claude		stay;mark=↻;markc=accent
+A	row9	Only what’s new goes to Claude, with your own Claude Code login · hourly · Del undoes one			mark=ⓘ;dim

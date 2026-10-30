@@ -1,0 +1,15 @@
+focus Sub
+crumb NETWORK › DISCORD
+query (Search Discord…)
+count not set up
+hints ↑↓ Step · ↵ Do it · ⌃V Paste · ⌫ Back · Esc Close
+title Discord · one-time setup · about 3 minutes (full width)
+!! accent: Connect Discord once · k4 talks to the Discord app on this computer through a developer app of your own. It sees mentions, DMs and voice; it can join and leave voice. It can’t read channels or send messages.
+  Create an application | discord.com/developers › New application (mark 1)
+  Add yourself as an app tester | App Testers › your account (mark 2)
+  Add the redirect http://127.0.0.1 | OAuth2 › Redirects (mark 3)
+* Paste the client ID | General Information › Application ID · ↵ (mark 4)
+  Paste the client secret | asked right after the ID · stays in the keyring (mark 5, dim)
+  Allow k4 in Discord | after that · Discord asks once (mark 6, dim)
+exit 1
+log: load apps

@@ -1,0 +1,9 @@
+focus Menu
+crumb SEARCH
+query track 00370 7123 4567 8901 234
+count 1 result
+hints ↑↓ Move · → ↵ Open · Esc Shortcuts n a r t w x
+— Parcels
+* Track 0037…1234 · PostNord · ↵ adds it to Parcels | Parcels
+exit 1
+log: load apps

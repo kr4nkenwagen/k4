@@ -1,0 +1,11 @@
+focus Sub
+crumb NETWORK › TODO
+query (Search todos…)
+count not connected
+hints ↑↓ Step · ↵ Do it · ⌫ Back · Esc Close
+title Todo · Google Tasks · your todo lists (full width)
+!! accent: Connect Google Tasks · k4 shows your Google Tasks lists here and on the bar beside the clock. It uses the Google sign-in Calendar and Mail use, with its own permission for tasks.
+* Enable the Google Tasks API | Cloud Console › your k4 project › Enable (mark 1)
+  Sign in | Google asks once (mark 2)
+exit 1
+log: load apps

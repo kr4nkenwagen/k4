@@ -1,0 +1,5 @@
+{"prs": [{"number": 12, "title": "Fix the login redirect", "repository": {"name": "lantern", "nameWithOwner": "example/lantern"}, "url": "https://github.com/example/lantern/pull/12", "createdAt": "2026-10-28T09:00:00Z"}],
+ "issues": [{"number": 40, "title": "Crash when the cache is empty", "repository": {"name": "lantern", "nameWithOwner": "example/lantern"}, "url": "https://github.com/example/lantern/issues/40", "createdAt": "2026-10-20T09:00:00Z"}],
+ "notifications": [{"id": "n1", "reason": "mention", "updated_at": "2026-10-29T19:30:00Z", "repository": {"full_name": "example/lantern"},
+   "subject": {"title": "Bar flickers on resume", "type": "Issue", "url": "https://api.github.com/repos/example/lantern/issues/41"},
+   "body": "@you can you send me the logs from the resume crash before Monday?"}]}

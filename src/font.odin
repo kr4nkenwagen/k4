@@ -7,6 +7,7 @@ import "core:math"
 import "core:os"
 import "core:strconv"
 import "core:strings"
+import "core:time"
 import "core:unicode/utf8"
 import kbts "vendor_k4:kb_text_shape"
 
@@ -56,6 +57,10 @@ Shaped :: struct {
 // substitution rules, and Omarchy's swap any named monospace for its own), then fc-match.
 // "Family:weight=bold" asks for the bold face.
 font_file :: proc(family: string) -> (path: string, index: int, ok: bool) {
+	// what fontconfig answered last time (~/.cache/k4/fonts.tsv), while that file is unchanged:
+	// fc-list costs ~10 ms a call, and every window asks for two or three faces
+	if path, index, ok = font_cache_get(family); ok do return
+	defer if ok do font_cache_put(family, path, index)
 	if path, index, ok = font_file_exact(family); ok do return
 	state, out, _, err := os.process_exec({command = {"fc-match", "-f", "%{file}\n%{index}", family}}, context.allocator)
 	if err != nil || !state.success do return
@@ -64,6 +69,47 @@ font_file :: proc(family: string) -> (path: string, index: int, ok: bool) {
 	path = lines[0]
 	if len(lines) > 1 do index, _ = strconv.parse_int(lines[1])
 	return path, index, true
+}
+
+@(private)
+font_cache_path :: proc() -> string {
+	if v := os.get_env("K4_FONT_CACHE", context.temp_allocator); v != "" do return v
+	return strings.concatenate({os.get_env("HOME", context.temp_allocator), "/.cache/k4/fonts.tsv"}, context.temp_allocator)
+}
+
+// A cached answer: family, file, index, the file's mtime (it must still match).
+@(private)
+font_cache_get :: proc(family: string) -> (path: string, index: int, ok: bool) {
+	data, err := os.read_entire_file(font_cache_path(), context.temp_allocator)
+	if err != nil do return
+	text := string(data)
+	for line in strings.split_lines_iterator(&text) {
+		f := strings.split(line, "\t", context.temp_allocator)
+		if len(f) < 4 || f[0] != family do continue
+		fi, serr := os.stat(f[1], context.temp_allocator)
+		if serr != nil || fmt.tprint(time_unix(fi.modification_time)) != f[3] do return
+		index, _ = strconv.parse_int(f[2])
+		return strings.clone(f[1]), index, true
+	}
+	return
+}
+
+@(private)
+time_unix :: proc(t: time.Time) -> i64 { return time.to_unix_seconds(t) }
+
+@(private)
+font_cache_put :: proc(family, path: string, index: int) {
+	fi, serr := os.stat(path, context.temp_allocator)
+	if serr != nil do return
+	p := font_cache_path()
+	old, _ := os.read_entire_file(p, context.temp_allocator)
+	sb := strings.builder_make(context.temp_allocator)
+	text := string(old)
+	for line in strings.split_lines_iterator(&text) do if !strings.has_prefix(line, strings.concatenate({family, "\t"}, context.temp_allocator)) && line != "" do fmt.sbprintln(&sb, line)
+	fmt.sbprintfln(&sb, "%s\t%s\t%d\t%d", family, path, index, time_unix(fi.modification_time))
+	_ = os.make_directory_all(p[:strings.last_index_byte(p, '/')])
+	tmp := strings.concatenate({p, ".tmp"}, context.temp_allocator)
+	if os.write_entire_file(tmp, transmute([]u8)strings.to_string(sb)) == nil do os.rename(tmp, p)
 }
 
 @(private)

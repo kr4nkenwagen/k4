@@ -35,6 +35,7 @@ Note :: struct {
 	id: u32,
 	app, title, body, image: string,
 	tag, icon, quote, cmd: string, // posted by k4's own services (post): a tag, a glyph, a quoted text, the command their buttons run
+	code, code_sub: string, // a pickup code shown large under the text, and what it is for (post's 14th field: CODE|SUB)
 	actions: [dynamic][2]string, // key, label ("default": a click on the card)
 	urgency: int, // 0 low, 1 normal, 2 critical
 	warn: bool, // posted with urgency warn: normal, drawn yellow
@@ -60,6 +61,7 @@ Nd :: struct {
 	more: int,
 	f9, f9b, f10, f10b, f11b, f12, f13, f13b: ^Font,
 	f11, f12b, f14, f22b: ^Font, // (the immersive box's)
+	f30b: ^Font, // a card's pickup code
 	immersive: bool, // the newest in the middle, over the dimmed desktop (immersive.odin)
 	qi: int,         // the box shown, among the ones waiting
 	want_w, want_h: int,
@@ -91,6 +93,8 @@ nd_setup :: proc(a: ^App) -> bool {
 	n.f9, n.f9b, n.f10, n.f10b, n.f11b, n.f12, n.f13, n.f13b = nd_fonts(a)
 	n.f11, n.f14 = font_sized(&a.font, 11), font_sized(&a.font, 14)
 	n.f12b, n.f22b = font_sized(&a.font, 12), font_sized(&a.font, 22)
+	n.f30b = font_sized(&a.font, 30)
+	if b, ok := bold_font(a, 30); ok do n.f30b = b
 	if b, ok := bold_font(a, 12); ok do n.f12b = b
 	if b, ok := bold_font(a, 22); ok do n.f22b = b
 	append(&a.fonts, n.f11, n.f14, n.f12b, n.f22b)
@@ -189,9 +193,19 @@ nd_have_share :: proc() -> bool {
 	return nd_share_ok
 }
 
+// Discord's own notifications while k4-discord watch follows the app (it touches
+// $XDG_RUNTIME_DIR/k4-discord.live every 20 s): those come as k4's cards instead.
+nd_discord_live :: proc(app: string) -> bool {
+	if strings.to_lower(app, context.temp_allocator) != "discord" do return false
+	p := fmt.tprintf("%s/k4-discord.live", os.get_env("XDG_RUNTIME_DIR", context.temp_allocator))
+	fi, err := os.stat(p, context.temp_allocator)
+	if err != nil do return false
+	return time.since(fi.modification_time) < 60 * time.Second
+}
+
 nd_free :: proc(x: ^Note) {
 	delete(x.app); delete(x.title); delete(x.body); delete(x.image)
-	delete(x.tag); delete(x.icon); delete(x.quote); delete(x.cmd)
+	delete(x.tag); delete(x.icon); delete(x.quote); delete(x.cmd); delete(x.code); delete(x.code_sub)
 	for p in x.actions { delete(p[0]); delete(p[1]) }
 	delete(x.actions)
 }
@@ -389,6 +403,13 @@ nd_call :: proc(a: ^App, msg: ^DBus_Msg) -> bool {
 		x.timeout = t < 0 ? -1 : int(t)
 		if x.image == "" && strings.has_prefix(icon, "/") do x.image = icon
 		else do delete(icon)
+		if nd_discord_live(x.app) { // k4-discord posts its own card for it (with Open): this one would be a second
+			n := a.nd
+			dbus_put_u32(&out, n.next_id)
+			n.next_id += 1
+			nd_free(&x)
+			return true
+		}
 		dbus_put_u32(&out, nd_add(a, x))
 		return true
 	}
@@ -668,6 +689,7 @@ nd_command :: proc(a: ^App, line: string) -> (reply: string, changed: bool) {
 			append(&x.actions, [2]string{strings.clone(kv[:j]), strings.clone(kv[j + 1:])})
 		}
 		x.cmd, x.image = get(p, 11), get(p, 12)
+		if c := get(p, 13); c != "" { cc, _, sub := strings.partition(c, "|"); x.code, x.code_sub = strings.clone(cc), strings.clone(sub); delete(c) }
 		was_popup := false
 		if j := nd_find(n, x.id); j >= 0 do was_popup = n.notes[j].popup
 		id := nd_add(a, x)
@@ -824,6 +846,7 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 	for p in note.actions do if p[0] != "default" && p[1] != "" do append(&acts, p)
 	h := pt + 18 * S + 9 * S + row2
 	if len(quote_l) > 0 do h += 9 * S + 16 * S + len(quote_l) * 18 * S
+	if note.code != "" do h += 9 * S + 46 * S
 	if note.progress >= 0 do h += 9 * S + 4 * S + 5 * S + int(n.f10.line_h)
 	if len(acts) > 0 do h += 9 * S + 24 * S
 	if replying do h += 9 * S + 28 * S + 4 * S + int(n.f10.line_h)
@@ -911,6 +934,18 @@ nd_card :: proc(a: ^App, cv: ^Canvas, S, x, y: int, note: Note, count: int, hove
 		qc := strings.has_prefix(note.quote, "http") ? H.acc : H.fg
 		for l, i in quote_l do text_in(cv, n.f12, l, x + pl + 10 * S, yy + 8 * S + i * 18 * S, 18 * S, argb(qc, 0xff))
 		yy += qh
+	}
+	// a pickup code: CODE, the digits large, what it is for
+	if note.code != "" {
+		yy += 9 * S
+		ch := 46 * S
+		fill_rect(cv, x + pl, yy, iw, ch, argb(H.bg, 0xff))
+		rounded_rect(cv, x + pl, yy, iw, ch, 0, 0, f32(S), argb(H.line, 0xff))
+		spaced(cv, n.f9, "CODE", x + pl + 12 * S, yy, ch, H.dim, S)
+		cx := x + pl + 12 * S + spaced_w(n.f9, "CODE", S) + 14 * S
+		text_in(cv, n.f30b, note.code, cx, yy, ch, argb(H.fg, 0xff))
+		if note.code_sub != "" do text_in(cv, n.f10, note.code_sub, x + pl + iw - 12 * S - tw(n.f10, note.code_sub), yy, ch, argb(H.dim, 0xff))
+		yy += ch
 	}
 	// progress: 20 segments, the percentage
 	if note.progress >= 0 {
@@ -1160,6 +1195,7 @@ nd_fixture :: proc(a: ^App, data: string) {
 		f := strings.split(line, "\t", context.temp_allocator)
 		if len(f) < 2 do continue
 		get :: proc(f: []string, i: int) -> string { return i < len(f) ? f[i] : "" }
+		if nd_discord_live(f[0]) do continue // (as the bus does)
 		x := Note{progress = -1, urgency = 1, timeout = -1}
 		x.app, x.title, x.body = strings.clone(f[0]), strings.clone(f[1]), strings.clone(get(f, 2))
 		if u, ok := strconv.parse_int(get(f, 3)); ok do x.urgency = u
@@ -1190,6 +1226,7 @@ nd_dump :: proc(a: ^App) -> string {
 		if x.warn do fmt.sbprint(&sb, " (warn)")
 		if x.wait do fmt.sbprint(&sb, " (wait)")
 		if x.done do fmt.sbprint(&sb, " (done)")
+		if x.code != "" do fmt.sbprintf(&sb, " (code %s)", x.code)
 		if n.focus && k == n.sel && n.reply do fmt.sbprintf(&sb, " (reply: %s)", string(a.query[:]))
 		fmt.sbprintln(&sb)
 	}

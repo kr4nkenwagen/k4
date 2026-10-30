@@ -1,0 +1,3 @@
+azQtdG9kbyBhZGQgJ2J1eSBtaWxrJw==
+exit 0
+log: load apps

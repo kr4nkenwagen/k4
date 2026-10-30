@@ -1,0 +1,5 @@
+D	Google Tasks · your todo lists	not connected	Search todos…
+Y	↑↓	Step	↵	Do it	⌫	Back
+N	Connect Google Tasks	k4 shows your Google Tasks lists here and on the bar beside the clock. It uses the Google sign-in Calendar and Mail use, with its own permission for tasks.	accent	
+A	azQtdG9kbyBydW4gWW1jZ2VHUm5MVzl3Wlc0Z2FIUjBjSE02THk5amIyNXpiMnhsTG1Oc2IzVmtMbWR2YjJkc1pTNWpiMjB2WVhCcGN5OXNhV0p5WVhKNUwzUmhjMnR6TG1kdmIyZHNaV0Z3YVhNdVkyOXQ=	Enable the Google Tasks API	Cloud Console › your k4 project › Enable		stay;mark=1;markc=accent
+A	azQtdG9kbyBydW4gWW1jZ0wyaHZiV1V2YTNJMGJtc3ZMbXh2WTJGc0wzTm9ZWEpsTHk0dUwySnBiaTlyTkMxMGIyUnZJSE5wWjI1cGJnPT0=	Sign in	Google asks once		stay;mark=2;markc=accent

@@ -1,0 +1,9 @@
+D	one-time setup · about 3 minutes	not set up	Search Discord…
+Y	↑↓	Step	↵	Do it	⌃V	Paste	⌫	Back
+N	Connect Discord once	k4 talks to the Discord app on this computer through a developer app of your own. It sees mentions, DMs and voice; it can join and leave voice. It can’t read channels or send messages.	accent	
+A	setup3	Create an application	discord.com/developers › New application		stay;mark=1;markc=accent
+A	setup4	Add yourself as an app tester	App Testers › your account		stay;mark=2;markc=accent
+A	setup5	Add the redirect http://127.0.0.1	OAuth2 › Redirects		stay;mark=3;markc=accent
+A	setup6	Paste the client ID	General Information › Application ID · ↵		stay;mark=4;markc=accent;input=Discord application ID|General Information › Application ID (a long number)
+A	setup7	Paste the client secret	asked right after the ID · stays in the keyring		mark=5;markc=dim;dim
+A	setup8	Allow k4 in Discord	after that · Discord asks once		mark=6;markc=dim;dim

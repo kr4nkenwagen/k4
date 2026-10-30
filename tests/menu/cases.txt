@@ -99,3 +99,27 @@ clock-alarm	-	alarm 6:45 weekdays gym<enter>	-
 search_groups	-	re<down>	-
 cal_wow_today	gcalwow	-	COMPACT=1
 cal_wow_resetday	gcalwow	<right><right>	COMPACT=1
+parcel-track	-	track 00370 7123 4567 8901 234	-
+parcel-track-run	-	track ua123456789se<enter>	-
+discord_page	discord	-	-
+discord_mute_key	discord	<ctrl-m>	-
+parcels_page	parcels	-	-
+parcels_copy_code	parcels	<ctrl-c>	-
+parcels_archive	parcels	<del>	-
+discord_setup	discordsetup	-	-
+discord_setup_id	discordsetup	<down><down><down>	-
+discord_setup_typed	discordsetup	<down><down><down><enter>1234567890123456789<enter>	-
+discord_setup_paste	discordsetup	<down><down><down><enter><ctrl-v><enter>	K4_MESSENGER_CLIPBOARD=1234567890123456789
+events_page	events	-	-
+events_add	events	<enter>	-
+events_dismiss	events	<down><del>	-
+events_source	events	<ctrl-o>	-
+events_remove_undo	events	<del>	-
+todo_page	todo	-	-
+todo_done	todo	<enter>	-
+todo_delete	todo	<del>	-
+todo_edit_key	todo	<ctrl-e>	-
+todo_type	todo	oat milk · fri<enter>	-
+todo_setup	todosetup	-	-
+todo-typed	-	todo buy milk · fri	-
+todo-typed-run	-	todo buy milk<enter>	-

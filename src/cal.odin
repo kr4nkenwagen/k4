@@ -31,6 +31,7 @@ Cal_Ev :: struct {
 Cal_Data :: struct {
 	conn, status, cx: string,
 	wow_date, wow_hm: string, // CW: World of Warcraft's next weekly reset (local date, HH:MM)
+	suggestions: int, // CV: event suggestions waiting in Apps › Events (k4-events)
 	cals: [dynamic]Cal_Cal,
 	evs:  [dynamic]Cal_Ev,
 }
@@ -58,6 +59,7 @@ cal_line :: proc(s: ^Section, f: []string) -> bool {
 	case "CS": d.conn, d.status = strings.clone(get(f, 1)), strings.clone(get(f, 2))
 	case "CX": d.cx = strings.clone(get(f, 1))
 	case "CW": d.wow_date, d.wow_hm = strings.clone(get(f, 2)), strings.clone(get(f, 3))
+	case "CV": d.suggestions, _ = strconv.parse_int(get(f, 1))
 	case "CC":
 		append(&d.cals, Cal_Cal{strings.clone(get(f, 1)), strings.clone(get(f, 2)), strings.clone(get(f, 3)), strings.clone(get(f, 4)), get(f, 5) != "0", get(f, 6) == "1"})
 	case "CE":
@@ -90,6 +92,7 @@ cal_reset :: proc(s: ^Section) {
 	clear(&s.cd.evs)
 	s.cd.conn, s.cd.status = "", ""
 	s.cd.wow_date, s.cd.wow_hm = "", ""
+	s.cd.suggestions = 0
 }
 
 @(private)
@@ -750,6 +753,10 @@ cal_draw_month :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		draw_text_f(cv, m.f_tiny, wl, rx + 14 * S, ry, argb(0xE8A33D, 0xff))
 		ry += int(m.f_tiny.line_h) + 2 * S
 	}
+	if d.suggestions > 0 && u.cur == now_day {
+		draw_text_f(cv, m.f_tiny, fmt.tprintf("󰃭 k4 added %d event%s from your messages · Apps › Events", d.suggestions, d.suggestions == 1 ? "" : "s"), rx + 14 * S, ry, argb(acc, 0xff))
+		ry += int(m.f_tiny.line_h) + 2 * S
+	}
 	ry += 4 * S
 	// now / next
 	if u.cur == now_day && connected {
@@ -1150,6 +1157,7 @@ cal_dump :: proc(a: ^App, b: ^strings.Builder) {
 	case .Month:
 		now_day, now_m := cal_now()
 		if wl := cal_wow_line(d, u.cur, now_day, now_m); wl != "" do fmt.sbprintfln(b, "%s", wl)
+		if d.suggestions > 0 && u.cur == now_day do fmt.sbprintfln(b, "k4 added %d events", d.suggestions)
 		for o, i in cal_day(d, u.cur) {
 			e := d.evs[o.ev]
 			fmt.sbprintfln(b, "%s %s · %s · %s%s", u.list && i == u.ei ? "*" : " ", cal_time(e), e.title, cal_meta(d, o), cal_past(e, u.cur) ? " (past)" : "")

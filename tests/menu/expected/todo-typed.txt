@@ -1,0 +1,9 @@
+focus Menu
+crumb SEARCH
+query todo buy milk · fri
+count 1 result
+hints ↑↓ Move · → ↵ Open · Esc Shortcuts n a r t w x
+— Todo
+* Add a todo · buy milk · fri · ↵ adds it to Google Tasks · “· fri” sets a due day | Todo
+exit 1
+log: load apps

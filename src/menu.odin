@@ -80,7 +80,7 @@ import "logic"
 // alt=<label>|<id> (Tab runs it).
 // Enter prints the chosen action's or item's id; a web search prints "url:<url>".
 
-Entry_Kind :: enum { Row, Heading, Empty, Notice, Bars, Card, Progress, Day, Hero, Qr, Big, Info }
+Entry_Kind :: enum { Row, Heading, Empty, Notice, Bars, Card, Progress, Day, Hero, Qr, Big, Info, Voice, Pickup }
 
 // The Weather dashboard's data (WN/WD/WH records), drawn by draw_weather.
 Wx_Hour :: struct { day: int, t, kind, temp: string, rain: int }
@@ -108,6 +108,13 @@ Action :: struct {
 	pct, bars: int,
 	wlo, whi: int, // a weather day's low and high (the range bar)
 	stay, app: bool,
+	// rows of the newer integration pages (KDiscord, KParcels): a round avatar (av=ML;avc=#hex), a
+	// second line (l2=…;l2c=tone), small avatars before the meta (minis=ML:#hex,ES:#hex), an outlined
+	// tag after the name (tag2=DHL;tag2c=#hex), the meta big (bigmeta), a coloured edge (edge=tone);
+	// Del and ⌃C on the row run del=ID / copy=ID
+	av, avc, l2, l2c, minis, tag2, tag2c, edge, del, copy, subc: string,
+	row_keys: [dynamic][2]string, // k^o=ID: ⌃O on this row runs ID (any letter)
+	bigmeta: bool,
 	slider: bool,
 	value, step: int,
 	vmax: int, // slider top (default 100; app streams go to 150)
@@ -342,6 +349,12 @@ section_line :: proc(s: ^Section, f: []string) {
 	case "KV": // KV <key> <value> <action id>: a value in the last info block; a click runs the action
 		if n := len(s.actions); n > 0 && s.actions[n - 1].kind == .Info do append(&s.actions[n - 1].kvs, [3]string{strings.clone(get(f, 1)), strings.clone(get(f, 2)), strings.clone(get(f, 3))})
 	case "KB": append(&s.keybinds, [2]string{strings.clone(get(f, 1)), strings.clone(get(f, 2))})
+	case "VP": // a voice panel: VP <channel> <server> <your state: MUTED|DEAFENED|MIC ON, | between> <people: ini~#hex~talk|mute|deaf|me~name, | between>
+		append(&s.actions, Action{kind = .Voice, heading = true, label = strings.clone(get(f, 1)), meta = strings.clone(get(f, 2)), line2 = strings.clone(get(f, 3)), minis = strings.clone(get(f, 4))})
+	case "PU": // a pickup: PU <id> <shop> <carrier> <#hex> <place> <address> <last day> <its tone> <code> <copy id> <del id>
+		append(&s.actions, Action{kind = .Pickup, id = strings.clone(get(f, 1)), label = strings.clone(get(f, 2)), tag2 = strings.clone(get(f, 3)), tag2c = strings.clone(get(f, 4)),
+			meta = strings.clone(get(f, 5)), sub = strings.clone(get(f, 6)), line2 = strings.clone(get(f, 7)), tone = strings.clone(get(f, 8)), chip = strings.clone(get(f, 9)),
+			copy = strings.clone(get(f, 10)), del = strings.clone(get(f, 11)), bat = -1})
 	case "QR": // a picture centred with a title and a line under it (Wi-Fi: share by QR code)
 		append(&s.actions, Action{kind = .Qr, heading = true, thumb = strings.clone(get(f, 1)), label = strings.clone(get(f, 2)), meta = strings.clone(get(f, 3)), bat = -1})
 	case "BIG": // a code large in a box (Bluetooth pairing)
@@ -349,7 +362,7 @@ section_line :: proc(s: ^Section, f: []string) {
 	case "X": // the battery popup's charge: X <percent> <line> [charging]
 		p, _ := strconv.parse_int(get(f, 1))
 		append(&s.actions, Action{kind = .Hero, heading = true, pct = clamp(p, 0, 100), meta = strings.clone(get(f, 2)), active = get(f, 3) == "charging"})
-	case "CS", "CX", "CW", "CC", "CE", "CG", "CN": cal_line(s, f)
+	case "CS", "CX", "CW", "CV", "CC", "CE", "CG", "CN": cal_line(s, f)
 	case "WN":
 		for i in 0 ..< 6 do s.wx_now[i] = strings.clone(get(f, i + 1))
 	case "WD":
@@ -409,6 +422,19 @@ action_from :: proc(f: []string) -> Action {
 		case strings.has_prefix(flag, "icon="): a.icon = strings.clone(flag[5:])
 		case strings.has_prefix(flag, "tag="): a.tag = strings.clone(flag[4:])
 		case strings.has_prefix(flag, "people="): a.people = strings.clone(flag[7:])
+		case strings.has_prefix(flag, "av="): a.av = strings.clone(flag[3:])
+		case strings.has_prefix(flag, "avc="): a.avc = strings.clone(flag[4:])
+		case strings.has_prefix(flag, "l2="): a.l2 = strings.clone(flag[3:])
+		case strings.has_prefix(flag, "l2c="): a.l2c = strings.clone(flag[4:])
+		case strings.has_prefix(flag, "minis="): a.minis = strings.clone(flag[6:])
+		case strings.has_prefix(flag, "tag2="): a.tag2 = strings.clone(flag[5:])
+		case strings.has_prefix(flag, "tag2c="): a.tag2c = strings.clone(flag[6:])
+		case strings.has_prefix(flag, "edge="): a.edge = strings.clone(flag[5:])
+		case strings.has_prefix(flag, "del="): a.del = strings.clone(flag[4:])
+		case strings.has_prefix(flag, "copy="): a.copy = strings.clone(flag[5:])
+		case flag == "bigmeta": a.bigmeta = true
+		case strings.has_prefix(flag, "subc="): a.subc = strings.clone(flag[5:])
+		case strings.has_prefix(flag, "k^") && len(flag) > 4 && flag[3] == '=': append(&a.row_keys, [2]string{strings.clone(flag[1:3]), strings.clone(flag[4:])})
 		case strings.has_prefix(flag, "chat="): a.chat = strings.clone(flag[5:])
 		case flag == "words": a.words = true
 		case strings.has_prefix(flag, "min="): a.min_q, _ = strconv.parse_int(flag[4:])
@@ -899,6 +925,23 @@ menu_clock_rows :: proc(m: ^Menu, q: string) {
 				fmt.aprintf("%s · %s", day, clock_in_words(in_)), strings.clone(cmd)})
 		}
 	}
+	if strings.has_prefix(ql, "track ") { // a parcel by its number (k4-parcels)
+		num := strings.to_upper(strings.trim_space(q)[6:], context.temp_allocator)
+		num, _ = strings.remove_all(num, " ", context.temp_allocator)
+		if len(num) >= 6 {
+			carrier := parcel_carrier(num)
+			short := len(num) > 10 ? fmt.tprintf("%s…%s", num[:4], num[len(num) - 4:]) : num
+			append(&m.clock_rows, [3]string{fmt.aprintf("Track %s · %s", short, carrier != "" ? carrier : "carrier unknown"),
+				strings.clone("↵ adds it to Parcels"), fmt.aprintf("k4-parcels add %s", sh(num))})
+		}
+	}
+	if strings.has_prefix(ql, "todo ") { // a todo (k4-todo, Google Tasks): "todo buy milk · fri"
+		text := strings.trim_space(strings.trim_space(q)[5:])
+		if len(text) > 0 {
+			append(&m.clock_rows, [3]string{fmt.aprintf("Add a todo · %s", text), strings.clone("↵ adds it to Google Tasks · “· fri” sets a due day"),
+				fmt.aprintf("k4-todo add %s", sh(text))})
+		}
+	}
 	if len(m.clock_rows) == 0 do return
 	rest := make([dynamic]Result, 0, len(m.results), context.temp_allocator)
 	for r in m.results do append(&rest, r)
@@ -911,7 +954,9 @@ menu_clock_rows :: proc(m: ^Menu, q: string) {
 result_group :: proc(m: ^Menu, r: Result) -> string {
 	switch {
 	case r.sec == FILE_SEC: return "Files"
-	case r.sec == CLOCK_SEC: return "Clock"
+	case r.sec == CLOCK_SEC:
+		label := m.clock_rows[r.act][0]
+		return strings.has_prefix(label, "Track ") ? "Parcels" : strings.has_prefix(label, "Add a todo") ? "Todo" : "Clock"
 	case r.act < 0: return "Sections"
 	}
 	act := m.sections[r.sec].actions[r.act]
@@ -935,6 +980,20 @@ group_results :: proc(m: ^Menu) {
 	copy(all, m.results[:])
 	clear(&m.results)
 	for g in order do for r in all do if result_group(m, r) == g do append(&m.results, r)
+}
+
+// A tracking number's carrier by its shape (as parcels.py guesses), "" when it could be anyone's.
+@(private)
+parcel_carrier :: proc(n: string) -> string {
+	digits :: proc(s: string) -> bool { for c in s do if c < '0' || c > '9' do return false; return len(s) > 0 }
+	letters :: proc(s: string) -> bool { for c in s do if c < 'A' || c > 'Z' do return false; return len(s) > 0 }
+	switch {
+	case len(n) == 13 && letters(n[:2]) && digits(n[2:11]) && n[11:] == "SE", len(n) >= 18 && len(n) <= 20 && strings.has_prefix(n, "00") && digits(n): return "PostNord"
+	case strings.has_prefix(n, "IB"): return "Instabox"
+	case strings.has_prefix(n, "JJD") && digits(n[3:]), strings.has_prefix(n, "JVGL") && digits(n[4:]), len(n) == 10 && digits(n): return "DHL"
+	case strings.has_prefix(n, "CRAY"), len(n) == 17 && strings.has_prefix(n, "370") && digits(n): return "Bring"
+	}
+	return ""
 }
 
 // The words of s (split at spaces, commas and |) include one starting with t (lower case).
@@ -1551,6 +1610,25 @@ menu_key :: proc(a: ^App, k: Key, ctrl, alt: bool, ch: rune, text: string) -> bo
 		case: return app_edit_key(a, k, ctrl, ch, text)
 		}
 		return true
+	}
+	if m.focus == .Sub && m.open >= 0 && m.open < len(m.sections) { // the page's ⌃ keys (KB ^m), Del and ⌃C on the row (del=, copy=)
+		s := &m.sections[m.open]
+		run :: proc(a: ^App, id: string) -> bool {
+			m := a.menu
+			if m.runner.state == .Loading { m.toast = "Still running the last action…"; return true }
+			start_runner(a, id, "", "", "")
+			return true
+		}
+		if m.si < len(m.sel_actions) {
+			act := s.actions[m.sel_actions[m.si]]
+			if k == .Delete && act.del != "" do return run(a, act.del)
+			if ctrl && ch == 'c' && act.copy != "" do return run(a, act.copy)
+			if ctrl && ch >= 'a' && ch <= 'z' do for rk in act.row_keys do if rk[0] == fmt.tprintf("^%c", ch) do return run(a, rk[1])
+		}
+		if ctrl && ch >= 'a' && ch <= 'z' {
+			key := fmt.tprintf("^%c", ch)
+			for kb in s.keybinds do if kb[0] == key do return run(a, kb[1])
+		}
 	}
 	if compact_now(a) && m.focus == .Sub && compact_key(a, k, ctrl, ch, text) do return true
 	if m.focus == .Sub && m.sections[m.open].cal && !alt && !(ctrl && (ch == 'c' || ch == 'g')) do return cal_key(a, k, ctrl, ch, text)
@@ -2321,6 +2399,7 @@ draw_panes :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int, sc: bool) {
 // Theme colour for a tone name used by the integration lines.
 @(private)
 tone_color :: proc(t: logic.Theme, tone: string, def: u32) -> u32 {
+	if len(tone) == 7 && tone[0] == '#' do if v, ok := strconv.parse_u64_of_base(tone[1:], 16); ok do return u32(v)
 	switch tone {
 	case "accent": return t.accent
 	case "red": return t.red
@@ -2354,7 +2433,12 @@ entry_h :: proc(m: ^Menu, act: Action, S: int, compact := false) -> int {
 		rows := (len(act.kvs) + 1) / 2
 		return 6 * S + 10 * S + top + (rows > 0 ? 9 * S + rows * (int(m.f_tiny.line_h) + 4 * S) - 4 * S : 0) + 10 * S + 8 * S
 	case .Hero: return 10 * S + int(m.f_hero.line_h) + 8 * S + 12 * S + 8 * S + int(m.f_small.line_h) + 12 * S
-	case .Row, .Empty, .Day: return 30 * S
+	case .Row:
+		if act.av != "" || act.l2 != "" do return (act.bigmeta ? 46 : 42) * S
+		return 30 * S
+	case .Empty, .Day: return 30 * S
+	case .Voice: return 6 * S + 12 * S + 18 * S + 10 * S + 34 * S + 6 * S + int(m.f_tiny.line_h) + 12 * S + 8 * S
+	case .Pickup: return 4 * S + 12 * S + 4 * (int(m.f_small.line_h) + 4 * S) + 12 * S + 8 * S
 	case .Heading: return 10 * S + int(m.f_tiny.line_h) + 4 * S
 	case .Notice: return 8 * S + 12 * S + int(m.f_bold13.line_h) + 4 * S + int(m.f_small.line_h) + 12 * S + 8 * S
 	case .Bars: return act.bars * 30 * S
@@ -2444,6 +2528,86 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 			text_in(cv, m.f_body, act.label, mx + 28 * S, py, ah, argb(on ? bg : fgb, 0xff))
 			r := fmt.tprintf("%s – %s", act.meta, act.line2)
 			text_in(cv, m.f_small, r, x1 - 20 * S - tw(m.f_small, r), py, ah, argb(on ? bg : dim, 0xff))
+		case .Voice: // the voice panel: the channel, your state, the people (a ring while they speak)
+			blurple := u32(0x5865F2)
+			vx, vy, vw := mx, py + 6 * S, x1 - (compact ? 16 : 20) * S - mx
+			vh := h - 14 * S
+			fill_rect(cv, vx, vy, vw, vh, argb(blurple, 0x10))
+			rounded_rect(cv, vx, vy, vw, vh, 0, 0, f32(S), argb(blurple, 0x88))
+			fill_rect(cv, vx, vy, 3 * S, vh, argb(blurple, 0xff))
+			ty := vy + 12 * S
+			text_in(cv, m.f_bold13, act.label, vx + 14 * S, ty, 18 * S, argb(fgb, 0xff))
+			text_in(cv, m.f_tiny, act.meta, vx + 14 * S + tw(m.f_bold13, act.label) + 8 * S, ty, 18 * S, argb(dim, 0xff))
+			tx := vx + vw - 14 * S
+			for tag in strings.split(act.line2, "|", context.temp_allocator) {
+				if tag == "" do continue
+				red := tag != "MIC ON"
+				tc := red ? t.red : t.green
+				w := tw(m.f_bold10, tag) + 12 * S
+				tx -= w
+				if red do fill_rect(cv, tx, ty + S, w, 16 * S, argb(tc, 0x1a))
+				rounded_rect(cv, tx, ty + S, w, 16 * S, 0, 0, f32(S), argb(tc, 0xff))
+				text_in(cv, m.f_bold10, tag, tx + 6 * S, ty + S, 16 * S, argb(tc, 0xff))
+				tx -= 6 * S
+			}
+			ay := ty + 18 * S + 10 * S
+			ax := vx + 14 * S
+			for p in strings.split(act.minis, "|", context.temp_allocator) {
+				f := strings.split(p, "~", context.temp_allocator)
+				if len(f) < 4 do continue
+				pc := tone_color(t, f[1], dim)
+				me := strings.has_prefix(f[2], "me")
+				talk, muted, deaf := f[2] == "talk", strings.contains(f[2], "mute"), strings.contains(f[2], "deaf")
+				if me && (muted || deaf) do pc = mix(bg, pc, 0.5)
+				cx := ax + (58 * S - 34 * S) / 2
+				if talk do rounded_rect(cv, cx - 3 * S, ay - 3 * S, 40 * S, 40 * S, f32(20 * S), argb(t.green, 0xff))
+				rounded_rect(cv, cx, ay, 34 * S, 34 * S, f32(17 * S), argb(pc, 0xff))
+				text_in(cv, m.f_bold10, f[0], cx + (34 * S - tw(m.f_bold10, f[0])) / 2, ay, 34 * S, argb(bg, 0xff))
+				if muted || deaf { // the mark: a small red ring with the glyph
+					mxx, myy := cx + 34 * S - 11 * S, ay + 34 * S - 12 * S
+					rounded_rect(cv, mxx, myy, 16 * S, 16 * S, f32(8 * S), argb(bg, 0xff), f32(S), argb(t.red, 0xff))
+					g := deaf ? "󰟎" : "󰍭"
+					text_in(cv, m.f_tiny, g, mxx + (16 * S - tw(m.f_tiny, g)) / 2, myy, 16 * S, argb(t.red, 0xff))
+				}
+				n := ellipsize(m.f_tiny, f[3], 58 * S)
+				text_in(cv, m.f_tiny, n, ax + (58 * S - tw(m.f_tiny, n)) / 2, ay + 34 * S + 6 * S, int(m.f_tiny.line_h), argb(talk ? t.green : (me ? acc : mix(fg, bg, 0.2)), 0xff))
+				ax += 58 * S + (compact ? 4 : 10) * S
+				if ax + 58 * S > vx + vw do break
+			}
+		case .Pickup: // ready for pickup: shop, carrier, where, until when; the code large on the right
+			on := m.focus == .Sub && e == sel_entry
+			cx, cy, cw := mx, py + 4 * S, x1 - (compact ? 16 : 20) * S - mx
+			ch := h - 12 * S
+			ec := tone_color(t, act.tone, acc)
+			hit_add(a, cx, cy, cw, ch, .Action, sec_index(m, s), m.shown_actions[e])
+			fill_rect(cv, cx, cy, cw, ch, argb(on ? mix(bg, acc, 0.08) : mix(bg, fg, 0.03), 0xff))
+			rounded_rect(cv, cx, cy, cw, ch, 0, 0, f32(S), argb(act.tone == "yellow" ? t.yellow : mix(bg, acc, 0.55), 0xff))
+			fill_rect(cv, cx, cy, 3 * S, ch, argb(ec, 0xff))
+			if on do mark_sel(a, cx, cy, cw, ch)
+			// the code box
+			cf := compact ? m.f_title : m.f_hero
+			bw := max(tw(cf, act.chip), tw(m.f_tiny, "⌃C copies")) + 24 * S
+			bh := ch - 20 * S
+			bx, by := cx + cw - 14 * S - bw, cy + 10 * S
+			fill_rect(cv, bx, by, bw, bh, argb(bg, 0xff))
+			rounded_rect(cv, bx, by, bw, bh, 0, 0, f32(S), argb(mix(bg, acc, 0.16), 0xff))
+			text_in(cv, m.f_tiny, "CODE", bx + (bw - tw(m.f_tiny, "CODE")) / 2, by + 4 * S, int(m.f_tiny.line_h), argb(dim, 0xff))
+			text_in(cv, cf, act.chip, bx + (bw - tw(cf, act.chip)) / 2, by, bh, argb(fgb, 0xff))
+			text_in(cv, m.f_tiny, "⌃C copies", bx + (bw - tw(m.f_tiny, "⌃C copies")) / 2, by + bh - int(m.f_tiny.line_h) - 4 * S, int(m.f_tiny.line_h), argb(dim, 0xff))
+			lx, ly := cx + 14 * S, cy + 12 * S
+			tw_ := bx - 14 * S - lx
+			lh := int(m.f_small.line_h) + 4 * S
+			text_in(cv, m.f_bold13, act.label, lx, ly, lh, argb(fgb, 0xff))
+			if act.tag2 != "" {
+				gx := lx + tw(m.f_bold13, act.label) + 8 * S
+				gc := tone_color(t, act.tag2c, dim)
+				gw := tw(m.f_tiny, act.tag2) + 10 * S
+				rounded_rect(cv, gx, ly + (lh - 14 * S) / 2, gw, 14 * S, 0, 0, f32(S), argb(gc, 0xff))
+				text_in(cv, m.f_tiny, act.tag2, gx + 5 * S, ly + (lh - 14 * S) / 2, 14 * S, argb(gc, 0xff))
+			}
+			text_in(cv, m.f_small, ellipsize(m.f_small, act.meta, tw_), lx, ly + lh, lh, argb(fgb, 0xff))
+			text_in(cv, m.f_tiny, ellipsize(m.f_tiny, act.sub, tw_), lx, ly + 2 * lh, lh, argb(dim, 0xff))
+			text_in(cv, m.f_bold11, ellipsize(m.f_bold11, act.line2, tw_), lx, ly + 3 * lh, lh, argb(act.tone == "yellow" ? t.yellow : mix(fg, bg, 0.2), 0xff))
 		case .Hero: // the battery popup: the charge large, a bar, the line under it
 			c := act.active ? acc : (act.pct <= 10 ? t.red : (act.pct <= 25 ? t.yellow : fgb))
 			y := py + 10 * S
@@ -2632,7 +2796,7 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 				}
 				break
 			}
-			if compact && !act.slider { // the popup's row: a switch, a lock, the meta, a battery; one or two lines
+			if compact && !act.slider && act.av == "" && act.l2 == "" { // the popup's row: a switch, a lock, the meta, a battery; one or two lines
 				if act.toggle do right -= draw_switch(a, cv, S, right, py, h, act.on, on) + 10 * S
 				if act.lock {
 					g := "󰌾"
@@ -2678,6 +2842,69 @@ draw_actions :: proc(a: ^App, cv: ^Canvas, S: int, s: ^Section, px, py_, x1, bot
 				sw := draw_slider(a, cv, S, act.value, right, py, ah, on, act.vmax, act.dim)
 				hit_add(a, right - sw - 4 * S, py, 120 * S + 8 * S, ah, .Slider, sec_index(m, s), m.shown_actions[e], right - sw, 120 * S)
 				text_in(cv, m.f_body, act.label, lx, py, ah, argb(lc, 0xff), right - sw - 12 * S)
+				break
+			}
+			if act.av != "" || act.l2 != "" { // the two-line row: avatar, name and tag, the line under; minis, chip, meta
+				if act.edge != "" && !on {
+					ec := tone_color(t, act.edge, acc)
+					fill_rect(cv, px, py, x1 - px, h, argb(ec, 0x10))
+					fill_rect(cv, px, py, 3 * S, h, argb(ec, 0xff))
+				}
+				x := mx
+				if act.av != "" {
+					d := 26 * S
+					ac := tone_color(t, act.avc, acc)
+					rounded_rect(cv, x, py + (h - d) / 2, d, d, f32(d / 2), argb(on ? bg : ac, 0xff))
+					text_in(cv, m.f_bold10, act.av, x + (d - tw(m.f_bold10, act.av)) / 2, py + (h - d) / 2, d, argb(on ? acc : bg, 0xff))
+					x += d + 10 * S
+				} else do x = lx
+				meta := act.meta
+				mf := act.bigmeta ? m.f_title : m.f_small
+				if meta != "" {
+					mw := tw(mf, meta)
+					text_in(cv, mf, meta, right - mw, py, h, argb(mc, 0xff))
+					right -= mw + 10 * S
+				}
+				if act.chip != "" {
+					cw := tw(m.f_bold10, act.chip) + 10 * S
+					chh := 16 * S
+					filled := act.chipc == "accent"
+					if filled do fill_rect(cv, right - cw, py + (h - chh) / 2, cw, chh, argb(on ? bg : acc, 0xff))
+					rounded_rect(cv, right - cw, py + (h - chh) / 2, cw, chh, 0, 0, f32(S), argb(on ? bg : chipc, 0xff))
+					text_in(cv, m.f_bold10, act.chip, right - cw + 5 * S, py + (h - chh) / 2, chh, argb(filled ? (on ? acc : bg) : chipc, 0xff))
+					right -= cw + 10 * S
+				}
+				if act.minis != "" {
+					ms := strings.split(act.minis, ",", context.temp_allocator)
+					d := 16 * S
+					mxx := right - d - (len(ms) - 1) * 10 * S
+					for mi in ms {
+						kv := strings.split(mi, ":", context.temp_allocator)
+						rounded_rect(cv, mxx - 2 * S, py + (h - d) / 2 - 2 * S, d + 4 * S, d + 4 * S, f32(d / 2 + 2 * S), argb(on ? acc : bg, 0xff))
+						rounded_rect(cv, mxx, py + (h - d) / 2, d, d, f32(d / 2), argb(tone_color(t, len(kv) > 1 ? kv[1] : "", dim), 0xff))
+						if len(kv[0]) > 0 do text_in(cv, m.f_tiny, kv[0][:min(2, len(kv[0]))], mxx + (d - tw(m.f_tiny, kv[0][:min(2, len(kv[0]))])) / 2, py + (h - d) / 2, d, argb(bg, 0xff))
+						mxx += 10 * S
+					}
+					right -= d + (len(ms) - 1) * 10 * S + 12 * S
+				}
+				l1h := int(m.f_body.line_h)
+				l2h := act.l2 != "" ? int(m.f_tiny.line_h) + 2 * S : 0
+				ty := py + (h - l1h - l2h) / 2
+				label := ellipsize(m.f_body, act.label, right - x)
+				text_in(cv, m.f_body, label, x, ty, l1h, argb(lc, 0xff))
+				ex := x + tw(m.f_body, label)
+				if act.sub != "" && ex < right {
+					sb := ellipsize(m.f_body, act.sub, right - ex)
+					text_in(cv, m.f_body, sb, ex, ty, l1h, argb(on ? bg : tone_color(t, act.subc, dim), 0xff))
+					ex += tw(m.f_body, sb)
+				}
+				if act.tag2 != "" && ex + 40 * S < right {
+					gc := on ? bg : tone_color(t, act.tag2c, dim)
+					gw := tw(m.f_tiny, act.tag2) + 10 * S
+					rounded_rect(cv, ex + 8 * S, ty + (l1h - 14 * S) / 2, gw, 14 * S, 0, 0, f32(S), argb(gc, 0xff))
+					text_in(cv, m.f_tiny, act.tag2, ex + 13 * S, ty + (l1h - 14 * S) / 2, 14 * S, argb(gc, 0xff))
+				}
+				if act.l2 != "" do text_in(cv, m.f_tiny, ellipsize(m.f_tiny, act.l2, right - x), x, ty + l1h + 2 * S, int(m.f_tiny.line_h), argb(on ? bg : tone_color(t, act.l2c, dim), 0xff))
 				break
 			}
 			if act.toggle do right -= draw_switch(a, cv, S, right, py, ah, act.on, on) + 12 * S
@@ -2782,16 +3009,17 @@ draw_results :: proc(a: ^App, cv: ^Canvas, S: int, body: [4]int) {
 		lc, mc, tc := fgb, dim, acc
 		if on { fill_rect(cv, x0, py, bw, rh, argb(acc, 0xff)); mark_sel(a, x0, py, bw, rh); lc, mc, tc = bg, bg, bg }
 		if n < 9 { // ⌃1–9 runs it: the number left of the tag
-			tg := r.sec == FILE_SEC ? "file" : r.sec == CLOCK_SEC ? "Clock" : (r.act >= 0 ? (m.sections[r.sec].actions[r.act].tag != "" ? m.sections[r.sec].actions[r.act].tag : m.sections[r.sec].name) : "section")
+			tg := r.sec == FILE_SEC ? "file" : r.sec == CLOCK_SEC ? result_group(m, r) : (r.act >= 0 ? (m.sections[r.sec].actions[r.act].tag != "" ? m.sections[r.sec].actions[r.act].tag : m.sections[r.sec].name) : "section")
 			kn := fmt.tprintf("^%d", n + 1)
 			text_in(cv, m.f_tiny, kn, x1 - 20 * S - tw(m.f_tiny, tg) - 8 * S - tw(m.f_tiny, kn), py, rh, argb(on ? bg : mix(bg, dim, 0.6), 0xff))
 		}
 		if r.sec == CLOCK_SEC {
 			row := m.clock_rows[r.act]
 			x := x0 + 20 * S
-			text_in(cv, m.f_row, "󰥔", x, py, rh, argb(lc, 0xff))
+			ctag := result_group(m, r)
+			text_in(cv, m.f_row, ctag == "Parcels" ? "󰏗" : "󰥔", x, py, rh, argb(lc, 0xff))
 			x += 15 * S + 12 * S
-			text_in(cv, m.f_tiny, "Clock", x1 - 20 * S - tw(m.f_tiny, "Clock"), py, rh, argb(tc, 0xff))
+			text_in(cv, m.f_tiny, ctag, x1 - 20 * S - tw(m.f_tiny, ctag), py, rh, argb(tc, 0xff))
 			tag_x := x1 - 20 * S - 90 * S
 			mw := min(tw(m.f_small, row[1]), (tag_x - x) * 44 / 100)
 			text_in(cv, m.f_small, ellipsize(m.f_small, row[1], mw), tag_x - 12 * S - mw, py, rh, argb(mc, 0xff))
@@ -3315,10 +3543,14 @@ menu_setup :: proc(a: ^App, data: string) {
 
 @(private)
 bold_font :: proc(a: ^App, px: f32) -> (^Font, bool) {
+	// the face is found and read once; each size after that is a cheap sizing of it
+	if a.bold_base != nil do return font_sized(a.bold_base, px), true
+	if a.bold_failed do return nil, false
 	f := new(Font)
-	if !font_load(f, strings.concatenate({a.family, ":weight=bold"}, context.temp_allocator), px, true) do return nil, false
+	if !font_load(f, strings.concatenate({a.family, ":weight=bold"}, context.temp_allocator), px, true) { free(f); a.bold_failed = true; return nil, false }
 	f.fallback = a.font.fallback
-	return f, true
+	a.bold_base = f
+	return font_sized(f, px), true
 }
 
 // ---------- --dump: the state as text, for tests ----------
@@ -3358,7 +3590,7 @@ menu_dump :: proc(a: ^App) -> string {
 			for r, i in m.results {
 				if g := result_group(m, r); !m.settings && (i == 0 || g != result_group(m, m.results[i - 1])) do fmt.sbprintfln(&b, "— %s", g)
 				if r.sec == FILE_SEC { fmt.sbprintfln(&b, "%s %s | file", i == m.si ? "*" : " ", m.files[r.act]); continue }
-				if r.sec == CLOCK_SEC { fmt.sbprintfln(&b, "%s %s · %s | Clock", i == m.si ? "*" : " ", m.clock_rows[r.act][0], m.clock_rows[r.act][1]); continue }
+				if r.sec == CLOCK_SEC { fmt.sbprintfln(&b, "%s %s · %s | %s", i == m.si ? "*" : " ", m.clock_rows[r.act][0], m.clock_rows[r.act][1], result_group(m, r)); continue }
 				sec := m.sections[r.sec]
 				label := r.act >= 0 ? result_label(sec.actions[r.act], q_of(a)) : sec.name
 				tag := r.act >= 0 ? (sec.actions[r.act].tag != "" ? sec.actions[r.act].tag : sec.name) : "section"
@@ -3400,6 +3632,14 @@ menu_dump :: proc(a: ^App) -> string {
 			case .Notice: fmt.sbprintfln(&b, "!! %s: %s · %s", act.tone, act.label, act.meta)
 			case .Bars: fmt.sbprintfln(&b, "~~ %d loading bars", act.bars)
 			case .Card: fmt.sbprintfln(&b, "[] %s %s · %s · %s", act.state, act.label, act.meta, act.line2)
+			case .Voice:
+				ppl := make([dynamic]string, 0, 8, context.temp_allocator)
+				for p in strings.split(act.minis, "|", context.temp_allocator) {
+					f := strings.split(p, "~", context.temp_allocator)
+					if len(f) >= 4 do append(&ppl, f[2] != "" ? fmt.tprintf("%s(%s)", f[3], f[2]) : f[3])
+				}
+				fmt.sbprintfln(&b, "[voice] %s · %s · %s · %s", act.label, act.meta, act.line2, strings.join(ppl[:], " ", context.temp_allocator))
+			case .Pickup: fmt.sbprintfln(&b, "%s [pickup] %s %s · %s · %s · %s · code %s", sel ? "*" : " ", act.label, act.tag2, act.meta, act.sub, act.line2, act.chip)
 			case .Progress: fmt.sbprintfln(&b, "↓ %s %d%% · %s", act.label, act.pct, act.meta)
 			case .Hero: fmt.sbprintfln(&b, "## %d%%%s · %s", act.pct, act.active ? " charging" : "", act.meta)
 			case .Qr: fmt.sbprintfln(&b, "[qr] %s · %s", act.label, act.meta)
@@ -3425,6 +3665,11 @@ menu_dump :: proc(a: ^App) -> string {
 				if act.bat >= 0 do append(&extra, fmt.tprintf("bat %d%%", act.bat))
 				if act.lock do append(&extra, "lock")
 				if act.bold do append(&extra, "bold")
+				if act.av != "" do append(&extra, fmt.tprintf("av %s", act.av))
+				if act.l2 != "" do append(&extra, fmt.tprintf("/ %s", act.l2))
+				if act.tag2 != "" do append(&extra, fmt.tprintf("tag %s", act.tag2))
+				if act.minis != "" do append(&extra, fmt.tprintf("minis %s", act.minis))
+				if act.edge != "" do append(&extra, fmt.tprintf("edge %s", act.edge))
 				fmt.sbprintf(&b, "%s %s", sel ? "*" : " ", act.label)
 				if meta != "" do fmt.sbprintf(&b, " | %s", meta)
 				if len(extra) > 0 do fmt.sbprintf(&b, " (%s)", strings.join(extra[:], ", ", context.temp_allocator))

@@ -47,6 +47,7 @@ Rows come from stdin, one per line; "label\0icon\x1f/path/to.png" adds a picture
   --mail                  Gmail: labels, threads, reading and replying (k4-mail data, mail.odin)
   --wow                   World of Warcraft Forever: your characters (k4-wow data, wow.odin)
   --clock                 Clock: world clocks, timers, alarms, a stopwatch (k4-clock data, clock.odin)
+  --releases              Releases: upcoming movies, TV, games, books (k4-releases data, releases.odin)
   --keymap                your keyboard's QMK layout, full screen, following its layer (k4-keymap data, keymap.odin)
   --peek                  with --keymap: small, bottom middle, no input, gone 5 s after the last layer key
   --clip                  the clipboard history: search, preview, paste (Super+Ctrl+V; entries on stdin, clip.odin)
@@ -171,6 +172,7 @@ parse_args :: proc(args: []string) -> (o: Options, prompt_only: bool, ok: bool) 
 		case "--mail": o.mail = true
 		case "--wow": o.wow = true
 		case "--clock": o.clock = true
+		case "--releases": o.releases = true
 		case "--keymap": o.keymap = true
 		case "--peek": o.peek = true
 		case "--osd": o.osd = value(args, &i, inline, has_inline)
@@ -261,6 +263,9 @@ main :: proc() {
 	} else if opts.mail {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		mail_setup(a, string(data))
+	} else if opts.releases {
+		data, _ := os.read_entire_file(os.stdin, context.allocator)
+		releases_setup(a, string(data))
 	} else if opts.clock {
 		data, _ := os.read_entire_file(os.stdin, context.allocator)
 		clock_setup(a, string(data))

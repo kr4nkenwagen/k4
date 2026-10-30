@@ -1,0 +1,19 @@
+#!/bin/sh
+# a fake local model for k4-events' tests: the prompt (stdin) goes to $K4_EVENTS_FAKE/prompt; the answer
+# names items by what they say (n PATTERN: the item whose text holds it), plus two it should refuse
+P="$K4_EVENTS_FAKE/prompt"
+cat > "$P"
+n() { awk -v pat="$1" '/^### Item [0-9]+/ { split($3, a, " "); cur = a[1] } index($0, pat) && cur { print cur; exit }' "$P"; }
+t() { grep -o "^T[0-9]* · $1" "$P" | head -1 | cut -d' ' -f1; }
+ev=""; td=""; dn=""
+d=$(n "tandläkaren"); [ -n "$d" ] && ev="$ev{\"item\":$d,\"title\":\"Tandläkaren\",\"date\":\"2026-11-05\",\"start\":\"14:30\",\"end\":null,\"place\":\"Folktandvården Odenplan\",\"why\":\"torsdag 5 november kl 14:30\",\"confidence\":\"high\"},{\"item\":$d,\"title\":\"Tandläkaren\",\"date\":\"2026-11-05\",\"start\":\"14:30\",\"confidence\":\"high\"},"
+c=$(n "Hornstull"); [ -n "$c" ] && ev="$ev{\"item\":$c,\"title\":\"Cykla med Maja\",\"date\":\"2026-10-31\",\"start\":\"10:00\",\"end\":null,\"place\":\"Hornstull\",\"why\":\"ses vid Hornstull kl 10 då\",\"confidence\":\"medium\"},"
+m=$(n "MC on"); [ -n "$m" ] && ev="$ev{\"item\":$m,\"title\":\"MC raid\",\"date\":\"2026-11-06\",\"start\":\"20:00\",\"end\":\"23:00\",\"place\":\"\",\"why\":\"MC on Friday 20:00\",\"confidence\":\"high\"},"
+ev="$ev{\"item\":2,\"title\":\"Bad date\",\"date\":\"2026-02-30\",\"confidence\":\"low\"},{\"item\":99,\"title\":\"No such item\",\"date\":\"2026-11-01\"}"
+f=$(n "elfaktura"); [ -n "$f" ] && td="$td{\"item\":$f,\"title\":\"Betala elräkningen\",\"due\":\"2026-11-10\",\"why\":\"förfallodag tisdag 10 november\"},{\"item\":$f,\"title\":\"betala  Elräkningen\",\"due\":\"2026-11-10\"},"
+g=$(n "send me the logs"); [ -n "$g" ] && td="$td{\"item\":$g,\"title\":\"Send the resume-crash logs\",\"due\":\"2026-11-02\",\"why\":\"send me the logs … before Monday\"},"
+b=$(n "Majas födelsedag"); [ -n "$b" ] && td="$td{\"item\":$b,\"title\":\"Köp present till Maja\",\"due\":\"2026-11-02\",\"why\":\"Majas födelsedag\"},"
+td="$td{\"item\":99,\"title\":\"No such item\"}"
+p=$(n "Betalningen är mottagen"); k=$(t "Betala elräkningen"); [ -n "$p" ] && [ -n "$k" ] && dn="{\"todo\":\"$k\",\"item\":$p,\"why\":\"Betalningen är mottagen\"},"
+dn="$dn{\"todo\":\"T99\",\"item\":1,\"why\":\"bogus\"}"
+printf '{"events":[%s],"cancelled":[],"todos":[%s],"done":[%s]}' "$ev" "$td" "$dn"

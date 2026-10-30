@@ -1,0 +1,17 @@
+focus Sub
+crumb NETWORK › PARCELS
+query (Paste a tracking number…)
+count 1 to pick up · 1 today
+toast Ran  copy-code
+title Parcels · from Gmail and IMAP order mails, and numbers you paste · live: PostNord, DHL (full width)
+== READY FOR PICKUP [1]
+* [pickup] Trailshop POSTNORD · ICA Nära Fridhemsplan · PostNord · UA123456789SE · Pick up by Fri 6 Nov · code 4821
+== OUT FOR DELIVERY TODAY [1]
+  Nordic Bikes | 14–17 (/ Out for delivery · AB12CD34, tag BUDBEE)
+== ON THE WAY [1]
+  Webhallen | — (/ In transit · 1234567890, tag DHL)
+== DELIVERED
+  Apotea | yesterday (mark ✓, dim, / Delivered, tag INSTABOX)
+exit 1
+log: load apps
+log: run copy-code

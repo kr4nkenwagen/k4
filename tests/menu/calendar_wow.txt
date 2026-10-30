@@ -35,3 +35,4 @@ CE	family|e12	family	2026-10-31	19:00	23:00	1	Dinner at Elin’s	Södermalm	-	-
 CE	personal|e13	personal	2026-11-02	-	-	3	Berlin trip	-	-	-	own
 CE	personal|e14	personal	2026-11-20	-	-	1	Pay rent	-	-	-	own
 CW	1793163600	2026-10-28	05:00
+CV	3

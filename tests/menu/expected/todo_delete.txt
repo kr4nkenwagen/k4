@@ -1,0 +1,23 @@
+focus Sub
+crumb NETWORK › TODO
+query (Add a todo… (· fri for a due date))
+count 1 overdue · 1 today
+toast Ran  azQtdG9kbyBydW4gTDJodmJXVXZhM0kwYm1zdkxteHZZMkZzTDNOb1lYSmxMeTR1TDJKcGJpOXJOQzEwYjJSdklHUmxiR1YwWlNCaE1RPT0=
+title Todo · Google Tasks · type to add (“Buy milk · fri”) (full width)
+== MY TASKS [5]
+* Renew the passport | overdue · Wed 28 Oct (mark !)
+  Call the plumber | today (mark ○, / about the kitchen sink)
+  Betala elräkningen | Tue 10 Nov (mark ○, chip K4, / from Elbolaget Norr · Mail · “förfallodag tisdag 10 november”)
+  Book the car service (mark ○)
+  ↳ Ask for the quote (mark ○)
+== SHOPPING [1]
+  Oat milk | Mon 2 Nov (mark ○)
+== TICKED OFF BY K4 · THIS WEEK · ↵ REOPENS [1]
+  Review PR #12 · Fix the login redirect (lantern) | 45 min ago (mark ✓, dim, / “merged, closed or reviewed on GitHub”)
+== DONE
+  Return the library books | 21 h ago (mark ✓, dim)
+== MORE
+  Sync now | synced just now · every 5 min (mark ↻)
+exit 1
+log: load apps
+log: run azQtdG9kbyBydW4gTDJodmJXVXZhM0kwYm1zdkxteHZZMkZzTDNOb1lYSmxMeTR1TDJKcGJpOXJOQzEwYjJSdklHUmxiR1YwWlNCaE1RPT0=

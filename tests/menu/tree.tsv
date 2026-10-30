@@ -11,6 +11,12 @@ A	t	Theme	Nord	theme
 P	wifi	Wi-Fi networks	nmcli	printf 'A\tconnect-open\tCafe\t80%%\t\tstay\nA\tconnect-secure\tHome\t40%%\t\tstay;current\nH\tMore\nA\tclose\tClose\t\t\tstay\n'
 O	pane
 P	gcal	Calendar	Google Calendar	cat "$K4_TEST_DIR/calendar.txt"
+P	discord	Discord	Discord	cat "$K4_TEST_DIR/discord.txt"
+P	discordsetup	Discord	Discord	cat "$K4_TEST_DIR/discord_setup.txt"
+P	parcels	Parcels	Parcels	cat "$K4_TEST_DIR/parcels.txt"
+P	events	Events	Events	cat "$K4_TEST_DIR/events.txt"
+P	todo	Todo	Todo	cat "$K4_TEST_DIR/todo.txt"
+P	todosetup	Todo	Todo	cat "$K4_TEST_DIR/todo_setup.txt"
 P	gcalwow	Calendar	Google Calendar	cat "$K4_TEST_DIR/calendar_wow.txt"
 P	wifi2	Wi-Fi	Networks	cat "$K4_TEST_DIR/wifi.txt"
 P	bt2	Bluetooth	Devices	cat "$K4_TEST_DIR/bt.txt"

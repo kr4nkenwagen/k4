@@ -626,6 +626,7 @@ mod_chip :: proc(a: ^App, i: int, S: int, narrow: bool) -> (c: Chip, shown: bool
 	}
 	switch m.badge_tone { // accent for unread, red when the app needs you, faint under do not disturb
 	case "red": c.badge_bg, c.badge_fg = t.red, t.bg
+	case "yellow": c.badge_bg, c.badge_fg = t.yellow, t.bg // (a parcel's last pickup day)
 	case "dnd": c.badge_bg, c.badge_fg = mix(t.bg, t.fg_dim, 0.45), t.fg_dim
 	case: c.badge_bg, c.badge_fg = t.accent, t.bg
 	}

@@ -1,0 +1,3 @@
+T	!room1:k4	Maja Lind	1793300000	Maja Lind	0	ska vi cykla på lördag?
+T	!room1:k4	Maja Lind	1793300400	me	1	ja gärna!
+T	!room1:k4	Maja Lind	1793300500	Maja Lind	0	ses vid Hornstull kl 10 då

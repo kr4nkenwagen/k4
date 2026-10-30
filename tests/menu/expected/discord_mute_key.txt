@@ -1,0 +1,20 @@
+focus Sub
+crumb NETWORK › DISCORD
+query (Search Discord…)
+count 🔊 Raid
+toast Ran  key-m
+title Discord · through the Discord app · mentions, DMs and voice · can’t read channels or send (full width)
+[voice] 🔊 Raid · Ember Pact · 4 · MIC ON · Maja(talk) Erik(mute) Tilly you(me)
+* Mute | ⌃M (mark ●, chip OFF)
+  Deafen | ⌃D (mark ◎, chip OFF)
+  Leave voice | ⌃L (mark ⏏)
+== MENTIONS & DMS [2]
+  Maja Lind | now (sub · #raid-signups · Ember Pact, chip NEW, av ML, / MC tonight 20:00, invites 19:45)
+  Erik Svensson | 33 m (sub · DM, chip NEW, av ES, / saw your screenshot, nice loot)
+== SERVERS
+  Ember Pact (mark ▾)
+     # raid-signups | ↵ opens (mark  )
+     🔊 Raid | you’re here (mark  )
+exit 1
+log: load apps
+log: run key-m
